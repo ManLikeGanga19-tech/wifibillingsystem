@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+db.sqlite3
+staticfiles/
+.pytest_cache/
+.ruff_cache/
+
+# Env / secrets
+.env
+.env.local
+*.pem
+
+# Node
+node_modules/
+dist/
+
+# OS / editor
+.DS_Store
+Thumbs.db

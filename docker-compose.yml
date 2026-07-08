@@ -1,0 +1,61 @@
+name: wifi-billing
+
+x-backend: &backend
+  build: ./backend
+  volumes:
+    - ./backend:/app
+  environment: &backend-env
+    DJANGO_SETTINGS_MODULE: config.settings.dev
+    DATABASE_URL: postgres://wifi:wifi@db:5432/wifi
+    REDIS_URL: redis://redis:6379/0
+    DARAJA_CONSUMER_KEY: ${DARAJA_CONSUMER_KEY:-}
+    DARAJA_CONSUMER_SECRET: ${DARAJA_CONSUMER_SECRET:-}
+    DARAJA_CALLBACK_BASE_URL: ${DARAJA_CALLBACK_BASE_URL:-https://example.invalid}
+    DARAJA_CALLBACK_TOKEN: ${DARAJA_CALLBACK_TOKEN:-dev-callback-token}
+    AT_API_KEY: ${AT_API_KEY:-}
+    NOTIFICATIONS_PROVIDER: ${NOTIFICATIONS_PROVIDER:-dummy}
+  depends_on:
+    db:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: wifi
+      POSTGRES_PASSWORD: wifi
+      POSTGRES_DB: wifi
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wifi"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    <<: *backend
+    command: sh -c "python manage.py migrate && python manage.py seed_dev && python manage.py runserver 0.0.0.0:8000"
+    ports:
+      - "8000:8000"
+
+  worker:
+    <<: *backend
+    command: celery -A config worker -l info
+
+  beat:
+    <<: *backend
+    command: celery -A config beat -l info
+
+volumes:
+  pgdata:

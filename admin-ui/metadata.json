@@ -1,0 +1,6 @@
+{
+  "name": "WiFi Billing System",
+  "description": "Automated daily/monthly subscribers billing, hotspot voucher generator, and MikroTik integration console.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
