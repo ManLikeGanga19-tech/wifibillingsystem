@@ -1,6 +1,7 @@
 # Python
 __pycache__/
 *.pyc
+celerybeat-schedule*
 .venv/
 venv/
 db.sqlite3
