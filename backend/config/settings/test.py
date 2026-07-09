@@ -1,6 +1,11 @@
+from cryptography.fernet import Fernet
+
 from .base import *  # noqa: F403
 
 DEBUG = False
+
+# Ephemeral per-run key: tests exercise encryption without any key living anywhere
+FIELD_ENCRYPTION_KEY = Fernet.generate_key().decode()
 
 # Run Celery tasks inline so tests exercise the full payment -> provision flow
 CELERY_TASK_ALWAYS_EAGER = True

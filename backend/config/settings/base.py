@@ -128,21 +128,17 @@ CELERY_BEAT_SCHEDULE = {
 DARAJA_BASE_URL = os.getenv("DARAJA_BASE_URL", "https://sandbox.safaricom.co.ke")
 DARAJA_CONSUMER_KEY = os.getenv("DARAJA_CONSUMER_KEY", "")
 DARAJA_CONSUMER_SECRET = os.getenv("DARAJA_CONSUMER_SECRET", "")
-DARAJA_SHORTCODE = os.getenv("DARAJA_SHORTCODE", "174379")
-DARAJA_PASSKEY = os.getenv(
-    "DARAJA_PASSKEY",
-    "bfb279f9aa9bdbcf158e97dd71a467cd2e0c893059b10f78e6b72ada1ed2c919",
-)
+DARAJA_SHORTCODE = os.getenv("DARAJA_SHORTCODE", "")
+DARAJA_PASSKEY = os.getenv("DARAJA_PASSKEY", "")
 # Public HTTPS base Safaricom can reach, e.g. https://billing.example.com
 DARAJA_CALLBACK_BASE_URL = os.getenv("DARAJA_CALLBACK_BASE_URL", "https://example.invalid")
 # Shared secret embedded in the callback path so random POSTs 404
 DARAJA_CALLBACK_TOKEN = os.getenv("DARAJA_CALLBACK_TOKEN", "dev-callback-token")
 
-# Fernet key for encrypting router/operator secrets at rest.
-# Dev-only default; MUST be overridden in production (see settings/prod.py).
-FIELD_ENCRYPTION_KEY = os.getenv(
-    "FIELD_ENCRYPTION_KEY", "5oS9Wg8kzXQhJ3mB1dTcv2aY7nR4uE6pL0fKqDiZsHM="
-)
+# Fernet key for encrypting router/operator secrets at rest. Never in code —
+# set via env (.env locally, secret manager in prod). Encryption features raise
+# a clear error if it's missing; blank values pass through untouched.
+FIELD_ENCRYPTION_KEY = os.getenv("FIELD_ENCRYPTION_KEY", "")
 
 # Africa's Talking SMS
 AT_USERNAME = os.getenv("AT_USERNAME", "sandbox")
