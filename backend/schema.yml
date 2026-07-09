@@ -1,0 +1,1672 @@
+openapi: 3.0.3
+info:
+  title: WIFI.OS Billing API
+  version: 1.0.0
+  description: 'WISP hotspot billing: plans, M-Pesa, provisioning, vouchers, messaging'
+paths:
+  /api/v1/auth/token/:
+    post:
+      operationId: auth_token_create
+      description: |-
+        Takes a set of user credentials and returns an access and refresh JSON web
+        token pair to prove the authentication of those credentials.
+      tags:
+      - auth
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenObtainPair'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TokenObtainPair'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TokenObtainPair'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenObtainPair'
+          description: ''
+  /api/v1/auth/token/refresh/:
+    post:
+      operationId: auth_token_refresh_create
+      description: |-
+        Takes a refresh type JSON web token and returns an access type JSON web
+        token if the refresh token is valid.
+      tags:
+      - auth
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenRefresh'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TokenRefresh'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TokenRefresh'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenRefresh'
+          description: ''
+  /api/v1/notifications/campaigns/:
+    get:
+      operationId: notifications_campaigns_list
+      description: Creating a campaign immediately queues the bulk send.
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      tags:
+      - notifications
+      security:
+      - jwtAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedCampaignList'
+          description: ''
+    post:
+      operationId: notifications_campaigns_create
+      description: Creating a campaign immediately queues the bulk send.
+      tags:
+      - notifications
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Campaign'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Campaign'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Campaign'
+        required: true
+      security:
+      - jwtAuth: []
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Campaign'
+          description: ''
+  /api/v1/notifications/campaigns/{id}/:
+    get:
+      operationId: notifications_campaigns_retrieve
+      description: Creating a campaign immediately queues the bulk send.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this campaign.
+        required: true
+      tags:
+      - notifications
+      security:
+      - jwtAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Campaign'
+          description: ''
+  /api/v1/notifications/messages/:
+    get:
+      operationId: notifications_messages_list
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      tags:
+      - notifications
+      security:
+      - jwtAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedMessageList'
+          description: ''
+  /api/v1/notifications/messages/{id}/:
+    get:
+      operationId: notifications_messages_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this message.
+        required: true
+      tags:
+      - notifications
+      security:
+      - jwtAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+          description: ''
+  /api/v1/payments/status/{public_id}/:
+    get:
+      operationId: payments_status_retrieve
+      description: Portal polls this after STK push until status leaves 'pending'.
+      parameters:
+      - in: path
+        name: public_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - payments
+      security:
+      - jwtAuth: []
+      - cookieAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionStatus'
+          description: ''
+  /api/v1/payments/stk-push/:
+    post:
+      operationId: payments_stk_push_create
+      description: 'Portal: start an M-Pesa payment. Returns a public_id to poll.'
+      tags:
+      - payments
+      security:
+      - jwtAuth: []
+      - cookieAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/v1/payments/transactions/:
+    get:
+      operationId: payments_transactions_list
+      description: 'Admin UI: live transaction feed.'
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      tags:
+      - payments
+      security:
+      - jwtAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedTransactionAdminList'
+          description: ''
+  /api/v1/payments/transactions/{id}/:
+    get:
+      operationId: payments_transactions_retrieve
+      description: 'Admin UI: live transaction feed.'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this transaction.
+        required: true
+      tags:
+      - payments
+      security:
+      - jwtAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionAdmin'
+          description: ''
+  /api/v1/plans/:
+    get:
+      operationId: plans_list
+      description: Public can list/retrieve active plans (captive portal); staff manage
+        them.
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      tags:
+      - plans
+      security:
+      - jwtAuth: []
+      - cookieAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedPlanList'
+          description: ''
+    post:
+      operationId: plans_create
+      description: Public can list/retrieve active plans (captive portal); staff manage
+        them.
+      tags:
+      - plans
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Plan'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Plan'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Plan'
+        required: true
+      security:
+      - jwtAuth: []
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Plan'
+          description: ''
+  /api/v1/plans/{id}/:
+    get:
+      operationId: plans_retrieve
+      description: Public can list/retrieve active plans (captive portal); staff manage
+        them.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this plan.
+        required: true
+      tags:
+      - plans
+      security:
+      - jwtAuth: []
+      - cookieAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Plan'
+          description: ''
+    put:
+      operationId: plans_update
+      description: Public can list/retrieve active plans (captive portal); staff manage
+        them.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this plan.
+        required: true
+      tags:
+      - plans
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Plan'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Plan'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Plan'
+        required: true
+      security:
+      - jwtAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Plan'
+          description: ''
+    patch:
+      operationId: plans_partial_update
+      description: Public can list/retrieve active plans (captive portal); staff manage
+        them.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this plan.
+        required: true
+      tags:
+      - plans
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedPlan'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedPlan'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedPlan'
+      security:
+      - jwtAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Plan'
+          description: ''
+    delete:
+      operationId: plans_destroy
+      description: Public can list/retrieve active plans (captive portal); staff manage
+        them.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this plan.
+        required: true
+      tags:
+      - plans
+      security:
+      - jwtAuth: []
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/routers/:
+    get:
+      operationId: routers_list
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      tags:
+      - routers
+      security:
+      - jwtAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedRouterList'
+          description: ''
+    post:
+      operationId: routers_create
+      tags:
+      - routers
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Router'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Router'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Router'
+        required: true
+      security:
+      - jwtAuth: []
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Router'
+          description: ''
+  /api/v1/routers/{id}/:
+    get:
+      operationId: routers_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this router.
+        required: true
+      tags:
+      - routers
+      security:
+      - jwtAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Router'
+          description: ''
+    put:
+      operationId: routers_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this router.
+        required: true
+      tags:
+      - routers
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Router'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Router'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Router'
+        required: true
+      security:
+      - jwtAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Router'
+          description: ''
+    patch:
+      operationId: routers_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this router.
+        required: true
+      tags:
+      - routers
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedRouter'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedRouter'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedRouter'
+      security:
+      - jwtAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Router'
+          description: ''
+    delete:
+      operationId: routers_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this router.
+        required: true
+      tags:
+      - routers
+      security:
+      - jwtAuth: []
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/routers/{id}/active_sessions/:
+    get:
+      operationId: routers_active_sessions_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this router.
+        required: true
+      tags:
+      - routers
+      security:
+      - jwtAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Router'
+          description: ''
+  /api/v1/routers/{id}/test_connection/:
+    post:
+      operationId: routers_test_connection_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this router.
+        required: true
+      tags:
+      - routers
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Router'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Router'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Router'
+        required: true
+      security:
+      - jwtAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Router'
+          description: ''
+  /api/v1/sessions/:
+    get:
+      operationId: sessions_list
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      tags:
+      - sessions
+      security:
+      - jwtAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedSessionList'
+          description: ''
+  /api/v1/sessions/{id}/:
+    get:
+      operationId: sessions_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this session.
+        required: true
+      tags:
+      - sessions
+      security:
+      - jwtAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+          description: ''
+  /api/v1/sessions/{id}/suspend/:
+    post:
+      operationId: sessions_suspend_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this session.
+        required: true
+      tags:
+      - sessions
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Session'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Session'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Session'
+        required: true
+      security:
+      - jwtAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+          description: ''
+  /api/v1/stats/:
+    get:
+      operationId: stats_retrieve
+      tags:
+      - stats
+      security:
+      - jwtAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/subscribers/:
+    get:
+      operationId: subscribers_list
+      description: Hotspot customers (non-staff users) with session summary for the
+        admin UI.
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      tags:
+      - subscribers
+      security:
+      - jwtAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedSubscriberList'
+          description: ''
+  /api/v1/subscribers/{id}/:
+    get:
+      operationId: subscribers_retrieve
+      description: Hotspot customers (non-staff users) with session summary for the
+        admin UI.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this user.
+        required: true
+      tags:
+      - subscribers
+      security:
+      - jwtAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscriber'
+          description: ''
+  /api/v1/vouchers/:
+    get:
+      operationId: vouchers_list
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      tags:
+      - vouchers
+      security:
+      - jwtAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedVoucherList'
+          description: ''
+  /api/v1/vouchers/{id}/:
+    get:
+      operationId: vouchers_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this voucher.
+        required: true
+      tags:
+      - vouchers
+      security:
+      - jwtAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Voucher'
+          description: ''
+  /api/v1/vouchers/generate/:
+    post:
+      operationId: vouchers_generate_create
+      tags:
+      - vouchers
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Voucher'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Voucher'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Voucher'
+        required: true
+      security:
+      - jwtAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Voucher'
+          description: ''
+  /api/v1/vouchers/redeem/:
+    post:
+      operationId: vouchers_redeem_create
+      description: 'Portal: redeem a printed voucher code.'
+      tags:
+      - vouchers
+      security:
+      - jwtAuth: []
+      - cookieAuth: []
+      - {}
+      responses:
+        '200':
+          description: No response body
+components:
+  schemas:
+    AudienceEnum:
+      enum:
+      - all
+      - active
+      - expired
+      type: string
+      description: |-
+        * `all` - All clients
+        * `active` - Clients with an active session
+        * `expired` - Clients whose sessions have expired
+    Campaign:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 120
+        channel:
+          $ref: '#/components/schemas/ChannelEnum'
+        audience:
+          $ref: '#/components/schemas/AudienceEnum'
+        body:
+          type: string
+          maxLength: 480
+        status:
+          allOf:
+          - $ref: '#/components/schemas/CampaignStatusEnum'
+          readOnly: true
+        total_recipients:
+          type: integer
+          readOnly: true
+        sent_count:
+          type: integer
+          readOnly: true
+        failed_count:
+          type: integer
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - body
+      - created_at
+      - failed_count
+      - id
+      - name
+      - sent_count
+      - status
+      - total_recipients
+    CampaignStatusEnum:
+      enum:
+      - queued
+      - sending
+      - done
+      type: string
+      description: |-
+        * `queued` - Queued
+        * `sending` - Sending
+        * `done` - Done
+    ChannelEnum:
+      enum:
+      - sms
+      - whatsapp
+      type: string
+      description: |-
+        * `sms` - SMS
+        * `whatsapp` - WhatsApp
+    Message:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        campaign:
+          type: integer
+          nullable: true
+        to_phone:
+          type: string
+          maxLength: 12
+        channel:
+          $ref: '#/components/schemas/ChannelEnum'
+        body:
+          type: string
+          maxLength: 480
+        status:
+          $ref: '#/components/schemas/MessageStatusEnum'
+        provider_ref:
+          type: string
+          maxLength: 100
+        error:
+          type: string
+          maxLength: 255
+        sent_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - body
+      - created_at
+      - id
+      - to_phone
+    MessageStatusEnum:
+      enum:
+      - queued
+      - sent
+      - failed
+      type: string
+      description: |-
+        * `queued` - Queued
+        * `sent` - Sent
+        * `failed` - Failed
+    PaginatedCampaignList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Campaign'
+    PaginatedMessageList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Message'
+    PaginatedPlanList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Plan'
+    PaginatedRouterList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Router'
+    PaginatedSessionList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Session'
+    PaginatedSubscriberList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Subscriber'
+    PaginatedTransactionAdminList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/TransactionAdmin'
+    PaginatedVoucherList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Voucher'
+    PatchedPlan:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 80
+        plan_type:
+          $ref: '#/components/schemas/PlanTypeEnum'
+        price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        duration:
+          type: string
+          description: Access time granted, e.g. 1:00:00 for one hour
+        duration_seconds:
+          type: integer
+          readOnly: true
+        data_cap_mb:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          nullable: true
+          description: Blank = unlimited data
+        download_kbps:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+        upload_kbps:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+        shared_users:
+          type: integer
+          maximum: 32767
+          minimum: 0
+        mikrotik_profile:
+          type: string
+          description: Hotspot user profile name on the router
+          maxLength: 60
+        description:
+          type: string
+          maxLength: 200
+        is_active:
+          type: boolean
+        sort_order:
+          type: integer
+          maximum: 32767
+          minimum: 0
+    PatchedRouter:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          description: Site name, e.g. 'Kibera Site A'
+          maxLength: 80
+        management_host:
+          type: string
+          description: WireGuard IP or public IP the server reaches the router on
+          maxLength: 100
+        api_port:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+        username:
+          type: string
+          maxLength: 60
+        password:
+          type: string
+          writeOnly: true
+        use_tls:
+          type: boolean
+        verify_tls:
+          type: boolean
+          description: 'Off by default: routers use self-signed certs'
+        provisioning_backend:
+          $ref: '#/components/schemas/ProvisioningBackendEnum'
+        status:
+          allOf:
+          - $ref: '#/components/schemas/RouterStatusEnum'
+          readOnly: true
+        last_seen_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        is_active:
+          type: boolean
+    Plan:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 80
+        plan_type:
+          $ref: '#/components/schemas/PlanTypeEnum'
+        price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        duration:
+          type: string
+          description: Access time granted, e.g. 1:00:00 for one hour
+        duration_seconds:
+          type: integer
+          readOnly: true
+        data_cap_mb:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          nullable: true
+          description: Blank = unlimited data
+        download_kbps:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+        upload_kbps:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+        shared_users:
+          type: integer
+          maximum: 32767
+          minimum: 0
+        mikrotik_profile:
+          type: string
+          description: Hotspot user profile name on the router
+          maxLength: 60
+        description:
+          type: string
+          maxLength: 200
+        is_active:
+          type: boolean
+        sort_order:
+          type: integer
+          maximum: 32767
+          minimum: 0
+      required:
+      - download_kbps
+      - duration
+      - duration_seconds
+      - id
+      - name
+      - price
+      - upload_kbps
+    PlanTypeEnum:
+      enum:
+      - hotspot
+      - pppoe
+      type: string
+      description: |-
+        * `hotspot` - Hotspot (prepaid)
+        * `pppoe` - PPPoE (monthly)
+    ProvisioningBackendEnum:
+      enum:
+      - mikrotik_rest
+      - dummy
+      type: string
+      description: |-
+        * `mikrotik_rest` - MikroTik RouterOS v7 REST
+        * `dummy` - Dummy (dev/testing)
+    Router:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          description: Site name, e.g. 'Kibera Site A'
+          maxLength: 80
+        management_host:
+          type: string
+          description: WireGuard IP or public IP the server reaches the router on
+          maxLength: 100
+        api_port:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+        username:
+          type: string
+          maxLength: 60
+        password:
+          type: string
+          writeOnly: true
+        use_tls:
+          type: boolean
+        verify_tls:
+          type: boolean
+          description: 'Off by default: routers use self-signed certs'
+        provisioning_backend:
+          $ref: '#/components/schemas/ProvisioningBackendEnum'
+        status:
+          allOf:
+          - $ref: '#/components/schemas/RouterStatusEnum'
+          readOnly: true
+        last_seen_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        is_active:
+          type: boolean
+      required:
+      - id
+      - last_seen_at
+      - management_host
+      - name
+      - status
+    RouterStatusEnum:
+      enum:
+      - online
+      - offline
+      - unknown
+      type: string
+      description: |-
+        * `online` - Online
+        * `offline` - Offline
+        * `unknown` - Unknown
+    Session:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        phone:
+          type: string
+          readOnly: true
+          default: ''
+        hotspot_username:
+          type: string
+          maxLength: 60
+        plan_name:
+          type: string
+          readOnly: true
+        router_name:
+          type: string
+          readOnly: true
+        status:
+          $ref: '#/components/schemas/SessionStatusEnum'
+        starts_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        mac_address:
+          type: string
+          maxLength: 17
+        ip_address:
+          type: string
+          nullable: true
+        data_used_mb:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+        provision_error:
+          type: string
+          maxLength: 255
+      required:
+      - expires_at
+      - hotspot_username
+      - id
+      - phone
+      - plan_name
+      - router_name
+      - starts_at
+    SessionStatusEnum:
+      enum:
+      - pending
+      - active
+      - expired
+      - suspended
+      - failed
+      type: string
+      description: |-
+        * `pending` - Pending provision
+        * `active` - Active
+        * `expired` - Expired
+        * `suspended` - Suspended
+        * `failed` - Provisioning failed
+    Status9e7Enum:
+      enum:
+      - pending
+      - success
+      - failed
+      - timeout
+      - reconciled
+      type: string
+      description: |-
+        * `pending` - Pending
+        * `success` - Success
+        * `failed` - Failed
+        * `timeout` - Timeout
+        * `reconciled` - Success (reconciled)
+    Subscriber:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        phone:
+          type: string
+          maxLength: 12
+        name:
+          type: string
+          maxLength: 120
+        email:
+          oneOf:
+          - type: string
+            format: email
+            maxLength: 254
+          - type: string
+            maxLength: 0
+        date_joined:
+          type: string
+          format: date-time
+        last_session_expires:
+          type: string
+          format: date-time
+          readOnly: true
+        active_sessions:
+          type: integer
+          readOnly: true
+      required:
+      - active_sessions
+      - id
+      - last_session_expires
+      - phone
+    TokenObtainPair:
+      type: object
+      properties:
+        phone:
+          type: string
+          writeOnly: true
+        password:
+          type: string
+          writeOnly: true
+        access:
+          type: string
+          readOnly: true
+        refresh:
+          type: string
+          readOnly: true
+      required:
+      - access
+      - password
+      - phone
+      - refresh
+    TokenRefresh:
+      type: object
+      properties:
+        access:
+          type: string
+          readOnly: true
+        refresh:
+          type: string
+          writeOnly: true
+      required:
+      - access
+      - refresh
+    TransactionAdmin:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        public_id:
+          type: string
+          format: uuid
+          readOnly: true
+        phone:
+          type: string
+          maxLength: 12
+        plan_name:
+          type: string
+          readOnly: true
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        status:
+          $ref: '#/components/schemas/Status9e7Enum'
+        mpesa_receipt:
+          type: string
+          maxLength: 30
+        checkout_request_id:
+          type: string
+          nullable: true
+          maxLength: 100
+        result_code:
+          type: integer
+          maximum: 2147483647
+          minimum: -2147483648
+          nullable: true
+        result_desc:
+          type: string
+          maxLength: 255
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        callback_received_at:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+      - amount
+      - created_at
+      - id
+      - phone
+      - plan_name
+      - public_id
+    TransactionStatus:
+      type: object
+      properties:
+        public_id:
+          type: string
+          format: uuid
+          readOnly: true
+        status:
+          $ref: '#/components/schemas/Status9e7Enum'
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        mpesa_receipt:
+          type: string
+          maxLength: 30
+        result_desc:
+          type: string
+          maxLength: 255
+        session_active:
+          type: boolean
+          readOnly: true
+        session:
+          type: object
+          additionalProperties: {}
+          nullable: true
+          description: |-
+            Hotspot credentials for the paying device — the portal submits these to
+            the MikroTik link-login-only endpoint to connect the customer automatically.
+          readOnly: true
+      required:
+      - amount
+      - public_id
+      - session
+      - session_active
+    Voucher:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        code:
+          type: string
+          maxLength: 20
+        plan:
+          type: integer
+        plan_name:
+          type: string
+          readOnly: true
+        batch_id:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/VoucherStatusEnum'
+        redeemed_at:
+          type: string
+          format: date-time
+          nullable: true
+        printed:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - code
+      - created_at
+      - id
+      - plan
+      - plan_name
+    VoucherStatusEnum:
+      enum:
+      - unused
+      - redeemed
+      - expired
+      - void
+      type: string
+      description: |-
+        * `unused` - Unused
+        * `redeemed` - Redeemed
+        * `expired` - Expired
+        * `void` - Void
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: sessionid
+    jwtAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

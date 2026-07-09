@@ -36,6 +36,7 @@ class STKPushRequestSerializer(serializers.Serializer):
 
 class TransactionStatusSerializer(serializers.ModelSerializer):
     session_active = serializers.SerializerMethodField()
+    session = serializers.SerializerMethodField()
 
     class Meta:
         model = Transaction
@@ -46,11 +47,29 @@ class TransactionStatusSerializer(serializers.ModelSerializer):
             "mpesa_receipt",
             "result_desc",
             "session_active",
+            "session",
         ]
 
-    def get_session_active(self, obj) -> bool:
+    def _active_session(self, obj):
         session = getattr(obj, "session", None)
-        return bool(session and session.status == session.Status.ACTIVE)
+        if session and session.status == session.Status.ACTIVE:
+            return session
+        return None
+
+    def get_session_active(self, obj) -> bool:
+        return self._active_session(obj) is not None
+
+    def get_session(self, obj) -> dict | None:
+        """Hotspot credentials for the paying device — the portal submits these to
+        the MikroTik link-login-only endpoint to connect the customer automatically."""
+        session = self._active_session(obj)
+        if session is None:
+            return None
+        return {
+            "hotspot_username": session.hotspot_username,
+            "hotspot_password": session.hotspot_password,
+            "expires_at": session.expires_at.isoformat(),
+        }
 
 
 class TransactionAdminSerializer(serializers.ModelSerializer):
