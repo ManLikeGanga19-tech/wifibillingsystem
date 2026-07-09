@@ -21,14 +21,14 @@ class WhatsAppCloud(MessageProvider):
         )
         self.token = settings.WHATSAPP_TOKEN
 
-    def send(self, to_phone: str, body: str) -> SendResult:
+    def send(self, message) -> SendResult:
         resp = httpx.post(
             self.url,
             json={
                 "messaging_product": "whatsapp",
-                "to": to_phone,
+                "to": message.to_phone,
                 "type": "text",
-                "text": {"body": body},
+                "text": {"body": message.body},
             },
             headers={"Authorization": f"Bearer {self.token}"},
             timeout=30,

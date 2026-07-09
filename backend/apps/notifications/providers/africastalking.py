@@ -19,8 +19,8 @@ class AfricasTalkingSMS(MessageProvider):
         )
         self.url = f"{host}/version1/messaging"
 
-    def send(self, to_phone: str, body: str) -> SendResult:
-        data = {"username": self.username, "to": f"+{to_phone}", "message": body}
+    def send(self, message) -> SendResult:
+        data = {"username": self.username, "to": f"+{message.to_phone}", "message": message.body}
         if settings.AT_SENDER_ID:
             data["from"] = settings.AT_SENDER_ID
         resp = httpx.post(

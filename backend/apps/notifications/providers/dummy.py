@@ -4,8 +4,8 @@ from .base import MessageProvider, SendResult
 
 
 class DummyProvider(MessageProvider):
-    sent: list[tuple[str, str]] = []
+    sent: list[tuple[str, str]] = []  # (recipient, body) — reset in tests
 
-    def send(self, to_phone: str, body: str) -> SendResult:
-        DummyProvider.sent.append((to_phone, body))
+    def send(self, message) -> SendResult:
+        DummyProvider.sent.append((message.recipient, message.body))
         return SendResult(ok=True, provider_ref=f"dummy-{len(DummyProvider.sent)}")

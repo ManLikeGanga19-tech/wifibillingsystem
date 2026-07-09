@@ -15,4 +15,5 @@ class SendResult:
 
 class MessageProvider(ABC):
     @abstractmethod
-    def send(self, to_phone: str, body: str) -> SendResult: ...
+    def send(self, message) -> SendResult:
+        """Deliver a notifications.Message. Reads recipient/subject/body off the model."""

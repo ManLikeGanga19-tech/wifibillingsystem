@@ -10,6 +10,7 @@ api_v1 = [
     path("", include("apps.provisioning.urls")),
     path("vouchers/", include("apps.vouchers.urls")),
     path("notifications/", include("apps.notifications.urls")),
+    path("ops/", include("apps.ops.urls")),
 ]
 
 urlpatterns = [

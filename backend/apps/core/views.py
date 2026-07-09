@@ -8,9 +8,35 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.models import User
+from apps.notifications.models import Campaign
+from apps.ops.models import Equipment, Lead, Ticket
 from apps.payments.models import Transaction
+from apps.plans.models import Plan
 from apps.provisioning.models import Router, Session
 from apps.vouchers.models import Voucher
+
+
+class NavCountsView(APIView):
+    """Live badge counts for the admin sidebar. Cheap enough to poll."""
+
+    permission_classes = [IsAdminUser]
+
+    def get(self, request):
+        return Response(
+            {
+                "active_users": Session.objects.filter(status=Session.Status.ACTIVE).count(),
+                "users": User.objects.filter(is_staff=False).count(),
+                "tickets": Ticket.objects.filter(status__in=Ticket.OPEN_STATUSES).count(),
+                "leads": Lead.objects.filter(status=Lead.Status.NEW).count(),
+                "packages": Plan.objects.filter(is_active=True).count(),
+                "vouchers": Voucher.objects.filter(status=Voucher.Status.UNUSED).count(),
+                "campaigns": Campaign.objects.count(),
+                "mikrotik": Router.objects.filter(is_active=True).count(),
+                "equipment": Equipment.objects.exclude(
+                    status=Equipment.Status.RETIRED
+                ).count(),
+            }
+        )
 
 
 class DashboardStatsView(APIView):

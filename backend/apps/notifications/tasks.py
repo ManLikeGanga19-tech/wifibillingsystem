@@ -15,7 +15,7 @@ def send_message(self, message_id: int):
     msg = Message.objects.get(pk=message_id)
     if msg.status == Message.Status.SENT:
         return
-    result = get_provider(msg.channel).send(msg.to_phone, msg.body)
+    result = get_provider(msg.channel).send(msg)
     if result.ok:
         msg.status = Message.Status.SENT
         msg.provider_ref = result.provider_ref
@@ -44,27 +44,34 @@ def dispatch_campaign(campaign_id: int):
     from apps.accounts.models import User
     from apps.provisioning.models import Session
 
-    from .models import Campaign, Message
+    from .models import Campaign, Channel, Message
 
     campaign = Campaign.objects.get(pk=campaign_id)
-    customers = User.objects.filter(is_staff=False, is_active=True).exclude(phone="")
+    customers = User.objects.filter(is_staff=False, is_active=True)
+    if campaign.channel == Channel.EMAIL:
+        customers = customers.exclude(email="")
+    else:
+        customers = customers.exclude(phone="")
     if campaign.audience == Campaign.Audience.ACTIVE:
         customers = customers.filter(sessions__status=Session.Status.ACTIVE)
     elif campaign.audience == Campaign.Audience.EXPIRED:
         customers = customers.filter(sessions__isnull=False).exclude(
             sessions__status=Session.Status.ACTIVE
         )
-    phones = list(customers.values_list("phone", flat=True).distinct())
+    field = "email" if campaign.channel == Channel.EMAIL else "phone"
+    recipients = list(customers.values_list(field, flat=True).distinct())
 
     messages = Message.objects.bulk_create(
         Message(
             operator=campaign.operator,
             campaign=campaign,
-            to_phone=phone,
+            to_phone="" if campaign.channel == Channel.EMAIL else recipient,
+            to_email=recipient if campaign.channel == Channel.EMAIL else "",
             channel=campaign.channel,
+            subject=campaign.subject,
             body=campaign.body,
         )
-        for phone in phones
+        for recipient in recipients
     )
     campaign.total_recipients = len(messages)
     campaign.status = (

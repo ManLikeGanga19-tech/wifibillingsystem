@@ -170,11 +170,11 @@ export default function LiveDashboard({ onNavigate }: { onNavigate: (tab: string
         )}
       </Panel>
 
-      <div className="flex gap-3">
-        <QuickLink label="View transactions" onClick={() => onNavigate('invoices')} icon={<Activity className="h-3.5 w-3.5" />} />
-        <QuickLink label="Manage plans" onClick={() => onNavigate('plans')} icon={<TrendingUp className="h-3.5 w-3.5" />} />
-        <QuickLink label="Vouchers" onClick={() => onNavigate('hotspot')} icon={<Ticket className="h-3.5 w-3.5" />} />
-        <QuickLink label="Message clients" onClick={() => onNavigate('messaging')} icon={<Users className="h-3.5 w-3.5" />} />
+      <div className="flex gap-3 flex-wrap">
+        <QuickLink label="View payments" onClick={() => onNavigate('payments')} icon={<Activity className="h-3.5 w-3.5" />} />
+        <QuickLink label="Manage packages" onClick={() => onNavigate('packages')} icon={<TrendingUp className="h-3.5 w-3.5" />} />
+        <QuickLink label="Vouchers" onClick={() => onNavigate('vouchers')} icon={<Ticket className="h-3.5 w-3.5" />} />
+        <QuickLink label="Message clients" onClick={() => onNavigate('campaigns')} icon={<Users className="h-3.5 w-3.5" />} />
       </div>
     </div>
   );

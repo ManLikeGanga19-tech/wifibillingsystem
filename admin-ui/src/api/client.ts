@@ -133,14 +133,131 @@ export interface ApiTransaction {
 export interface ApiCampaign {
   id: number;
   name: string;
-  channel: 'sms' | 'whatsapp';
+  channel: 'sms' | 'whatsapp' | 'email';
   audience: 'all' | 'active' | 'expired';
+  subject: string;
   body: string;
   status: 'queued' | 'sending' | 'done';
   total_recipients: number;
   sent_count: number;
   failed_count: number;
   created_at: string;
+}
+
+export interface ApiMessage {
+  id: number;
+  campaign: number | null;
+  to_phone: string;
+  to_email: string;
+  channel: 'sms' | 'whatsapp' | 'email';
+  subject: string;
+  body: string;
+  status: 'queued' | 'sent' | 'failed';
+  provider_ref: string;
+  error: string;
+  sent_at: string | null;
+  created_at: string;
+}
+
+export interface ApiSession {
+  id: number;
+  phone: string;
+  hotspot_username: string;
+  plan_name: string;
+  router_name: string;
+  status: 'pending' | 'active' | 'expired' | 'suspended' | 'failed';
+  starts_at: string;
+  expires_at: string;
+  mac_address: string;
+  ip_address: string | null;
+  data_used_mb: number;
+  provision_error: string;
+}
+
+export interface ApiVoucher {
+  id: number;
+  code: string;
+  plan: number;
+  plan_name: string;
+  batch_id: string;
+  status: 'unused' | 'redeemed' | 'expired' | 'void';
+  redeemed_at: string | null;
+  printed: boolean;
+  created_at: string;
+}
+
+export interface ApiRouter {
+  id: number;
+  name: string;
+  management_host: string;
+  api_port: number;
+  username: string;
+  use_tls: boolean;
+  verify_tls: boolean;
+  provisioning_backend: 'mikrotik_rest' | 'dummy';
+  status: 'online' | 'offline' | 'unknown';
+  last_seen_at: string | null;
+  is_active: boolean;
+}
+
+export interface ApiTicket {
+  id: number;
+  subject: string;
+  description: string;
+  subscriber: number | null;
+  subscriber_phone: string;
+  status: 'open' | 'in_progress' | 'resolved' | 'closed';
+  priority: 'low' | 'normal' | 'high' | 'urgent';
+  assigned_to: number | null;
+  created_at: string;
+  resolved_at: string | null;
+}
+
+export interface ApiLead {
+  id: number;
+  name: string;
+  phone: string;
+  location: string;
+  source: string;
+  status: 'new' | 'contacted' | 'converted' | 'lost';
+  notes: string;
+  created_at: string;
+}
+
+export interface ApiExpense {
+  id: number;
+  date: string;
+  category: 'bandwidth' | 'power' | 'rent' | 'salaries' | 'equipment' | 'transport' | 'other';
+  description: string;
+  amount: string;
+  router: number | null;
+  router_name: string;
+  created_at: string;
+}
+
+export interface ApiEquipment {
+  id: number;
+  name: string;
+  equipment_type: 'router' | 'antenna' | 'switch' | 'cpe' | 'cable' | 'power' | 'other';
+  serial_number: string;
+  status: 'in_store' | 'deployed' | 'faulty' | 'retired';
+  router: number | null;
+  router_name: string;
+  cost: string | null;
+  notes: string;
+  created_at: string;
+}
+
+export interface NavCounts {
+  active_users: number;
+  users: number;
+  tickets: number;
+  leads: number;
+  packages: number;
+  vouchers: number;
+  campaigns: number;
+  mikrotik: number;
+  equipment: number;
 }
 
 export interface ApiSubscriber {
@@ -192,8 +309,19 @@ interface Paginated<T> {
 
 // ---- endpoints ----------------------------------------------------------
 
+function crud<T>(base: string) {
+  return {
+    list: (query = '') => request<Paginated<T>>(`${base}/${query}`),
+    create: (data: Partial<T>) => request<T>(`${base}/`, { method: 'POST', body: JSON.stringify(data) }),
+    update: (id: number, data: Partial<T>) =>
+      request<T>(`${base}/${id}/`, { method: 'PATCH', body: JSON.stringify(data) }),
+    remove: (id: number) => request<null>(`${base}/${id}/`, { method: 'DELETE' }),
+  };
+}
+
 export const api = {
   stats: () => request<DashboardStats>('/stats/'),
+  navCounts: () => request<NavCounts>('/nav/'),
 
   plans: {
     list: () => request<Paginated<ApiPlan>>('/plans/'),
@@ -211,11 +339,37 @@ export const api = {
 
   campaigns: {
     list: () => request<Paginated<ApiCampaign>>('/notifications/campaigns/'),
-    create: (data: { name: string; channel: string; audience: string; body: string }) =>
+    create: (data: { name: string; channel: string; audience: string; body: string; subject?: string }) =>
       request<ApiCampaign>('/notifications/campaigns/', { method: 'POST', body: JSON.stringify(data) }),
+  },
+
+  messages: {
+    list: (query = '') => request<Paginated<ApiMessage>>(`/notifications/messages/${query}`),
   },
 
   subscribers: {
     list: () => request<Paginated<ApiSubscriber>>('/subscribers/'),
   },
+
+  sessions: {
+    list: (query = '') => request<Paginated<ApiSession>>(`/sessions/${query}`),
+    suspend: (id: number) => request<{ detail: string }>(`/sessions/${id}/suspend/`, { method: 'POST' }),
+  },
+
+  vouchers: {
+    list: (query = '') => request<Paginated<ApiVoucher>>(`/vouchers/${query}`),
+    generate: (data: { plan_id: number; count: number; prefix?: string }) =>
+      request<ApiVoucher[]>('/vouchers/generate/', { method: 'POST', body: JSON.stringify(data) }),
+  },
+
+  routers: {
+    ...crud<ApiRouter>('/routers'),
+    testConnection: (id: number) =>
+      request<{ ok: boolean; detail?: string }>(`/routers/${id}/test_connection/`, { method: 'POST' }),
+  },
+
+  tickets: crud<ApiTicket>('/ops/tickets'),
+  leads: crud<ApiLead>('/ops/leads'),
+  expenses: crud<ApiExpense>('/ops/expenses'),
+  equipment: crud<ApiEquipment>('/ops/equipment'),
 };

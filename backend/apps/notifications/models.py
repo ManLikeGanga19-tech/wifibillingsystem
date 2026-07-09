@@ -7,6 +7,7 @@ from apps.core.models import OperatorOwnedModel
 class Channel(models.TextChoices):
     SMS = "sms", "SMS"
     WHATSAPP = "whatsapp", "WhatsApp"
+    EMAIL = "email", "Email"
 
 
 class Campaign(OperatorOwnedModel):
@@ -25,7 +26,8 @@ class Campaign(OperatorOwnedModel):
     name = models.CharField(max_length=120)
     channel = models.CharField(max_length=10, choices=Channel.choices, default=Channel.SMS)
     audience = models.CharField(max_length=10, choices=Audience.choices, default=Audience.ALL)
-    body = models.TextField(max_length=480)
+    subject = models.CharField(max_length=150, blank=True, help_text="Email channel only")
+    body = models.TextField(max_length=2000)
     status = models.CharField(max_length=10, choices=Status.choices, default=Status.QUEUED)
     total_recipients = models.PositiveIntegerField(default=0)
     sent_count = models.PositiveIntegerField(default=0)
@@ -50,9 +52,11 @@ class Message(OperatorOwnedModel):
     campaign = models.ForeignKey(
         Campaign, null=True, blank=True, on_delete=models.CASCADE, related_name="messages"
     )
-    to_phone = models.CharField(max_length=12, db_index=True)
+    to_phone = models.CharField(max_length=12, blank=True, db_index=True)
+    to_email = models.EmailField(blank=True)
     channel = models.CharField(max_length=10, choices=Channel.choices, default=Channel.SMS)
-    body = models.TextField(max_length=480)
+    subject = models.CharField(max_length=150, blank=True)
+    body = models.TextField(max_length=2000)
     status = models.CharField(
         max_length=10, choices=Status.choices, default=Status.QUEUED, db_index=True
     )
@@ -63,5 +67,9 @@ class Message(OperatorOwnedModel):
     class Meta:
         ordering = ["-created_at"]
 
+    @property
+    def recipient(self) -> str:
+        return self.to_email if self.channel == Channel.EMAIL else self.to_phone
+
     def __str__(self):
-        return f"{self.channel} to {self.to_phone} [{self.status}]"
+        return f"{self.channel} to {self.recipient} [{self.status}]"
