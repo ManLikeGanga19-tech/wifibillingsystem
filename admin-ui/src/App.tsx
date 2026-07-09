@@ -19,28 +19,33 @@ import {
 
 // Models and Helpers
 import { BandwidthProfile, Subscriber, HotspotVoucher, Invoice, RouterConfig, SystemLog, OutboundCampaign } from './types';
-import { 
-  DEFAULT_PROFILES, 
-  DEFAULT_SUBSCRIBERS, 
-  DEFAULT_VOUCHERS, 
-  DEFAULT_INVOICES, 
-  DEFAULT_ROUTER, 
+import {
+  DEFAULT_SUBSCRIBERS,
+  DEFAULT_VOUCHERS,
+  DEFAULT_INVOICES,
+  DEFAULT_ROUTER,
   DEFAULT_LOGS,
   generateVoucherCode,
   calculateNextDate,
-  runAutomatedBillingJob 
+  runAutomatedBillingJob
 } from './utils/billingEngine';
 
+// Live API
+import { api, isAuthenticated, logout } from './api/client';
+import { planToProfile, profileToPlan, campaignToUi, subscriberToUi } from './api/mappers';
+
 // Components
-import DashboardView from './components/DashboardView';
 import SubscriberManager from './components/SubscriberManager';
 import HotspotBillingView from './components/HotspotBillingView';
-import InvoiceList from './components/InvoiceList';
 import PlanConfigurator from './components/PlanConfigurator';
 import MikroTikIntegration from './components/MikroTikIntegration';
 import MessagingView from './components/MessagingView';
+import LoginView from './components/LoginView';
+import LiveDashboard from './components/LiveDashboard';
+import TransactionsView from './components/TransactionsView';
 
 export default function App() {
+  const [authed, setAuthed] = useState<boolean>(isAuthenticated());
   const [activeTab, setActiveTab] = useState<string>('dashboard');
   const [simulatedDate, setSimulatedDate] = useState<string>('2026-06-14');
   const [isDarkMode, setIsDarkMode] = useState<boolean>(false);
@@ -55,11 +60,8 @@ export default function App() {
     localStorage.setItem('wifi_sidebar_collapsed', String(isSidebarCollapsed));
   }, [isSidebarCollapsed]);
 
-  // Core Persistent State
-  const [profiles, setProfiles] = useState<BandwidthProfile[]>(() => {
-    const saved = localStorage.getItem('wifi_profiles');
-    return saved ? JSON.parse(saved) : DEFAULT_PROFILES;
-  });
+  // Live server state (plans come from the Django API)
+  const [profiles, setProfiles] = useState<BandwidthProfile[]>([]);
 
   const [subscribers, setSubscribers] = useState<Subscriber[]>(() => {
     const saved = localStorage.getItem('wifi_subscribers');
@@ -86,19 +88,17 @@ export default function App() {
     return saved ? JSON.parse(saved) : DEFAULT_LOGS;
   });
 
-  const [campaigns, setCampaigns] = useState<OutboundCampaign[]>(() => {
-    const saved = localStorage.getItem('wifi_campaigns');
-    return saved ? JSON.parse(saved) : [];
-  });
+  // Live server state (campaigns + subscribers for messaging audience counts)
+  const [campaigns, setCampaigns] = useState<OutboundCampaign[]>([]);
+  const [liveSubscribers, setLiveSubscribers] = useState<Subscriber[]>([]);
 
+  // Load live data once signed in
   useEffect(() => {
-    localStorage.setItem('wifi_campaigns', JSON.stringify(campaigns));
-  }, [campaigns]);
-
-  // Save changes automatically
-  useEffect(() => {
-    localStorage.setItem('wifi_profiles', JSON.stringify(profiles));
-  }, [profiles]);
+    if (!authed) return;
+    api.plans.list().then(r => setProfiles(r.results.map(planToProfile))).catch(() => {});
+    api.campaigns.list().then(r => setCampaigns(r.results.map(campaignToUi).reverse())).catch(() => {});
+    api.subscribers.list().then(r => setLiveSubscribers(r.results.map(subscriberToUi))).catch(() => {});
+  }, [authed]);
 
   useEffect(() => {
     localStorage.setItem('wifi_subscribers', JSON.stringify(subscribers));
@@ -151,30 +151,6 @@ export default function App() {
     ]);
   };
 
-  // Automated Invoicing Runner Trigger
-  const triggerBillingEngineCycle = () => {
-    const invoiceCounter = invoices.length + 1;
-    const result = runAutomatedBillingJob(subscribers, profiles, simulatedDate, invoiceCounter);
-    
-    if (result.newInvoices.length > 0) {
-      // Generated invoices
-      setInvoices(prev => [...prev, ...result.newInvoices]);
-      setSubscribers(result.updatedSubscribers);
-      setLogs(prev => [...prev, ...result.newLogs]);
-      addLog(
-        'Billing',
-        'success',
-        `Cron Trigger complete: Successfully ran scheduled audit check. Issued ${result.newInvoices.length} outstanding renewal fiber/wifi invoices.`
-      );
-    } else {
-      addLog(
-        'Billing',
-        'info',
-        'Automated Cron: Active subscriptions verified. 0 outstanding subscriber cycles found for date check.'
-      );
-    }
-  };
-
   // Roll simulated date by 1 day and automatically run client audits
   const advanceSimulatedDate = () => {
     const nextDay = calculateNextDate(simulatedDate, 'Daily', 1);
@@ -193,32 +169,6 @@ export default function App() {
         setLogs(prev => [...prev, ...result.newLogs]);
       }
     }, 150);
-  };
-
-  // Pay Manual Invoice handler
-  const handlePayInvoice = (invoiceId: string) => {
-    setInvoices(prev => prev.map(inv => {
-      if (inv.id === invoiceId) {
-        // Find subscriber and subtract billing amount from balance
-        setSubscribers(subs => subs.map(sub => {
-          if (sub.id === inv.subscriberId) {
-            return {
-              ...sub,
-              balance: Math.max(0, Number((sub.balance - inv.amount).toFixed(2))),
-              status: 'Active' // restore access
-            };
-          }
-          return sub;
-        }));
-
-        return {
-          ...inv,
-          status: 'Paid',
-          datePaid: simulatedDate
-        };
-      }
-      return inv;
-    }));
   };
 
   // Instantly issue manual on-demand invoice for a customer
@@ -261,17 +211,33 @@ export default function App() {
     );
   };
 
-  // Add/Edit Profiles
-  const handleAddProfile = (newProf: Omit<BandwidthProfile, 'id'>) => {
-    setProfiles(prev => [...prev, { ...newProf, id: `prof-${Date.now()}` }]);
+  // Add/Edit Profiles — persisted through the Django API
+  const handleAddProfile = async (newProf: Omit<BandwidthProfile, 'id'>) => {
+    try {
+      const created = await api.plans.create(profileToPlan(newProf));
+      setProfiles(prev => [...prev, planToProfile(created)]);
+      addLog('Billing', 'success', `Plan '${created.name}' saved to the server.`);
+    } catch {
+      addLog('Billing', 'error', 'Failed to save plan — check the API connection.');
+    }
   };
 
-  const handleUpdateProfile = (updatedProf: BandwidthProfile) => {
-    setProfiles(prev => prev.map(p => p.id === updatedProf.id ? updatedProf : p));
+  const handleUpdateProfile = async (updatedProf: BandwidthProfile) => {
+    try {
+      const saved = await api.plans.update(Number(updatedProf.id), profileToPlan(updatedProf));
+      setProfiles(prev => prev.map(p => p.id === updatedProf.id ? planToProfile(saved) : p));
+    } catch {
+      addLog('Billing', 'error', 'Failed to update plan — check the API connection.');
+    }
   };
 
-  const handleDeleteProfile = (id: string) => {
-    setProfiles(prev => prev.filter(p => p.id !== id));
+  const handleDeleteProfile = async (id: string) => {
+    try {
+      await api.plans.remove(Number(id));
+      setProfiles(prev => prev.filter(p => p.id !== id));
+    } catch {
+      addLog('Billing', 'error', 'Could not delete plan — plans with payment history should be deactivated instead.');
+    }
   };
 
   // Add/Edit Subscribers
@@ -343,25 +309,30 @@ export default function App() {
     setVouchers(prev => prev.filter(v => v.id !== id));
   };
 
-  // Bulk SMS / WhatsApp broadcast
-  const handleSendCampaign = (campaign: Omit<OutboundCampaign, 'id' | 'sentAt' | 'status'>) => {
-    const timeNow = new Date();
-    const pad = (n: number) => String(n).padStart(2, '0');
-    setCampaigns(prev => [
-      ...prev,
-      {
-        ...campaign,
-        id: `camp-${Date.now()}`,
-        sentAt: `${simulatedDate} ${pad(timeNow.getHours())}:${pad(timeNow.getMinutes())}`,
-        status: 'Sent'
-      }
-    ]);
-    addLog(
-      'Subscriber',
-      'success',
-      `Messaging: ${campaign.channel} broadcast "${campaign.name}" queued to ${campaign.recipients} ${campaign.audience.toLowerCase()} clients.`
-    );
+  // Bulk SMS / WhatsApp broadcast — dispatched by the server via Celery
+  const handleSendCampaign = async (campaign: Omit<OutboundCampaign, 'id' | 'sentAt' | 'status'>) => {
+    try {
+      await api.campaigns.create({
+        name: campaign.name,
+        channel: campaign.channel.toLowerCase(),
+        audience: campaign.audience.toLowerCase(),
+        body: campaign.body,
+      });
+      const r = await api.campaigns.list();
+      setCampaigns(r.results.map(campaignToUi).reverse());
+      addLog(
+        'Subscriber',
+        'success',
+        `Messaging: ${campaign.channel} broadcast "${campaign.name}" queued for ${campaign.audience.toLowerCase()} clients.`
+      );
+    } catch {
+      addLog('Subscriber', 'error', 'Messaging: failed to queue the broadcast — check the API connection.');
+    }
   };
+
+  if (!authed) {
+    return <LoginView onLoggedIn={() => setAuthed(true)} />;
+  }
 
   return (
     <div className="flex h-screen w-full bg-[#E4E3E0] text-[#141414] font-sans text-sm overflow-hidden selection:bg-[#141414] selection:text-[#E4E3E0]">
@@ -496,7 +467,7 @@ export default function App() {
           >
             <span className="flex items-center gap-2">
               <Receipt className="h-4 w-4 shrink-0" />
-              {!isSidebarCollapsed && <span className="font-bold tracking-tight">INVOICING</span>}
+              {!isSidebarCollapsed && <span className="font-bold tracking-tight">TRANSACTIONS</span>}
             </span>
             {!isSidebarCollapsed && <span className="text-xs font-bold">[05]</span>}
           </button>
@@ -636,9 +607,15 @@ export default function App() {
               </div>
             </div>
 
-            <div className="border-l border-[#141414] pl-3 sm:pl-4">
+            <div className="border-l border-[#141414] pl-3 sm:pl-4 text-right">
               <div className="text-[11px] opacity-50 uppercase">Session Operator</div>
-              <div className="font-bold uppercase tracking-tight">Admin_Root</div>
+              <button
+                onClick={() => { logout(); setAuthed(false); }}
+                title="Sign out of the console"
+                className="font-bold uppercase tracking-tight hover:text-[#B22222] transition cursor-pointer"
+              >
+                Sign out
+              </button>
             </div>
 
           </div>
@@ -648,17 +625,7 @@ export default function App() {
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 min-h-0">
           <div className="max-w-7xl mx-auto space-y-6">
             {activeTab === 'dashboard' && (
-              <DashboardView
-                subscribers={subscribers}
-                invoices={invoices}
-                vouchers={vouchers}
-                router={router}
-                profiles={profiles}
-                logs={logs}
-                onTriggerBillingJob={triggerBillingEngineCycle}
-                onNavigate={setActiveTab}
-                simulatedDate={simulatedDate}
-              />
+              <LiveDashboard onNavigate={setActiveTab} />
             )}
 
             {activeTab === 'subscribers' && (
@@ -686,13 +653,7 @@ export default function App() {
             )}
 
             {activeTab === 'invoices' && (
-              <InvoiceList
-                invoices={invoices}
-                subscribers={subscribers}
-                onPayInvoice={handlePayInvoice}
-                onAddLog={addLog}
-                simulatedDate={simulatedDate}
-              />
+              <TransactionsView />
             )}
 
             {activeTab === 'plans' && (
@@ -708,7 +669,7 @@ export default function App() {
             {activeTab === 'messaging' && (
               <MessagingView
                 campaigns={campaigns}
-                subscribers={subscribers}
+                subscribers={liveSubscribers}
                 onSendCampaign={handleSendCampaign}
                 onAddLog={addLog}
               />
