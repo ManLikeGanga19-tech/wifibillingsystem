@@ -195,8 +195,12 @@ export interface ApiRouter {
   use_tls: boolean;
   verify_tls: boolean;
   provisioning_backend: 'mikrotik_rest' | 'dummy';
-  status: 'online' | 'offline' | 'unknown';
+  status: 'online' | 'offline' | 'pending' | 'unknown';
   last_seen_at: string | null;
+  last_sync_at: string | null;
+  enrolled_at: string | null;
+  routeros_version: string;
+  is_enrolled: boolean;
   is_active: boolean;
 }
 
@@ -500,6 +504,10 @@ export const api = {
     ...crud<ApiRouter>('/routers'),
     testConnection: (id: number) =>
       request<{ ok: boolean; detail?: string }>(`/routers/${id}/test_connection/`, { method: 'POST' }),
+    setupScript: (id: number) =>
+      request<{ script: string; enrolled: boolean; status: string }>(`/routers/${id}/setup_script/`),
+    resync: (id: number) =>
+      request<{ detail: string }>(`/routers/${id}/resync/`, { method: 'POST' }),
   },
 
   tickets: crud<ApiTicket>('/ops/tickets'),

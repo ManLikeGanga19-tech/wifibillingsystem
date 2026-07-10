@@ -20,9 +20,21 @@ class RouterSerializer(serializers.ModelSerializer):
             "provisioning_backend",
             "status",
             "last_seen_at",
+            "last_sync_at",
+            "enrolled_at",
+            "routeros_version",
+            "is_enrolled",
             "is_active",
         ]
-        read_only_fields = ["status", "last_seen_at"]
+        read_only_fields = [
+            "status",
+            "last_seen_at",
+            "last_sync_at",
+            "enrolled_at",
+            "routeros_version",
+            "is_enrolled",
+            "management_host",
+        ]
 
 
 class SessionSerializer(serializers.ModelSerializer):

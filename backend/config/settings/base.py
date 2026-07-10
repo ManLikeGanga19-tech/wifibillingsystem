@@ -132,6 +132,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.provisioning.tasks.check_router_health",
         "schedule": 300.0,
     },
+    "sync-all-routers-nightly": {
+        "task": "apps.provisioning.tasks.sync_all_routers",
+        "schedule": crontab(minute=0, hour=3),
+    },
 }
 
 # Safaricom Daraja (defaults are the public sandbox values)

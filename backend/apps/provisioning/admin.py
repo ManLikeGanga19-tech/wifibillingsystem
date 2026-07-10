@@ -1,20 +1,29 @@
 from django.contrib import admin
 
-from .models import Router, Session
+from .models import Router, RouterHealthCheck, Session
 
 
 @admin.register(Router)
 class RouterAdmin(admin.ModelAdmin):
     list_display = (
         "name",
+        "operator",
         "management_host",
-        "api_port",
-        "provisioning_backend",
         "status",
+        "routeros_version",
         "last_seen_at",
+        "last_sync_at",
         "is_active",
     )
     list_filter = ("provisioning_backend", "status", "is_active")
+    readonly_fields = ("enrollment_token", "enrolled_at", "last_seen_at", "last_sync_at")
+
+
+@admin.register(RouterHealthCheck)
+class RouterHealthCheckAdmin(admin.ModelAdmin):
+    list_display = ("router", "online", "checked_at")
+    list_filter = ("online", "router")
+    date_hierarchy = "checked_at"
 
 
 @admin.register(Session)

@@ -1,33 +1,57 @@
 import { useState, type FormEvent } from 'react';
-import { Router as RouterIcon, Plus, Plug } from 'lucide-react';
+import { Router as RouterIcon, Plus, Plug, RefreshCw, Copy, Check, Loader2, X } from 'lucide-react';
 import { api, ApiRouter } from '../api/client';
 import {
   Badge, Btn, Field, inputCls, Panel, RefreshBtn, TableShell, tdCls, toast, useList, ViewHeader, fmtDateTime,
 } from './ui';
 
 export default function RoutersView() {
-  const [showForm, setShowForm] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
+  const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [scriptFor, setScriptFor] = useState<ApiRouter | null>(null);
+  const [script, setScript] = useState('');
+  const [copied, setCopied] = useState(false);
   const [testing, setTesting] = useState<number | null>(null);
-  const [form, setForm] = useState({
-    name: '',
-    management_host: '',
-    api_port: '443',
-    username: 'admin',
-    password: '',
-    provisioning_backend: 'mikrotik_rest' as ApiRouter['provisioning_backend'],
-  });
   const { rows, error, reload } = useList(() => api.routers.list());
 
-  const create = async (e: FormEvent) => {
+  const addRouter = async (e: FormEvent) => {
     e.preventDefault();
+    if (busy) return;
+    setBusy(true);
     try {
-      await api.routers.create({ ...form, api_port: Number(form.api_port) } as Partial<ApiRouter> & { password: string });
-      toast('success', `Router "${form.name}" registered.`);
-      setShowForm(false);
-      setForm({ ...form, name: '', management_host: '', password: '' });
+      const router = await api.routers.create({ name });
+      toast('success', `Site "${name}" created. Now paste the setup script into its MikroTik.`);
+      setName('');
+      setShowAdd(false);
       reload();
+      openScript(router);
     } catch {
-      toast('error', 'Failed to register router.');
+      toast('error', 'Failed to create router.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const openScript = async (router: ApiRouter) => {
+    setScriptFor(router);
+    setScript('');
+    setCopied(false);
+    try {
+      const r = await api.routers.setupScript(router.id);
+      setScript(r.script);
+    } catch {
+      toast('error', 'Could not load the setup script.');
+    }
+  };
+
+  const copyScript = async () => {
+    try {
+      await navigator.clipboard.writeText(script);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    } catch {
+      toast('warning', 'Could not copy automatically — select the text and copy manually.');
     }
   };
 
@@ -35,13 +59,21 @@ export default function RoutersView() {
     setTesting(router.id);
     try {
       const r = await api.routers.testConnection(router.id);
-      if (r.ok) toast('success', `${router.name} is reachable.`);
-      else toast('error', `${router.name} did not respond${r.detail ? `: ${r.detail}` : '.'}`);
+      toast(r.ok ? 'success' : 'error', r.ok ? `${router.name} is reachable.` : `${router.name} did not respond${r.detail ? `: ${r.detail}` : '.'}`);
     } catch (e) {
-      toast('error', e instanceof Error ? e.message : 'Connection test failed.');
+      toast('error', e instanceof Error ? e.message : 'Test failed.');
     } finally {
       setTesting(null);
       reload();
+    }
+  };
+
+  const resync = async (router: ApiRouter) => {
+    try {
+      await api.routers.resync(router.id);
+      toast('success', `Re-sync queued for ${router.name}.`);
+    } catch (e) {
+      toast('error', e instanceof Error ? e.message : 'Re-sync failed.');
     }
   };
 
@@ -50,71 +82,99 @@ export default function RoutersView() {
       <ViewHeader
         icon={<RouterIcon className="h-4.5 w-4.5" />}
         title="MikroTik Routers"
-        subtitle="One entry per site. The server reaches each router over its WireGuard tunnel IP and provisions hotspot users via the RouterOS v7 REST API."
+        subtitle="Add a site, paste the generated script into the router once, and it configures itself and connects back automatically."
       >
-        <Btn onClick={() => setShowForm(!showForm)}>
+        <Btn onClick={() => setShowAdd(!showAdd)}>
           <Plus className="h-3.5 w-3.5" /> Add Router
         </Btn>
         <RefreshBtn onClick={reload} />
       </ViewHeader>
 
-      {showForm && (
-        <Panel title="Register router">
-          <form onSubmit={create} className="grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
-            <Field label="Site name" className="md:col-span-2">
-              <input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className={inputCls} placeholder="e.g. Kibera Site A" />
+      {showAdd && (
+        <Panel title="Add a new site">
+          <form onSubmit={addRouter} className="flex flex-col sm:flex-row gap-3 sm:items-end">
+            <Field label="Site name" className="flex-1">
+              <input required autoFocus value={name} onChange={(e) => setName(e.target.value)} className={inputCls} placeholder="e.g. Kibera Site A" />
             </Field>
-            <Field label="Management IP (WireGuard)">
-              <input required value={form.management_host} onChange={(e) => setForm({ ...form, management_host: e.target.value })} className={inputCls} placeholder="10.10.0.2" />
-            </Field>
-            <Field label="API port">
-              <input type="number" required value={form.api_port} onChange={(e) => setForm({ ...form, api_port: e.target.value })} className={inputCls} />
-            </Field>
-            <Field label="Username">
-              <input required value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} className={inputCls} />
-            </Field>
-            <Field label="Password">
-              <input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} className={inputCls} />
-            </Field>
-            <Field label="Backend" className="md:col-span-2">
-              <select
-                value={form.provisioning_backend}
-                onChange={(e) => setForm({ ...form, provisioning_backend: e.target.value as ApiRouter['provisioning_backend'] })}
-                className={inputCls}
-              >
-                <option value="mikrotik_rest">MikroTik RouterOS v7 REST</option>
-                <option value="dummy">Dummy (testing without hardware)</option>
-              </select>
-            </Field>
-            <Btn type="submit" variant="green">Register</Btn>
+            <Btn type="submit" variant="green" disabled={busy}>
+              {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+              Create & get script
+            </Btn>
           </form>
         </Panel>
       )}
 
       <TableShell
-        headers={['Site', 'Management IP', 'Backend', 'Status', 'Last seen', '']}
+        headers={['Site', 'Status', 'RouterOS', 'Last seen', 'Last sync', '']}
         loading={rows === null}
         error={error}
-        empty="No routers yet — add your first site to start provisioning."
+        empty="No routers yet — add your first site to generate its setup script."
       >
         {(rows ?? []).map((r) => (
           <tr key={r.id} className="hover:bg-[#f0efec]/40 transition">
-            <td className={`${tdCls} font-bold`}>{r.name}</td>
-            <td className={`${tdCls} font-mono`}>{r.management_host}:{r.api_port}</td>
-            <td className={tdCls}><Badge color={r.provisioning_backend === 'dummy' ? 'gray' : 'blue'}>{r.provisioning_backend === 'dummy' ? 'dummy' : 'mikrotik'}</Badge></td>
-            <td className={tdCls}>
-              <Badge color={r.status === 'online' ? 'green' : r.status === 'offline' ? 'red' : 'gray'}>{r.status}</Badge>
+            <td className={`${tdCls} font-bold`}>
+              {r.name}
+              {r.management_host && <span className="block text-[11px] font-mono text-[#141414]/50">{r.management_host}</span>}
             </td>
-            <td className={`${tdCls} font-mono whitespace-nowrap`}>{fmtDateTime(r.last_seen_at)}</td>
             <td className={tdCls}>
-              <Btn variant="outline" onClick={() => test(r)} disabled={testing === r.id}>
-                <Plug className="h-3.5 w-3.5" />
-                {testing === r.id ? 'Testing…' : 'Test connection'}
-              </Btn>
+              <Badge color={r.status === 'online' ? 'green' : r.status === 'offline' ? 'red' : r.status === 'pending' ? 'amber' : 'gray'}>
+                {r.status === 'pending' ? 'awaiting setup' : r.status}
+              </Badge>
+            </td>
+            <td className={`${tdCls} font-mono`}>{r.routeros_version || '—'}</td>
+            <td className={`${tdCls} font-mono whitespace-nowrap`}>{fmtDateTime(r.last_seen_at)}</td>
+            <td className={`${tdCls} font-mono whitespace-nowrap`}>{fmtDateTime(r.last_sync_at)}</td>
+            <td className={`${tdCls} whitespace-nowrap space-x-1.5`}>
+              {!r.is_enrolled ? (
+                <Btn variant="dark" onClick={() => openScript(r)}>
+                  <Copy className="h-3.5 w-3.5" /> Setup script
+                </Btn>
+              ) : (
+                <>
+                  <Btn variant="outline" onClick={() => test(r)} disabled={testing === r.id}>
+                    <Plug className="h-3.5 w-3.5" />
+                    {testing === r.id ? 'Testing…' : 'Test'}
+                  </Btn>
+                  <Btn variant="outline" onClick={() => resync(r)}>
+                    <RefreshCw className="h-3.5 w-3.5" /> Re-sync
+                  </Btn>
+                </>
+              )}
             </td>
           </tr>
         ))}
       </TableShell>
+
+      {/* Script modal */}
+      {scriptFor && (
+        <div className="fixed inset-0 z-50 bg-[#141414]/50 flex items-center justify-center p-4" onClick={() => setScriptFor(null)}>
+          <div className="bg-white border border-[#141414] w-full max-w-2xl max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b border-[#141414]">
+              <h3 className="font-bold font-mono uppercase text-sm">Setup script — {scriptFor.name}</h3>
+              <button onClick={() => setScriptFor(null)} className="cursor-pointer"><X className="h-4 w-4" /></button>
+            </div>
+            <div className="p-4 space-y-3 overflow-y-auto">
+              <ol className="text-xs font-mono text-[#141414]/70 space-y-1 list-decimal list-inside">
+                <li>Open the router in Winbox → <b>New Terminal</b> (needs RouterOS v7).</li>
+                <li>Copy the script below and paste the whole thing into the terminal.</li>
+                <li>The router configures itself and appears here as <b>Online</b> within a minute.</li>
+              </ol>
+              {script ? (
+                <pre className="bg-[#141414] text-[#E4E3E0] text-[11px] font-mono p-3 overflow-x-auto max-h-72 whitespace-pre">{script}</pre>
+              ) : (
+                <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-[#141414]/40" /></div>
+              )}
+            </div>
+            <div className="p-4 border-t border-[#141414] flex justify-between items-center">
+              <span className="text-[11px] font-mono text-[#141414]/50">Safe to paste more than once.</span>
+              <Btn variant="green" onClick={copyScript} disabled={!script}>
+                {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                {copied ? 'Copied!' : 'Copy script'}
+              </Btn>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
