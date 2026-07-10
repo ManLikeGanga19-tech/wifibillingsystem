@@ -5,7 +5,6 @@ from .tenant_views import (
     OperatorSettingsView,
     PlatformTenantViewSet,
     TenantSignupView,
-    ValidateMpesaView,
 )
 from .views import DashboardStatsView, NavCountsView
 
@@ -17,6 +16,5 @@ urlpatterns = [
     path("nav/", NavCountsView.as_view(), name="nav-counts"),
     path("tenants/signup/", TenantSignupView.as_view(), name="tenant-signup"),
     path("operator/settings/", OperatorSettingsView.as_view(), name="operator-settings"),
-    path("operator/validate-mpesa/", ValidateMpesaView.as_view(), name="validate-mpesa"),
     *router.urls,
 ]

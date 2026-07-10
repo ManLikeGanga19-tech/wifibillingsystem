@@ -11,21 +11,26 @@ deployment happens only after all five are verified.
 | ISP admin portal | Each tenant WISP | `<slug>.wifios.co.ke` | built, needs tenant scoping |
 | Captive portal | ISP's end customers | `portal.wifios.co.ke` (router passes tenant context) | built |
 
-## Confirmed business rules
+## Confirmed business rules (REVISED 2026-07-11: aggregator model)
 
 - **Signup**: public form, but tenant activates only after Daniel approves it in the
   platform portal (status: pending → approved → active → suspended).
-- **Customer money never touches the platform**: each ISP registers their own paybill +
-  Daraja app credentials (validated live during onboarding, stored encrypted per Operator).
-- **Platform revenue, billed monthly per tenant** (all three rates editable per-tenant):
-  1. Base subscription fee — flat KSh/month for holding a subdomain, usage or not
-  2. Hotspot commission — default 3% of successful hotspot transaction revenue
-  3. PPPoE per-user fee — flat KSh per active PPPoE subscriber that month
-- **Platform invoices are paid via M-Pesa to Daniel's paybill** using the same STK/C2B
-  machinery, with the tenant's account number. Non-payment → grace period → tenant
-  suspension (portal + provisioning freeze, data retained).
+- **AGGREGATOR MODEL** (supersedes per-ISP paybills — most small ISPs lack BRS
+  registration): ALL customer money flows through **Danamo Tech Ltd's** paybill and
+  Daraja app. ISPs need zero Safaricom paperwork. Tenant attribution via the
+  `AccountReference` (tenant slug) and the operator FK on every transaction.
+- **Wallets (apps/billing)**: every successful sale credits the tenant's ledger with
+  gross amount; the platform commission (default 3%, per-tenant rate) is **withheld at
+  source** as a debit line. Base fee auto-deducts from the wallet on the 1st
+  (idempotent per month). PPPoE per-user fee joins as a wallet deduction in Phase 3.
+- **Payouts v1**: ISP requests a withdrawal (funds held immediately, min KSh 100) →
+  Daniel's payout queue → he sends the M-Pesa manually and records the transaction
+  code (or rejects, refunding the wallet). B2C automation later.
+- Regulatory note: aggregating third-party payments touches CBK/PSP rules — get
+  advice as volumes grow.
 - **PPPoE v1 is full-control**: the system creates PPPoE secrets AND speed profiles on
-  the router per plan; suspend/restore is automatic on invoice status.
+  the router per plan; suspend/restore is automatic on invoice status. PPPoE C2B
+  account numbers (WIF-XXXXX) resolve on Danamo's paybill.
 
 ## Phase 1 — Tenancy core
 

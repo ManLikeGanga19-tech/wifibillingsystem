@@ -33,7 +33,6 @@ class MeView(APIView):
                         "name": operator.name,
                         "slug": operator.slug,
                         "status": operator.status,
-                        "has_mpesa_credentials": operator.has_mpesa_credentials,
                     }
                     if operator
                     else None

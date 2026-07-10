@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.conf import settings
 from django.db import models
 
@@ -44,7 +46,10 @@ class Operator(TimeStampedModel):
         max_digits=10, decimal_places=2, default=0, help_text="Flat KSh/month for the subdomain"
     )
     hotspot_commission_pct = models.DecimalField(
-        max_digits=4, decimal_places=2, default=3.0, help_text="% of hotspot revenue"
+        max_digits=4,
+        decimal_places=2,
+        default=Decimal("3.00"),
+        help_text="% of hotspot revenue",
     )
     pppoe_user_fee = models.DecimalField(
         max_digits=10, decimal_places=2, default=0, help_text="KSh per active PPPoE user/month"

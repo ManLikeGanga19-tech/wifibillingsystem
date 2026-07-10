@@ -147,14 +147,9 @@ class PlatformTenantViewSet(viewsets.ModelViewSet):
 
 
 class OperatorSettingsSerializer(serializers.ModelSerializer):
-    mpesa_passkey = serializers.CharField(write_only=True, required=False, allow_blank=True)
-    daraja_consumer_key = serializers.CharField(
-        write_only=True, required=False, allow_blank=True
+    commission_rate = serializers.DecimalField(
+        source="hotspot_commission_pct", max_digits=4, decimal_places=2, read_only=True
     )
-    daraja_consumer_secret = serializers.CharField(
-        write_only=True, required=False, allow_blank=True
-    )
-    has_mpesa_credentials = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = Operator
@@ -165,13 +160,9 @@ class OperatorSettingsSerializer(serializers.ModelSerializer):
             "owner_name",
             "contact_phone",
             "contact_email",
-            "mpesa_shortcode",
-            "mpesa_passkey",
-            "daraja_consumer_key",
-            "daraja_consumer_secret",
-            "has_mpesa_credentials",
+            "commission_rate",
         ]
-        read_only_fields = ["slug", "status"]
+        read_only_fields = ["slug", "status", "commission_rate"]
 
 
 class OperatorSettingsView(APIView):
@@ -202,24 +193,3 @@ class OperatorSettingsView(APIView):
         return Response(OperatorSettingsSerializer(operator).data)
 
 
-class ValidateMpesaView(APIView):
-    """Live check of the tenant's Daraja credentials: request an OAuth token."""
-
-    permission_classes = [IsAdminUser]
-
-    def post(self, request):
-        from apps.payments.daraja import DarajaClient, DarajaError
-
-        operator = request_operator(request)
-        if operator is None:
-            return Response({"detail": "No tenant context."}, status=status.HTTP_404_NOT_FOUND)
-        if not operator.has_mpesa_credentials:
-            return Response(
-                {"ok": False, "detail": "Save your shortcode and Daraja keys first."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        try:
-            DarajaClient(operator)._token()
-        except DarajaError as exc:
-            return Response({"ok": False, "detail": str(exc)[:200]})
-        return Response({"ok": True, "detail": "Daraja credentials are valid."})

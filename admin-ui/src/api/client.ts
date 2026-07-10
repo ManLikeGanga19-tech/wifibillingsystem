@@ -258,8 +258,40 @@ export interface Me {
     name: string;
     slug: string;
     status: 'pending' | 'active' | 'suspended';
-    has_mpesa_credentials: boolean;
   } | null;
+}
+
+export interface WalletSummary {
+  balance: string | number;
+  minimum_payout: string | number;
+  month_gross: string | number;
+  month_commission: string | number;
+  month_fees: string | number;
+  month_withdrawn: string | number;
+  pending_payouts: string | number;
+  commission_rate: string | number;
+}
+
+export interface ApiLedgerEntry {
+  id: number;
+  entry_type: 'sale' | 'commission' | 'base_fee' | 'pppoe_fee' | 'payout' | 'adjustment';
+  amount: string;
+  memo: string;
+  period: string;
+  created_at: string;
+}
+
+export interface ApiPayout {
+  id: number;
+  operator_name: string;
+  operator_slug: string;
+  amount: string;
+  phone: string;
+  status: 'requested' | 'paid' | 'rejected';
+  mpesa_reference: string;
+  note: string;
+  created_at: string;
+  processed_at: string | null;
 }
 
 export interface ApiTenant {
@@ -286,8 +318,7 @@ export interface OperatorSettings {
   owner_name: string;
   contact_phone: string;
   contact_email: string;
-  mpesa_shortcode: string;
-  has_mpesa_credentials: boolean;
+  commission_rate: string;
 }
 
 export interface NavCounts {
@@ -389,8 +420,16 @@ export const api = {
     get: () => request<OperatorSettings>('/operator/settings/'),
     update: (data: Record<string, string>) =>
       request<OperatorSettings>('/operator/settings/', { method: 'PATCH', body: JSON.stringify(data) }),
-    validateMpesa: () =>
-      request<{ ok: boolean; detail: string }>('/operator/validate-mpesa/', { method: 'POST' }),
+  },
+
+  billing: {
+    wallet: () => request<WalletSummary>('/billing/wallet/'),
+    ledger: () => request<Paginated<ApiLedgerEntry>>('/billing/ledger/'),
+    payouts: {
+      list: () => request<Paginated<ApiPayout>>('/billing/payouts/'),
+      withdraw: (data: { amount: string; phone: string }) =>
+        request<ApiPayout>('/billing/payouts/withdraw/', { method: 'POST', body: JSON.stringify(data) }),
+    },
   },
 
   platform: {
@@ -402,6 +441,19 @@ export const api = {
         request<{ status: string }>(`/platform/tenants/${id}/approve/`, { method: 'POST' }),
       suspend: (id: number) =>
         request<{ status: string }>(`/platform/tenants/${id}/suspend/`, { method: 'POST' }),
+    },
+    payouts: {
+      list: (query = '') => request<Paginated<ApiPayout>>(`/billing/platform/payouts/${query}`),
+      markPaid: (id: number, mpesa_reference: string) =>
+        request<ApiPayout>(`/billing/platform/payouts/${id}/mark_paid/`, {
+          method: 'POST',
+          body: JSON.stringify({ mpesa_reference }),
+        }),
+      reject: (id: number, note: string) =>
+        request<ApiPayout>(`/billing/platform/payouts/${id}/reject/`, {
+          method: 'POST',
+          body: JSON.stringify({ note }),
+        }),
     },
   },
 

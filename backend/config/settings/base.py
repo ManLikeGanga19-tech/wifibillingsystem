@@ -29,6 +29,7 @@ INSTALLED_APPS = [
     "apps.vouchers",
     "apps.notifications",
     "apps.ops",
+    "apps.billing",
 ]
 
 MIDDLEWARE = [
@@ -112,7 +113,13 @@ CELERY_BROKER_URL = REDIS_URL
 CELERY_TASK_SERIALIZER = "json"
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_TIME_LIMIT = 120
+from celery.schedules import crontab  # noqa: E402
+
 CELERY_BEAT_SCHEDULE = {
+    "charge-monthly-base-fees": {
+        "task": "apps.billing.tasks.charge_monthly_base_fees",
+        "schedule": crontab(minute=30, hour=0, day_of_month=1),
+    },
     "expire-sessions": {
         "task": "apps.provisioning.tasks.expire_sessions",
         "schedule": 60.0,

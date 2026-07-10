@@ -1,0 +1,143 @@
+import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { Wallet, ArrowDownToLine, Loader2 } from 'lucide-react';
+import { api, ApiLedgerEntry, ApiPayout, WalletSummary } from '../api/client';
+import { Badge, Btn, Field, inputCls, Panel, RefreshBtn, TableShell, tdCls, toast, ViewHeader, fmtDateTime, fmtKsh } from './ui';
+
+const ENTRY_LABEL: Record<ApiLedgerEntry['entry_type'], { label: string; color: 'green' | 'red' | 'amber' | 'gray' | 'blue' }> = {
+  sale: { label: 'Sale', color: 'green' },
+  commission: { label: 'Commission', color: 'gray' },
+  base_fee: { label: 'Platform fee', color: 'amber' },
+  pppoe_fee: { label: 'PPPoE fee', color: 'amber' },
+  payout: { label: 'Withdrawal', color: 'blue' },
+  adjustment: { label: 'Adjustment', color: 'gray' },
+};
+
+export default function WalletView() {
+  const [summary, setSummary] = useState<WalletSummary | null>(null);
+  const [ledger, setLedger] = useState<ApiLedgerEntry[] | null>(null);
+  const [payouts, setPayouts] = useState<ApiPayout[]>([]);
+  const [error, setError] = useState('');
+  const [amount, setAmount] = useState('');
+  const [phone, setPhone] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const [s, l, p] = await Promise.all([
+        api.billing.wallet(),
+        api.billing.ledger(),
+        api.billing.payouts.list(),
+      ]);
+      setSummary(s);
+      setLedger(l.results);
+      setPayouts(p.results);
+      setError('');
+    } catch {
+      setError('Could not load your wallet.');
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const withdraw = async (e: FormEvent) => {
+    e.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    try {
+      await api.billing.payouts.withdraw({ amount, phone });
+      toast('success', 'Withdrawal requested — the platform will pay it out shortly.');
+      setAmount('');
+      load();
+    } catch (err) {
+      toast('error', err instanceof Error ? err.message : 'Withdrawal failed.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!summary && !error)
+    return (
+      <div className="flex justify-center py-24">
+        <Loader2 className="h-8 w-8 animate-spin text-[#141414]/40" />
+      </div>
+    );
+
+  return (
+    <div className="space-y-5 text-[#141414]">
+      <ViewHeader
+        icon={<Wallet className="h-4.5 w-4.5" />}
+        title="Wallet"
+        subtitle="Customer payments are collected by Danamo Tech and credited here, with the platform commission already deducted. Withdraw to M-Pesa anytime."
+      >
+        <RefreshBtn onClick={load} />
+      </ViewHeader>
+
+      {summary && (
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          <div className="bg-white border border-[#141414] p-3.5 col-span-2 md:col-span-1">
+            <p className="text-[11px] font-mono uppercase text-[#141414]/60">Available Balance</p>
+            <p className="text-xl font-black font-mono mt-1 text-[#228B22]">{fmtKsh(summary.balance)}</p>
+          </div>
+          <div className="bg-white border border-[#141414] p-3.5">
+            <p className="text-[11px] font-mono uppercase text-[#141414]/60">Sales This Month</p>
+            <p className="text-lg font-black font-mono mt-1">{fmtKsh(summary.month_gross)}</p>
+          </div>
+          <div className="bg-white border border-[#141414] p-3.5">
+            <p className="text-[11px] font-mono uppercase text-[#141414]/60">Commission ({Number(summary.commission_rate)}%)</p>
+            <p className="text-lg font-black font-mono mt-1">{fmtKsh(summary.month_commission)}</p>
+          </div>
+          <div className="bg-white border border-[#141414] p-3.5">
+            <p className="text-[11px] font-mono uppercase text-[#141414]/60">Fees This Month</p>
+            <p className="text-lg font-black font-mono mt-1">{fmtKsh(summary.month_fees)}</p>
+          </div>
+          <div className="bg-white border border-[#141414] p-3.5">
+            <p className="text-[11px] font-mono uppercase text-[#141414]/60">Withdrawn</p>
+            <p className="text-lg font-black font-mono mt-1">{fmtKsh(summary.month_withdrawn)}</p>
+          </div>
+        </div>
+      )}
+
+      <Panel title="Withdraw to M-Pesa">
+        <form onSubmit={withdraw} className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+          <Field label={`Amount (min ${fmtKsh(summary?.minimum_payout ?? 100)})`}>
+            <input type="number" min="100" step="0.01" required value={amount} onChange={(e) => setAmount(e.target.value)} className={inputCls} />
+          </Field>
+          <Field label="M-Pesa number">
+            <input type="tel" required value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="07XX…" className={inputCls} />
+          </Field>
+          <Btn type="submit" variant="green" disabled={busy}>
+            <ArrowDownToLine className="h-3.5 w-3.5" />
+            {busy ? 'Requesting…' : 'Withdraw'}
+          </Btn>
+        </form>
+        {payouts.filter((p) => p.status === 'requested').length > 0 && (
+          <p className="text-[11px] font-mono text-[#B26B00] mt-3">
+            {payouts.filter((p) => p.status === 'requested').length} withdrawal(s) awaiting payment by the platform.
+          </p>
+        )}
+      </Panel>
+
+      <TableShell
+        headers={['When', 'Type', 'Details', 'Amount']}
+        loading={ledger === null}
+        error={error}
+        empty="No wallet activity yet — it starts with your first customer payment."
+      >
+        {(ledger ?? []).map((e) => (
+          <tr key={e.id} className="hover:bg-[#f0efec]/40 transition">
+            <td className={`${tdCls} font-mono whitespace-nowrap`}>{fmtDateTime(e.created_at)}</td>
+            <td className={tdCls}>
+              <Badge color={ENTRY_LABEL[e.entry_type].color}>{ENTRY_LABEL[e.entry_type].label}</Badge>
+            </td>
+            <td className={`${tdCls} text-[#141414]/70`}>{e.memo || '—'}</td>
+            <td className={`${tdCls} font-mono font-bold text-right whitespace-nowrap ${Number(e.amount) < 0 ? 'text-[#B22222]' : 'text-[#228B22]'}`}>
+              {Number(e.amount) > 0 ? '+' : ''}{fmtKsh(e.amount)}
+            </td>
+          </tr>
+        ))}
+      </TableShell>
+    </div>
+  );
+}

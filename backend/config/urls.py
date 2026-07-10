@@ -11,6 +11,7 @@ api_v1 = [
     path("vouchers/", include("apps.vouchers.urls")),
     path("notifications/", include("apps.notifications.urls")),
     path("ops/", include("apps.ops.urls")),
+    path("billing/", include("apps.billing.urls")),
 ]
 
 urlpatterns = [

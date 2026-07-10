@@ -20,16 +20,16 @@ class DarajaError(Exception):
 
 
 class DarajaClient:
+    """All payments run on the platform's (Danamo Tech Ltd) paybill — the
+    aggregator model. Tenant attribution happens in the ledger, not at Safaricom.
+    The `operator` argument is accepted for call-site compatibility but ignored."""
+
     def __init__(self, operator=None):
         self.base_url = settings.DARAJA_BASE_URL.rstrip("/")
-        self.consumer_key = (
-            getattr(operator, "daraja_consumer_key", "") or settings.DARAJA_CONSUMER_KEY
-        )
-        self.consumer_secret = (
-            getattr(operator, "daraja_consumer_secret", "") or settings.DARAJA_CONSUMER_SECRET
-        )
-        self.shortcode = getattr(operator, "mpesa_shortcode", "") or settings.DARAJA_SHORTCODE
-        self.passkey = getattr(operator, "mpesa_passkey", "") or settings.DARAJA_PASSKEY
+        self.consumer_key = settings.DARAJA_CONSUMER_KEY
+        self.consumer_secret = settings.DARAJA_CONSUMER_SECRET
+        self.shortcode = settings.DARAJA_SHORTCODE
+        self.passkey = settings.DARAJA_PASSKEY
         if not (self.consumer_key and self.consumer_secret):
             raise DarajaError(
                 "Daraja credentials missing. Set DARAJA_CONSUMER_KEY / DARAJA_CONSUMER_SECRET."

@@ -32,7 +32,8 @@ def initiate_stk_push(*, phone: str, plan, mac: str = "", router=None) -> Transa
         phone=phone,
         amount=plan.price,
         mac_address=mac or "",
-        account_reference=f"WIFI-{plan.id}",
+        # Tenant tag on Danamo's paybill statement (AccountReference max 12 chars)
+        account_reference=operator.slug[:12].upper(),
     )
     try:
         resp = DarajaClient(operator).stk_push(
@@ -107,8 +108,10 @@ def process_stk_callback(payload: dict) -> Transaction | None:
         )
 
         if tx.status == Transaction.Status.SUCCESS:
+            from apps.billing.services import credit_sale
             from apps.provisioning.tasks import provision_transaction
 
+            credit_sale(tx)
             db_transaction.on_commit(lambda: provision_transaction.delay(tx.id))
     return tx
 
@@ -127,6 +130,8 @@ def mark_reconciled_success(tx: Transaction, query_response: dict) -> None:
         tx.save()
         audit("mpesa_reconciled", operator=tx.operator, target=tx)
 
+        from apps.billing.services import credit_sale
         from apps.provisioning.tasks import provision_transaction
 
+        credit_sale(tx)
         db_transaction.on_commit(lambda: provision_transaction.delay(tx.id))

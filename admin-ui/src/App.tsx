@@ -42,7 +42,9 @@ import MessagingView from './components/MessagingView';
 import RoutersView from './components/RoutersView';
 import EquipmentView from './components/EquipmentView';
 import PlatformTenantsView from './components/PlatformTenantsView';
+import PlatformPayoutsView from './components/PlatformPayoutsView';
 import SettingsView from './components/SettingsView';
+import WalletView from './components/WalletView';
 
 // ---- navigation model -------------------------------------------------------
 
@@ -62,7 +64,9 @@ type TabId =
   | 'mikrotik'
   | 'equipment'
   | 'settings'
-  | 'platform_tenants';
+  | 'wallet'
+  | 'platform_tenants'
+  | 'platform_payouts';
 
 interface NavItem {
   id: TabId;
@@ -88,7 +92,8 @@ const NAV_GROUPS: { title: string | null; items: NavItem[] }[] = [
       { id: 'packages', label: 'Packages', icon: Gauge, badge: 'packages' },
       { id: 'payments', label: 'Payments', icon: Receipt },
       { id: 'vouchers', label: 'Vouchers', icon: TicketIcon, badge: 'vouchers' },
-      { id: 'expenses', label: 'Expenses', icon: Wallet },
+      { id: 'wallet', label: 'Wallet', icon: Wallet },
+      { id: 'expenses', label: 'Expenses', icon: Receipt },
     ],
   },
   {
@@ -114,7 +119,10 @@ const NAV_GROUPS: { title: string | null; items: NavItem[] }[] = [
 
 const PLATFORM_GROUP: { title: string | null; items: NavItem[] } = {
   title: 'Platform',
-  items: [{ id: 'platform_tenants', label: 'ISP Tenants', icon: Building2 }],
+  items: [
+    { id: 'platform_tenants', label: 'ISP Tenants', icon: Building2 },
+    { id: 'platform_payouts', label: 'Payouts', icon: Wallet },
+  ],
 };
 
 export default function App() {
@@ -269,7 +277,6 @@ export default function App() {
   }
 
   const navGroups = me?.is_platform_admin ? [...NAV_GROUPS, PLATFORM_GROUP] : NAV_GROUPS;
-  const needsMpesaSetup = !!(me?.operator && !me.operator.has_mpesa_credentials);
 
   const badgeValue = (item: NavItem): number | null =>
     item.badge && navCounts ? navCounts[item.badge] : null;
@@ -417,15 +424,6 @@ export default function App() {
 
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 min-h-0">
           <div className="max-w-7xl mx-auto space-y-6">
-            {needsMpesaSetup && activeTab !== 'settings' && (
-              <button
-                onClick={() => setActiveTab('settings')}
-                className="w-full text-left bg-[#B26B00]/10 border border-[#B26B00]/50 px-4 py-3 text-xs font-mono cursor-pointer hover:bg-[#B26B00]/20 transition"
-              >
-                <b className="uppercase">Setup needed:</b> add your M-Pesa paybill and Daraja
-                credentials so customer payments reach your account — tap here to finish setup.
-              </button>
-            )}
             {activeTab === 'dashboard' && <LiveDashboard onNavigate={(tab) => setActiveTab(tab as TabId)} />}
             {activeTab === 'active_users' && <ActiveUsersView />}
             {activeTab === 'users' && <UsersView />}
@@ -455,10 +453,10 @@ export default function App() {
             )}
             {activeTab === 'mikrotik' && <RoutersView />}
             {activeTab === 'equipment' && <EquipmentView />}
-            {activeTab === 'settings' && (
-              <SettingsView onCredentialsSaved={() => api.me().then(setMe).catch(() => {})} />
-            )}
+            {activeTab === 'settings' && <SettingsView onOpenWallet={() => setActiveTab('wallet')} />}
+            {activeTab === 'wallet' && <WalletView />}
             {activeTab === 'platform_tenants' && <PlatformTenantsView />}
+            {activeTab === 'platform_payouts' && <PlatformPayoutsView />}
           </div>
         </div>
 
