@@ -18,6 +18,7 @@ class OperatorFactory(factory.django.DjangoModelFactory):
 
     name = "Test WISP"
     slug = "test-wisp"
+    status = Operator.Status.ACTIVE
 
 
 class UserFactory(factory.django.DjangoModelFactory):

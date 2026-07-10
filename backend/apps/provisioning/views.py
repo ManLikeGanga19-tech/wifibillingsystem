@@ -1,7 +1,8 @@
-from rest_framework import status, viewsets
+from rest_framework import status
 from rest_framework.decorators import action
-from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
+
+from apps.core.viewsets import TenantModelViewSet, TenantReadOnlyViewSet
 
 from .adapters import ProvisioningError, get_adapter
 from .models import Router, Session
@@ -9,8 +10,7 @@ from .serializers import RouterSerializer, SessionSerializer
 from .tasks import suspend_session
 
 
-class RouterViewSet(viewsets.ModelViewSet):
-    permission_classes = [IsAdminUser]
+class RouterViewSet(TenantModelViewSet):
     serializer_class = RouterSerializer
     queryset = Router.objects.all()
 
@@ -33,10 +33,16 @@ class RouterViewSet(viewsets.ModelViewSet):
         return Response([vars(s) for s in sessions])
 
 
-class SessionViewSet(viewsets.ReadOnlyModelViewSet):
-    permission_classes = [IsAdminUser]
+class SessionViewSet(TenantReadOnlyViewSet):
     serializer_class = SessionSerializer
     queryset = Session.objects.select_related("plan", "router", "user").order_by("-created_at")
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        status_param = self.request.query_params.get("status")
+        if status_param:
+            qs = qs.filter(status=status_param)
+        return qs
 
     @action(detail=True, methods=["post"])
     def suspend(self, request, pk=None):

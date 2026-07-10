@@ -23,8 +23,12 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         operator, created = Operator.objects.get_or_create(
-            slug="default", defaults={"name": "My WISP"}
+            slug="default",
+            defaults={"name": "My WISP", "status": Operator.Status.ACTIVE},
         )
+        if operator.status != Operator.Status.ACTIVE:
+            operator.status = Operator.Status.ACTIVE
+            operator.save(update_fields=["status", "updated_at"])
         self.stdout.write(f"Operator: {operator.name} ({'created' if created else 'exists'})")
 
         for name, price, duration, down, up, shared in PLANS:
@@ -53,13 +57,22 @@ class Command(BaseCommand):
         if created:
             self.stdout.write("Dummy router created")
 
-        if not User.objects.filter(is_superuser=True).exists():
+        if not User.objects.filter(phone="254700000000").exists():
             User.objects.create_superuser(
                 phone="254700000000", password="admin12345", name="Dev Admin", operator=operator
             )
             self.stdout.write(
                 self.style.WARNING(
-                    "Superuser created -> phone: 254700000000  password: admin12345 (DEV ONLY)"
+                    "ISP admin created -> phone: 254700000000  password: admin12345 (DEV ONLY)"
+                )
+            )
+        if not User.objects.filter(phone="254700000001").exists():
+            User.objects.create_superuser(
+                phone="254700000001", password="admin12345", name="Platform Admin", operator=None
+            )
+            self.stdout.write(
+                self.style.WARNING(
+                    "PLATFORM admin created -> phone: 254700000001  password: admin12345 (DEV ONLY)"
                 )
             )
         self.stdout.write(self.style.SUCCESS("Seed complete."))

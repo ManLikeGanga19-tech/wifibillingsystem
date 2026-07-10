@@ -1,7 +1,5 @@
 from rest_framework import serializers
 
-from apps.core.services import get_default_operator
-
 from .models import Router, Session
 
 
@@ -25,10 +23,6 @@ class RouterSerializer(serializers.ModelSerializer):
             "is_active",
         ]
         read_only_fields = ["status", "last_seen_at"]
-
-    def create(self, validated_data):
-        validated_data.setdefault("operator", get_default_operator())
-        return super().create(validated_data)
 
 
 class SessionSerializer(serializers.ModelSerializer):

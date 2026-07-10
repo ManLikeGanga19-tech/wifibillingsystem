@@ -13,23 +13,64 @@ class TimeStampedModel(models.Model):
 
 
 class Operator(TimeStampedModel):
-    """The WISP business. Single row today; becomes the tenant when the platform goes SaaS."""
+    """The tenant: one WISP business, resolved from the <slug> subdomain."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending approval"
+        ACTIVE = "active", "Active"
+        SUSPENDED = "suspended", "Suspended"
 
     name = models.CharField(max_length=120)
     slug = models.SlugField(unique=True)
-    is_active = models.BooleanField(default=True)
-    # Per-operator M-Pesa credentials. Blank means "use the env-var defaults" (phase 1).
+    status = models.CharField(
+        max_length=10, choices=Status.choices, default=Status.PENDING, db_index=True
+    )
+    is_active = models.BooleanField(default=True)  # hard kill-switch, distinct from status
+    approved_at = models.DateTimeField(null=True, blank=True)
+
+    # Contact (the ISP owner)
+    owner_name = models.CharField(max_length=120, blank=True)
+    contact_phone = models.CharField(max_length=20, blank=True)
+    contact_email = models.EmailField(blank=True)
+
+    # Per-operator M-Pesa credentials. Blank means "use the env-var defaults" (pilot).
     mpesa_shortcode = models.CharField(max_length=20, blank=True)
     mpesa_passkey = EncryptedTextField(blank=True)
     daraja_consumer_key = EncryptedTextField(blank=True)
     daraja_consumer_secret = EncryptedTextField(blank=True)
 
+    # Platform billing rates (editable per tenant from the platform portal)
+    base_fee = models.DecimalField(
+        max_digits=10, decimal_places=2, default=0, help_text="Flat KSh/month for the subdomain"
+    )
+    hotspot_commission_pct = models.DecimalField(
+        max_digits=4, decimal_places=2, default=3.0, help_text="% of hotspot revenue"
+    )
+    pppoe_user_fee = models.DecimalField(
+        max_digits=10, decimal_places=2, default=0, help_text="KSh per active PPPoE user/month"
+    )
+
+    RESERVED_SLUGS = {
+        "www", "api", "admin", "portal", "app", "mail", "platform", "billing",
+        "status", "docs", "static", "media",
+    }
+
     def __str__(self):
-        return self.name
+        return f"{self.name} ({self.slug})"
+
+    @property
+    def is_operational(self) -> bool:
+        return self.is_active and self.status == self.Status.ACTIVE
+
+    @property
+    def has_mpesa_credentials(self) -> bool:
+        return bool(self.mpesa_shortcode and self.daraja_consumer_key)
 
 
 class OperatorOwnedModel(TimeStampedModel):
-    operator = models.ForeignKey(Operator, on_delete=models.CASCADE, related_name="+")
+    operator = models.ForeignKey(
+        Operator, on_delete=models.CASCADE, related_name="%(class)ss"
+    )
 
     class Meta:
         abstract = True

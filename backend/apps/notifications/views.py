@@ -1,8 +1,7 @@
 from django.db import transaction as db_transaction
 from rest_framework import mixins, viewsets
-from rest_framework.permissions import IsAdminUser
 
-from apps.core.services import get_default_operator
+from apps.core.viewsets import TenantReadOnlyViewSet, TenantScopedMixin
 
 from .models import Campaign, Message
 from .serializers import CampaignSerializer, MessageSerializer
@@ -10,6 +9,7 @@ from .tasks import dispatch_campaign
 
 
 class CampaignViewSet(
+    TenantScopedMixin,
     mixins.CreateModelMixin,
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
@@ -17,18 +17,22 @@ class CampaignViewSet(
 ):
     """Creating a campaign immediately queues the bulk send."""
 
-    permission_classes = [IsAdminUser]
     serializer_class = CampaignSerializer
     queryset = Campaign.objects.order_by("-created_at")
 
     def perform_create(self, serializer):
-        campaign = serializer.save(
-            operator=get_default_operator(), created_by=self.request.user
-        )
+        super().perform_create(serializer)
+        campaign = serializer.instance
         db_transaction.on_commit(lambda: dispatch_campaign.delay(campaign.pk))
 
 
-class MessageViewSet(viewsets.ReadOnlyModelViewSet):
-    permission_classes = [IsAdminUser]
+class MessageViewSet(TenantReadOnlyViewSet):
     serializer_class = MessageSerializer
     queryset = Message.objects.order_by("-created_at")
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        channel = self.request.query_params.get("channel")
+        if channel:
+            qs = qs.filter(channel=channel)
+        return qs

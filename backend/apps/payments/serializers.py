@@ -20,16 +20,19 @@ class STKPushRequestSerializer(serializers.Serializer):
             raise serializers.ValidationError(str(exc)) from exc
 
     def validate(self, attrs):
+        plans = Plan.objects.filter(is_active=True, plan_type=Plan.PlanType.HOTSPOT)
+        request = self.context.get("request")
+        tenant = getattr(request, "tenant", None) if request else None
+        if tenant is not None:
+            plans = plans.filter(operator=tenant)
         try:
-            attrs["plan"] = Plan.objects.get(
-                pk=attrs["plan_id"], is_active=True, plan_type=Plan.PlanType.HOTSPOT
-            )
+            attrs["plan"] = plans.get(pk=attrs["plan_id"])
         except Plan.DoesNotExist as exc:
             raise serializers.ValidationError({"plan_id": "Unknown or inactive plan"}) from exc
         attrs["router"] = None
         if attrs.get("router_id"):
             attrs["router"] = Router.objects.filter(
-                pk=attrs["router_id"], is_active=True
+                pk=attrs["router_id"], is_active=True, operator=attrs["plan"].operator
             ).first()
         return attrs
 

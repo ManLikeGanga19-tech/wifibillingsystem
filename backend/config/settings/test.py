@@ -3,6 +3,7 @@ from cryptography.fernet import Fernet
 from .base import *  # noqa: F403
 
 DEBUG = False
+ALLOWED_HOSTS = ["*"]  # tenancy tests exercise arbitrary tenant subdomains
 
 # Ephemeral per-run key: tests exercise encryption without any key living anywhere
 FIELD_ENCRYPTION_KEY = Fernet.generate_key().decode()
@@ -20,4 +21,5 @@ REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"] = {
     "anon": "1000/min",
     "stk-push": "1000/min",
     "voucher-redeem": "1000/min",
+    "signup": "1000/min",
 }

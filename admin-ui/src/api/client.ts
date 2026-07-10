@@ -248,6 +248,48 @@ export interface ApiEquipment {
   created_at: string;
 }
 
+export interface Me {
+  phone: string;
+  name: string;
+  is_staff: boolean;
+  is_platform_admin: boolean;
+  operator: {
+    id: number;
+    name: string;
+    slug: string;
+    status: 'pending' | 'active' | 'suspended';
+    has_mpesa_credentials: boolean;
+  } | null;
+}
+
+export interface ApiTenant {
+  id: number;
+  name: string;
+  slug: string;
+  status: 'pending' | 'active' | 'suspended';
+  owner_name: string;
+  contact_phone: string;
+  contact_email: string;
+  base_fee: string;
+  hotspot_commission_pct: string;
+  pppoe_user_fee: string;
+  approved_at: string | null;
+  created_at: string;
+  router_count: number;
+  staff_count: number;
+}
+
+export interface OperatorSettings {
+  name: string;
+  slug: string;
+  status: string;
+  owner_name: string;
+  contact_phone: string;
+  contact_email: string;
+  mpesa_shortcode: string;
+  has_mpesa_credentials: boolean;
+}
+
 export interface NavCounts {
   active_users: number;
   users: number;
@@ -319,9 +361,49 @@ function crud<T>(base: string) {
   };
 }
 
+export function signup(data: {
+  business_name: string;
+  slug?: string;
+  owner_name: string;
+  phone: string;
+  email: string;
+  password: string;
+}): Promise<{ slug: string; status: string; detail: string }> {
+  return fetch(`${BASE}/api/v1/tenants/signup/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  }).then(async (resp) => {
+    const body = await resp.json().catch(() => null);
+    if (!resp.ok) throw new ApiError(resp.status, body);
+    return body;
+  });
+}
+
 export const api = {
   stats: () => request<DashboardStats>('/stats/'),
   navCounts: () => request<NavCounts>('/nav/'),
+  me: () => request<Me>('/me/'),
+
+  operatorSettings: {
+    get: () => request<OperatorSettings>('/operator/settings/'),
+    update: (data: Record<string, string>) =>
+      request<OperatorSettings>('/operator/settings/', { method: 'PATCH', body: JSON.stringify(data) }),
+    validateMpesa: () =>
+      request<{ ok: boolean; detail: string }>('/operator/validate-mpesa/', { method: 'POST' }),
+  },
+
+  platform: {
+    tenants: {
+      list: () => request<Paginated<ApiTenant>>('/platform/tenants/'),
+      update: (id: number, data: Partial<ApiTenant>) =>
+        request<ApiTenant>(`/platform/tenants/${id}/`, { method: 'PATCH', body: JSON.stringify(data) }),
+      approve: (id: number) =>
+        request<{ status: string }>(`/platform/tenants/${id}/approve/`, { method: 'POST' }),
+      suspend: (id: number) =>
+        request<{ status: string }>(`/platform/tenants/${id}/suspend/`, { method: 'POST' }),
+    },
+  },
 
   plans: {
     list: () => request<Paginated<ApiPlan>>('/plans/'),

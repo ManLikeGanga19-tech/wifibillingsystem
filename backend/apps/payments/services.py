@@ -8,7 +8,7 @@ from django.utils import timezone
 
 from apps.accounts.models import User
 from apps.core.phone import normalize_msisdn
-from apps.core.services import audit, get_default_operator
+from apps.core.services import audit
 
 from .daraja import DarajaClient
 from .models import Transaction
@@ -17,8 +17,10 @@ logger = logging.getLogger(__name__)
 
 
 def initiate_stk_push(*, phone: str, plan, mac: str = "", router=None) -> Transaction:
+    """Tenant context comes from the plan: money always flows to the paybill of
+    the operator who owns the plan being bought."""
     phone = normalize_msisdn(phone)
-    operator = get_default_operator()
+    operator = plan.operator
     user, _ = User.objects.get_or_create(
         phone=phone, defaults={"operator": operator}
     )

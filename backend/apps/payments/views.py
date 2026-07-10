@@ -6,12 +6,14 @@ from django.http import Http404, JsonResponse
 from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
-from rest_framework import status, viewsets
+from rest_framework import status
 from rest_framework.generics import RetrieveAPIView
-from rest_framework.permissions import AllowAny, IsAdminUser
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
+
+from apps.core.viewsets import TenantReadOnlyViewSet
 
 from .daraja import DarajaError
 from .models import Transaction
@@ -33,7 +35,7 @@ class STKPushView(APIView):
     throttle_scope = "stk-push"
 
     def post(self, request):
-        serializer = STKPushRequestSerializer(data=request.data)
+        serializer = STKPushRequestSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
         try:
@@ -82,11 +84,15 @@ class DarajaCallbackView(View):
         return JsonResponse({"ResultCode": 0, "ResultDesc": "Accepted"})
 
 
-class TransactionViewSet(viewsets.ReadOnlyModelViewSet):
-    """Admin UI: live transaction feed."""
+class TransactionViewSet(TenantReadOnlyViewSet):
+    """Admin UI: live transaction feed (tenant-scoped)."""
 
-    permission_classes = [IsAdminUser]
     serializer_class = TransactionAdminSerializer
     queryset = Transaction.objects.select_related("plan").order_by("-created_at")
-    filterset_fields = ["status"]
-    search_fields = ["phone", "mpesa_receipt", "checkout_request_id"]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        status_param = self.request.query_params.get("status")
+        if status_param:
+            qs = qs.filter(status=status_param)
+        return qs

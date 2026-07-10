@@ -16,24 +16,42 @@ from apps.provisioning.models import Router, Session
 from apps.vouchers.models import Voucher
 
 
+def _scoped(qs, operator):
+    return qs.filter(operator=operator) if operator is not None else qs
+
+
 class NavCountsView(APIView):
-    """Live badge counts for the admin sidebar. Cheap enough to poll."""
+    """Live badge counts for the admin sidebar, scoped to the tenant."""
 
     permission_classes = [IsAdminUser]
 
     def get(self, request):
+        from apps.core.tenancy import request_operator
+
+        op = request_operator(request)
+        users = User.objects.filter(is_staff=False)
+        if op is not None:
+            users = users.filter(
+                Q(operator=op) | Q(transactions__operator=op) | Q(sessions__operator=op)
+            ).distinct()
         return Response(
             {
-                "active_users": Session.objects.filter(status=Session.Status.ACTIVE).count(),
-                "users": User.objects.filter(is_staff=False).count(),
-                "tickets": Ticket.objects.filter(status__in=Ticket.OPEN_STATUSES).count(),
-                "leads": Lead.objects.filter(status=Lead.Status.NEW).count(),
-                "packages": Plan.objects.filter(is_active=True).count(),
-                "vouchers": Voucher.objects.filter(status=Voucher.Status.UNUSED).count(),
-                "campaigns": Campaign.objects.count(),
-                "mikrotik": Router.objects.filter(is_active=True).count(),
-                "equipment": Equipment.objects.exclude(
-                    status=Equipment.Status.RETIRED
+                "active_users": _scoped(
+                    Session.objects.filter(status=Session.Status.ACTIVE), op
+                ).count(),
+                "users": users.count(),
+                "tickets": _scoped(
+                    Ticket.objects.filter(status__in=Ticket.OPEN_STATUSES), op
+                ).count(),
+                "leads": _scoped(Lead.objects.filter(status=Lead.Status.NEW), op).count(),
+                "packages": _scoped(Plan.objects.filter(is_active=True), op).count(),
+                "vouchers": _scoped(
+                    Voucher.objects.filter(status=Voucher.Status.UNUSED), op
+                ).count(),
+                "campaigns": _scoped(Campaign.objects.all(), op).count(),
+                "mikrotik": _scoped(Router.objects.filter(is_active=True), op).count(),
+                "equipment": _scoped(
+                    Equipment.objects.exclude(status=Equipment.Status.RETIRED), op
                 ).count(),
             }
         )
@@ -46,6 +64,9 @@ class DashboardStatsView(APIView):
     permission_classes = [IsAdminUser]
 
     def get(self, request):
+        from apps.core.tenancy import request_operator
+
+        op = request_operator(request)
         now = timezone.now()
         today = now.replace(hour=0, minute=0, second=0, microsecond=0)
         month_start = today.replace(day=1)
@@ -53,7 +74,9 @@ class DashboardStatsView(APIView):
         d7 = now - timedelta(days=7)
         d30 = now - timedelta(days=30)
 
-        paid = Transaction.objects.filter(status__in=Transaction.SUCCESS_STATUSES)
+        paid = _scoped(
+            Transaction.objects.filter(status__in=Transaction.SUCCESS_STATUSES), op
+        )
         paid_month = paid.filter(callback_received_at__gte=month_start)
 
         # -- KPIs ----------------------------------------------------------
@@ -65,8 +88,11 @@ class DashboardStatsView(APIView):
             ).aggregate(v=Sum("amount"))["v"]
             or 0
         )
-        finished_7d = Transaction.objects.filter(
-            created_at__gte=d7, status__in=Transaction.TERMINAL_STATUSES
+        finished_7d = _scoped(
+            Transaction.objects.filter(
+                created_at__gte=d7, status__in=Transaction.TERMINAL_STATUSES
+            ),
+            op,
         )
         finished_7d_count = finished_7d.count()
         success_7d_count = finished_7d.filter(
@@ -88,35 +114,52 @@ class DashboardStatsView(APIView):
             "revenue_month": revenue_month,
             "revenue_prev_month": revenue_prev_month,
             "transactions_today": paid.filter(callback_received_at__gte=today).count(),
-            "failed_today": Transaction.objects.filter(
-                status__in=[Transaction.Status.FAILED, Transaction.Status.TIMEOUT],
-                created_at__gte=today,
+            "failed_today": _scoped(
+                Transaction.objects.filter(
+                    status__in=[Transaction.Status.FAILED, Transaction.Status.TIMEOUT],
+                    created_at__gte=today,
+                ),
+                op,
             ).count(),
             "success_rate_7d": (
                 round(100 * success_7d_count / finished_7d_count, 1)
                 if finished_7d_count
                 else None
             ),
-            "active_sessions": Session.objects.filter(
-                status=Session.Status.ACTIVE
+            "active_sessions": _scoped(
+                Session.objects.filter(status=Session.Status.ACTIVE), op
             ).count(),
-            "sessions_expiring_1h": Session.objects.filter(
-                status=Session.Status.ACTIVE, expires_at__lte=now + timedelta(hours=1)
+            "sessions_expiring_1h": _scoped(
+                Session.objects.filter(
+                    status=Session.Status.ACTIVE, expires_at__lte=now + timedelta(hours=1)
+                ),
+                op,
             ).count(),
-            "total_subscribers": User.objects.filter(is_staff=False).count(),
-            "new_subscribers_7d": User.objects.filter(
-                is_staff=False, date_joined__gte=d7
+            "total_subscribers": (
+                User.objects.filter(is_staff=False)
+                if op is None
+                else User.objects.filter(is_staff=False)
+                .filter(Q(operator=op) | Q(transactions__operator=op) | Q(sessions__operator=op))
+                .distinct()
+            ).count(),
+            "new_subscribers_7d": (
+                User.objects.filter(is_staff=False, date_joined__gte=d7)
+                if op is None
+                else User.objects.filter(is_staff=False, date_joined__gte=d7)
+                .filter(Q(operator=op) | Q(transactions__operator=op) | Q(sessions__operator=op))
+                .distinct()
             ).count(),
             "arpu_month": (
                 round(float(revenue_month) / paying_users_month, 2)
                 if paying_users_month
                 else None
             ),
-            "unused_vouchers": Voucher.objects.filter(
-                status=Voucher.Status.UNUSED
+            "unused_vouchers": _scoped(
+                Voucher.objects.filter(status=Voucher.Status.UNUSED), op
             ).count(),
-            "vouchers_redeemed_7d": Voucher.objects.filter(
-                status=Voucher.Status.REDEEMED, redeemed_at__gte=d7
+            "vouchers_redeemed_7d": _scoped(
+                Voucher.objects.filter(status=Voucher.Status.REDEEMED, redeemed_at__gte=d7),
+                op,
             ).count(),
         }
 
@@ -144,16 +187,19 @@ class DashboardStatsView(APIView):
         )
 
         payment_split = {
-            "mpesa": Session.objects.filter(
-                created_at__gte=d30, transaction__isnull=False
+            "mpesa": _scoped(
+                Session.objects.filter(created_at__gte=d30, transaction__isnull=False), op
             ).count(),
-            "voucher": Session.objects.filter(
-                created_at__gte=d30, voucher__isnull=False
+            "voucher": _scoped(
+                Session.objects.filter(created_at__gte=d30, voucher__isnull=False), op
             ).count(),
         }
 
         sessions_daily = list(
-            Session.objects.filter(created_at__gte=timezone.now() - timedelta(days=14))
+            _scoped(
+                Session.objects.filter(created_at__gte=timezone.now() - timedelta(days=14)),
+                op,
+            )
             .annotate(day=TruncDate("created_at"))
             .values("day")
             .annotate(sessions=Count("id"))
@@ -161,7 +207,7 @@ class DashboardStatsView(APIView):
         )
 
         routers = list(
-            Router.objects.filter(is_active=True).annotate(
+            _scoped(Router.objects.filter(is_active=True), op).annotate(
                 active_sessions=Count(
                     "sessions", filter=Q(sessions__status=Session.Status.ACTIVE)
                 )

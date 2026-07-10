@@ -1,11 +1,11 @@
-from rest_framework import status, viewsets
+from rest_framework import status
 from rest_framework.decorators import action
-from rest_framework.permissions import AllowAny, IsAdminUser
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
-from apps.core.services import get_default_operator
+from apps.core.viewsets import TenantReadOnlyViewSet
 from apps.plans.models import Plan
 from apps.provisioning.models import Router
 
@@ -14,23 +14,34 @@ from .serializers import GenerateBatchSerializer, RedeemSerializer, VoucherSeria
 from .services import VoucherError, generate_batch, redeem
 
 
-class VoucherViewSet(viewsets.ReadOnlyModelViewSet):
-    permission_classes = [IsAdminUser]
+class VoucherViewSet(TenantReadOnlyViewSet):
     serializer_class = VoucherSerializer
     queryset = Voucher.objects.select_related("plan").order_by("-created_at")
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        status_param = self.request.query_params.get("status")
+        if status_param:
+            qs = qs.filter(status=status_param)
+        return qs
 
     @action(detail=False, methods=["post"])
     def generate(self, request):
         serializer = GenerateBatchSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        operator = self.get_operator()
+        if operator is None:
+            return Response({"detail": "No tenant context"}, status=status.HTTP_400_BAD_REQUEST)
         try:
-            plan = Plan.objects.get(pk=serializer.validated_data["plan_id"], is_active=True)
+            plan = Plan.objects.get(
+                pk=serializer.validated_data["plan_id"], is_active=True, operator=operator
+            )
         except Plan.DoesNotExist:
             return Response(
                 {"plan_id": "Unknown or inactive plan"}, status=status.HTTP_400_BAD_REQUEST
             )
         created = generate_batch(
-            operator=get_default_operator(),
+            operator=operator,
             plan=plan,
             count=serializer.validated_data["count"],
             prefix=serializer.validated_data["prefix"],
@@ -42,7 +53,8 @@ class VoucherViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 class RedeemVoucherView(APIView):
-    """Portal: redeem a printed voucher code."""
+    """Portal: redeem a printed voucher code. Tenant safety comes from the voucher
+    itself — the session lands on the voucher's operator."""
 
     permission_classes = [AllowAny]
     throttle_classes = [ScopedRateThrottle]

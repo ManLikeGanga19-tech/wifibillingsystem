@@ -15,10 +15,14 @@ import {
   Megaphone,
   Router as RouterIcon,
   HardDrive,
+  Settings as SettingsIcon,
+  Building2,
+  Loader2,
+  Clock,
 } from 'lucide-react';
 
 import { BandwidthProfile, Subscriber, OutboundCampaign } from './types';
-import { api, ApiPlan, isAuthenticated, logout, NavCounts } from './api/client';
+import { api, ApiPlan, isAuthenticated, logout, Me, NavCounts } from './api/client';
 import { planToProfile, profileToPlan, campaignToUi, subscriberToUi } from './api/mappers';
 import { toast, ToastHost } from './components/ui';
 
@@ -37,6 +41,8 @@ import EmailsView from './components/EmailsView';
 import MessagingView from './components/MessagingView';
 import RoutersView from './components/RoutersView';
 import EquipmentView from './components/EquipmentView';
+import PlatformTenantsView from './components/PlatformTenantsView';
+import SettingsView from './components/SettingsView';
 
 // ---- navigation model -------------------------------------------------------
 
@@ -54,7 +60,9 @@ type TabId =
   | 'emails'
   | 'campaigns'
   | 'mikrotik'
-  | 'equipment';
+  | 'equipment'
+  | 'settings'
+  | 'platform_tenants';
 
 interface NavItem {
   id: TabId;
@@ -98,10 +106,21 @@ const NAV_GROUPS: { title: string | null; items: NavItem[] }[] = [
       { id: 'equipment', label: 'Equipment', icon: HardDrive, badge: 'equipment' },
     ],
   },
+  {
+    title: 'Setup',
+    items: [{ id: 'settings', label: 'Settings', icon: SettingsIcon }],
+  },
 ];
+
+const PLATFORM_GROUP: { title: string | null; items: NavItem[] } = {
+  title: 'Platform',
+  items: [{ id: 'platform_tenants', label: 'ISP Tenants', icon: Building2 }],
+};
 
 export default function App() {
   const [authed, setAuthed] = useState<boolean>(isAuthenticated());
+  const [me, setMe] = useState<Me | null>(null);
+  const [meLoading, setMeLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<TabId>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(
@@ -133,6 +152,15 @@ export default function App() {
       })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!authed) return;
+    setMeLoading(true);
+    api.me()
+      .then(setMe)
+      .catch(() => {})
+      .finally(() => setMeLoading(false));
+  }, [authed]);
 
   useEffect(() => {
     if (!authed) return;
@@ -206,6 +234,43 @@ export default function App() {
     );
   }
 
+  if (meLoading || (authed && me === null)) {
+    return (
+      <div className="min-h-screen bg-[#E4E3E0] flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-[#141414]/40" />
+      </div>
+    );
+  }
+
+  // Approval gate: ISP staff whose tenant is not active yet
+  if (me && me.operator && me.operator.status !== 'active') {
+    return (
+      <div className="min-h-screen bg-[#E4E3E0] text-[#141414] flex items-center justify-center p-4">
+        <div className="max-w-sm bg-white border border-[#141414] p-6 text-center space-y-4">
+          <Clock className="h-10 w-10 mx-auto text-[#B26B00]" />
+          <h1 className="font-bold font-mono uppercase">
+            {me.operator.status === 'pending' ? 'Awaiting approval' : 'Account suspended'}
+          </h1>
+          <p className="text-xs font-mono text-[#141414]/70 leading-relaxed">
+            {me.operator.status === 'pending'
+              ? `${me.operator.name} is pending review by the platform. You'll get access as soon as it's approved.`
+              : `${me.operator.name} has been suspended. Contact the platform administrator.`}
+          </p>
+          <button
+            onClick={() => { logout(); setAuthed(false); setMe(null); }}
+            className="text-xs font-mono underline cursor-pointer"
+          >
+            Sign out
+          </button>
+        </div>
+        <ToastHost />
+      </div>
+    );
+  }
+
+  const navGroups = me?.is_platform_admin ? [...NAV_GROUPS, PLATFORM_GROUP] : NAV_GROUPS;
+  const needsMpesaSetup = !!(me?.operator && !me.operator.has_mpesa_credentials);
+
   const badgeValue = (item: NavItem): number | null =>
     item.badge && navCounts ? navCounts[item.badge] : null;
 
@@ -243,7 +308,7 @@ export default function App() {
 
         {/* Navigation */}
         <nav className="flex-1 py-2 font-mono overflow-y-auto">
-          {NAV_GROUPS.map((group, gi) => (
+          {navGroups.map((group, gi) => (
             <div key={group.title ?? gi}>
               {group.title &&
                 (isSidebarCollapsed ? (
@@ -332,11 +397,14 @@ export default function App() {
 
           <div className="flex items-center gap-3 sm:gap-4 text-right font-mono text-[10px] sm:text-xs">
             <div className="border-l border-[#141414] pl-3 sm:pl-4 text-right">
-              <div className="text-[11px] opacity-50 uppercase">Session Operator</div>
+              <div className="text-[11px] opacity-50 uppercase">
+                {me?.is_platform_admin ? 'Platform Admin' : me?.operator?.name ?? 'Operator'}
+              </div>
               <button
                 onClick={() => {
                   logout();
                   setAuthed(false);
+                  setMe(null);
                 }}
                 title="Sign out of the console"
                 className="font-bold uppercase tracking-tight hover:text-[#B22222] transition cursor-pointer"
@@ -349,6 +417,15 @@ export default function App() {
 
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 min-h-0">
           <div className="max-w-7xl mx-auto space-y-6">
+            {needsMpesaSetup && activeTab !== 'settings' && (
+              <button
+                onClick={() => setActiveTab('settings')}
+                className="w-full text-left bg-[#B26B00]/10 border border-[#B26B00]/50 px-4 py-3 text-xs font-mono cursor-pointer hover:bg-[#B26B00]/20 transition"
+              >
+                <b className="uppercase">Setup needed:</b> add your M-Pesa paybill and Daraja
+                credentials so customer payments reach your account — tap here to finish setup.
+              </button>
+            )}
             {activeTab === 'dashboard' && <LiveDashboard onNavigate={(tab) => setActiveTab(tab as TabId)} />}
             {activeTab === 'active_users' && <ActiveUsersView />}
             {activeTab === 'users' && <UsersView />}
@@ -378,6 +455,10 @@ export default function App() {
             )}
             {activeTab === 'mikrotik' && <RoutersView />}
             {activeTab === 'equipment' && <EquipmentView />}
+            {activeTab === 'settings' && (
+              <SettingsView onCredentialsSaved={() => api.me().then(setMe).catch(() => {})} />
+            )}
+            {activeTab === 'platform_tenants' && <PlatformTenantsView />}
           </div>
         </div>
 

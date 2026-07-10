@@ -1,7 +1,5 @@
 from rest_framework import serializers
 
-from apps.core.services import get_default_operator
-
 from .models import Plan
 
 
@@ -26,7 +24,3 @@ class PlanSerializer(serializers.ModelSerializer):
             "is_active",
             "sort_order",
         ]
-
-    def create(self, validated_data):
-        validated_data.setdefault("operator", get_default_operator())
-        return super().create(validated_data)

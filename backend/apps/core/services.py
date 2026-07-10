@@ -1,14 +1,4 @@
-from .models import AuditLog, Operator
-
-
-def get_default_operator() -> Operator:
-    """Phase 1 runs single-tenant: everything belongs to the first active operator."""
-    op = Operator.objects.filter(is_active=True).order_by("id").first()
-    if op is None:
-        raise Operator.DoesNotExist(
-            "No active Operator exists. Run `manage.py seed_dev` or create one in /admin/."
-        )
-    return op
+from .models import AuditLog
 
 
 def audit(action: str, *, operator=None, actor=None, target=None, ip=None, **metadata):
