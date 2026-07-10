@@ -1,0 +1,15 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WiFi Login</title>
+  <!-- Served by the MikroTik hotspot. $(...) placeholders are filled by RouterOS
+       at serve time; the customer is bounced to the captive portal with device context. -->
+  <meta http-equiv="refresh" content="0; url=http://192.168.2.106:4700/?mac=$(mac-esc)&ip=$(ip)&login=$(link-login-only-esc)&orig=$(link-orig-esc)&router=34">
+</head>
+<body style="font-family:sans-serif;text-align:center;padding-top:4rem;background:#E4E3E0">
+  <p>Taking you to the payment page&hellip;</p>
+  <p><a href="http://192.168.2.106:4700/?mac=$(mac-esc)&ip=$(ip)&login=$(link-login-only-esc)&orig=$(link-orig-esc)&router=34">Tap here if nothing happens</a></p>
+</body>
+</html>
