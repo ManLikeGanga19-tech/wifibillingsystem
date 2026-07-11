@@ -217,10 +217,27 @@ export interface ApiRouter {
   last_sync_at: string | null;
   enrolled_at: string | null;
   routeros_version: string;
+  board_name: string;
+  serial_number: string;
+  architecture: string;
+  identity_updated_at: string | null;
   is_enrolled: boolean;
   is_reachable: boolean;
   needs_onboarding: boolean;
   is_active: boolean;
+}
+
+export interface DeviceInfo {
+  routeros_version: string;
+  board_name: string;
+  serial_number: string;
+  architecture: string;
+  identity_name: string;
+  uptime: string;
+  cpu_load: number | null;
+  free_memory: number | null;
+  total_memory: number | null;
+  active_users: number | null;
 }
 
 export interface ApiTicket {
@@ -559,6 +576,7 @@ export const api = {
       request<{ script: string; enrolled: boolean; status: string }>(`/routers/${id}/setup_script/`),
     resync: (id: number) =>
       request<{ detail: string }>(`/routers/${id}/resync/`, { method: 'POST' }),
+    deviceInfo: (id: number) => request<DeviceInfo>(`/routers/${id}/device_info/`),
   },
 
   tickets: crud<ApiTicket>('/ops/tickets'),

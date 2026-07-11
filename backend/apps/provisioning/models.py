@@ -47,8 +47,15 @@ class Router(OperatorOwnedModel):
         max_length=64, unique=True, default=_enrollment_token, editable=False
     )
     enrolled_at = models.DateTimeField(null=True, blank=True)
-    routeros_version = models.CharField(max_length=20, blank=True)
     last_sync_at = models.DateTimeField(null=True, blank=True)
+
+    # Hardware identity — refreshed from the device on every successful connection,
+    # so it's populated whether the router self-onboarded or was set up by hand.
+    routeros_version = models.CharField(max_length=20, blank=True)
+    board_name = models.CharField(max_length=60, blank=True)
+    serial_number = models.CharField(max_length=40, blank=True)
+    architecture = models.CharField(max_length=30, blank=True)
+    identity_updated_at = models.DateTimeField(null=True, blank=True)
     # Set when a connection attempt is rejected for bad credentials (factory reset
     # wiped the API user). Cleared on the next successful connection.
     onboarding_required = models.BooleanField(default=False)

@@ -1,9 +1,13 @@
 import { useState, type FormEvent } from 'react';
-import { Router as RouterIcon, Plus, Plug, RefreshCw, Copy, Check, Loader2, X } from 'lucide-react';
-import { api, ApiRouter } from '../api/client';
+import { Router as RouterIcon, Plus, Plug, RefreshCw, Copy, Check, Loader2, X, Cpu } from 'lucide-react';
+import { api, ApiRouter, DeviceInfo } from '../api/client';
 import {
   Badge, Btn, Field, inputCls, Panel, RefreshBtn, TableShell, tdCls, toast, useList, ViewHeader, fmtDateTime,
 } from './ui';
+
+function mb(bytes: number | null): string {
+  return bytes === null ? '—' : `${Math.round(bytes / 1048576)} MB`;
+}
 
 export default function RoutersView() {
   const [showAdd, setShowAdd] = useState(false);
@@ -13,7 +17,20 @@ export default function RoutersView() {
   const [script, setScript] = useState('');
   const [copied, setCopied] = useState(false);
   const [testing, setTesting] = useState<number | null>(null);
+  const [infoFor, setInfoFor] = useState<ApiRouter | null>(null);
+  const [info, setInfo] = useState<DeviceInfo | null>(null);
   const { rows, error, reload } = useList(() => api.routers.list());
+
+  const openInfo = async (r: ApiRouter) => {
+    setInfoFor(r);
+    setInfo(null);
+    try {
+      setInfo(await api.routers.deviceInfo(r.id));
+    } catch (e) {
+      toast('error', e instanceof Error ? e.message : 'Could not reach the router.');
+      setInfoFor(null);
+    }
+  };
 
   const addRouter = async (e: FormEvent) => {
     e.preventDefault();
@@ -105,7 +122,7 @@ export default function RoutersView() {
       )}
 
       <TableShell
-        headers={['Site', 'Status', 'RouterOS', 'Last seen', 'Last sync', '']}
+        headers={['Site', 'Model', 'Status', 'RouterOS', 'Last seen', 'Last sync', '']}
         loading={rows === null}
         error={error}
         empty="No routers yet — add your first site to generate its setup script."
@@ -115,6 +132,16 @@ export default function RoutersView() {
             <td className={`${tdCls} font-bold`}>
               {r.name}
               {r.management_host && <span className="block text-[11px] font-mono text-[#141414]/50">{r.management_host}</span>}
+            </td>
+            <td className={tdCls}>
+              {r.board_name ? (
+                <>
+                  <span className="font-mono">{r.board_name}</span>
+                  {r.serial_number && <span className="block text-[11px] font-mono text-[#141414]/50">SN {r.serial_number}</span>}
+                </>
+              ) : (
+                <span className="text-[#141414]/40">—</span>
+              )}
             </td>
             <td className={tdCls}>
               {r.needs_onboarding ? (
@@ -142,6 +169,9 @@ export default function RoutersView() {
                   </Btn>
                   <Btn variant="outline" onClick={() => resync(r)} title="Push any missing active sessions back onto the router">
                     <RefreshCw className="h-3.5 w-3.5" /> Re-sync
+                  </Btn>
+                  <Btn variant="outline" onClick={() => openInfo(r)} title="Live device details">
+                    <Cpu className="h-3.5 w-3.5" /> Details
                   </Btn>
                   <button
                     onClick={() => openScript(r)}
@@ -187,6 +217,48 @@ export default function RoutersView() {
           </div>
         </div>
       )}
+
+      {/* Device details modal */}
+      {infoFor && (
+        <div className="fixed inset-0 z-50 bg-[#141414]/50 flex items-center justify-center p-4" onClick={() => setInfoFor(null)}>
+          <div className="bg-white border border-[#141414] w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b border-[#141414]">
+              <h3 className="font-bold font-mono uppercase text-sm flex items-center gap-2">
+                <Cpu className="h-4 w-4" /> {infoFor.name}
+              </h3>
+              <button onClick={() => setInfoFor(null)} className="cursor-pointer"><X className="h-4 w-4" /></button>
+            </div>
+            {info ? (
+              <div className="p-4 font-mono text-xs">
+                <div className="grid grid-cols-2 gap-y-2">
+                  <InfoRow label="Model" value={info.board_name} />
+                  <InfoRow label="Serial" value={info.serial_number} />
+                  <InfoRow label="RouterOS" value={info.routeros_version} />
+                  <InfoRow label="Architecture" value={info.architecture} />
+                  <InfoRow label="Identity" value={info.identity_name} />
+                  <InfoRow label="Uptime" value={info.uptime} />
+                  <InfoRow label="CPU load" value={info.cpu_load === null ? '—' : `${info.cpu_load}%`} />
+                  <InfoRow label="Active users" value={info.active_users === null ? '—' : String(info.active_users)} />
+                  <InfoRow label="Free memory" value={mb(info.free_memory)} />
+                  <InfoRow label="Total memory" value={mb(info.total_memory)} />
+                </div>
+                <p className="text-[11px] text-[#141414]/50 mt-4">Live from the router just now.</p>
+              </div>
+            ) : (
+              <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-[#141414]/40" /></div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
+  );
+}
+
+function InfoRow({ label, value }: { label: string; value: string }) {
+  return (
+    <>
+      <span className="text-[#141414]/50 uppercase text-[11px]">{label}</span>
+      <span className="font-bold text-right">{value || '—'}</span>
+    </>
   );
 }

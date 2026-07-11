@@ -11,11 +11,19 @@ import httpx
 
 from .base import (
     ActiveSession,
+    DeviceInfo,
     ProvisioningAdapter,
     ProvisioningAuthError,
     ProvisioningError,
     ProvisionResult,
 )
+
+
+def _to_int(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 logger = logging.getLogger(__name__)
 
@@ -113,3 +121,43 @@ class MikroTikRestAdapter(ProvisioningAdapter):
                 f"{self.router} rejected our API credentials (status {resp.status_code})"
             )
         return resp.status_code == 200
+
+    def get_device_info(self) -> DeviceInfo:
+        """Query the router's identity + live health. Stable fields are persisted
+        by the caller; live metrics are shown but not stored."""
+        try:
+            with self._client() as client:
+                res = client.get("/system/resource")
+                if res.status_code in (401, 403):
+                    raise ProvisioningAuthError(f"{self.router} rejected our API credentials")
+                res.raise_for_status()
+                res = res.json()
+                try:
+                    rb = client.get("/system/routerboard").json()
+                except httpx.HTTPError:
+                    rb = {}
+                try:
+                    ident = client.get("/system/identity").json()
+                except httpx.HTTPError:
+                    ident = {}
+                try:
+                    active = len(client.get("/ip/hotspot/active").json())
+                except httpx.HTTPError:
+                    active = None
+        except httpx.HTTPError as exc:
+            raise ProvisioningError(f"device_info failed on {self.router}: {exc}") from exc
+
+        # "7.16.2 (stable)" -> "7.16.2"
+        version = str(res.get("version", "")).split(" ")[0]
+        return DeviceInfo(
+            routeros_version=version,
+            board_name=rb.get("model") or res.get("board-name", ""),
+            serial_number=rb.get("serial-number", ""),
+            architecture=res.get("architecture-name", ""),
+            identity_name=ident.get("name", ""),
+            uptime=res.get("uptime", ""),
+            cpu_load=_to_int(res.get("cpu-load")),
+            free_memory=_to_int(res.get("free-memory")),
+            total_memory=_to_int(res.get("total-memory")),
+            active_users=active,
+        )

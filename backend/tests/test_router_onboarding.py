@@ -39,8 +39,17 @@ class TestEnrollment:
         assert f"router={router.id}" in script
         assert "/tool fetch" in script  # phones home
 
-    def test_phone_home_enrolls_router(self):
+    def test_phone_home_enrolls_router(self, mocker):
+        from apps.provisioning.adapters.base import DeviceInfo
+
         router = RouterFactory(management_host="", provisioning_backend=Router.Backend.DUMMY)
+        # After enrolling, the platform queries the device for full identity.
+        mocker.patch(
+            "apps.provisioning.adapters.dummy.DummyAdapter.get_device_info",
+            return_value=DeviceInfo(
+                routeros_version="7.16.2", board_name="RB951Ui-2HnD", serial_number="HJY0AH8N5GE"
+            ),
+        )
         resp = APIClient().post(
             "/api/v1/routers/enroll/",
             data=json.dumps(
@@ -56,6 +65,7 @@ class TestEnrollment:
         assert router.management_host == "41.90.1.2"
         assert router.password == "secret123"
         assert router.routeros_version == "7.16.2"
+        assert router.board_name == "RB951Ui-2HnD"  # full identity captured
 
     def test_bad_token_rejected(self):
         resp = APIClient().post(

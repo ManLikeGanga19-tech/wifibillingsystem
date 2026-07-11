@@ -101,6 +101,10 @@ def check_router_health():
             logger.exception("Health check crashed for %s", router)
         RouterHealthCheck.objects.create(router=router, online=ok)
         _apply_reachability(router, ok, auth_failed)
+        if ok:
+            from .services import refresh_device_identity
+
+            refresh_device_identity(router)  # keep version/model/serial current
         # Offline -> online transition with valid creds: re-sync its sessions.
         if ok and not was_online:
             sync_router.delay(router.id)

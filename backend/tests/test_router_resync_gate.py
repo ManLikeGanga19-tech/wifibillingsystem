@@ -81,6 +81,51 @@ class TestResyncEndpoint:
         assert resp.json()["needs_onboarding"] is True
 
 
+class TestDeviceIdentity:
+    def test_refresh_persists_stable_identity(self, mocker):
+        from apps.provisioning.adapters.base import DeviceInfo
+        from apps.provisioning.services import refresh_device_identity
+
+        r = RouterFactory(provisioning_backend=Router.Backend.MIKROTIK_REST,
+                          management_host="10.0.0.5", password="secret")
+        mocker.patch(
+            "apps.provisioning.adapters.mikrotik.MikroTikRestAdapter.get_device_info",
+            return_value=DeviceInfo(
+                routeros_version="7.16.2", board_name="RB951Ui-2HnD",
+                serial_number="HJY0AH8N5GE", architecture="mipsbe",
+                uptime="2h40m", cpu_load=1, active_users=3,
+            ),
+        )
+        info = refresh_device_identity(r)
+        r.refresh_from_db()
+        assert r.routeros_version == "7.16.2"
+        assert r.board_name == "RB951Ui-2HnD"
+        assert r.serial_number == "HJY0AH8N5GE"
+        assert r.architecture == "mipsbe"
+        assert r.identity_updated_at is not None
+        # live metrics returned but NOT stored on the row
+        assert info.active_users == 3
+        assert not hasattr(r, "active_users")
+
+    def test_device_info_endpoint(self, mocker):
+        from apps.provisioning.adapters.base import DeviceInfo
+
+        op = OperatorFactory()
+        r = RouterFactory(operator=op, provisioning_backend=Router.Backend.MIKROTIK_REST,
+                          management_host="10.0.0.5", password="secret")
+        mocker.patch(
+            "apps.provisioning.adapters.mikrotik.MikroTikRestAdapter.get_device_info",
+            return_value=DeviceInfo(routeros_version="7.16.2", board_name="RB951Ui-2HnD",
+                                    uptime="2h40m", cpu_load=5, active_users=2),
+        )
+        resp = staff_client(op).get(f"/api/v1/routers/{r.id}/device_info/")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["board_name"] == "RB951Ui-2HnD"
+        assert body["active_users"] == 2
+        assert body["uptime"] == "2h40m"
+
+
 class TestAuthFailureDetection:
     def _adapter(self):
         r = RouterFactory(

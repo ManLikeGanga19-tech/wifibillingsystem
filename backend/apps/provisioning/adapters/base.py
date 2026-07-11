@@ -30,6 +30,24 @@ class ActiveSession:
     uptime: str = ""
 
 
+@dataclass
+class DeviceInfo:
+    """A router's hardware identity (stable) + live health (transient)."""
+
+    # Stable identity — persisted on the Router row
+    routeros_version: str = ""
+    board_name: str = ""
+    serial_number: str = ""
+    architecture: str = ""
+    identity_name: str = ""
+    # Live metrics — returned to the caller, never stored
+    uptime: str = ""
+    cpu_load: int | None = None
+    free_memory: int | None = None
+    total_memory: int | None = None
+    active_users: int | None = None
+
+
 class ProvisioningAdapter(ABC):
     def __init__(self, router):
         self.router = router
@@ -45,3 +63,6 @@ class ProvisioningAdapter(ABC):
 
     @abstractmethod
     def test_connection(self) -> bool: ...
+
+    @abstractmethod
+    def get_device_info(self) -> DeviceInfo: ...

@@ -53,6 +53,7 @@ class RouterViewSet(TenantModelViewSet):
     @action(detail=True, methods=["post"])
     def test_connection(self, request, pk=None):
         from .adapters import ProvisioningAuthError
+        from .services import refresh_device_identity
         from .tasks import _apply_reachability
 
         router = self.get_object()
@@ -67,7 +68,36 @@ class RouterViewSet(TenantModelViewSet):
         except ProvisioningError as exc:
             return Response({"ok": False, "detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
         _apply_reachability(router, ok=ok, auth_failed=False)
+        if ok:
+            refresh_device_identity(router)  # capture version/model/serial while here
         return Response({"ok": ok})
+
+    @action(detail=True, methods=["get"])
+    def device_info(self, request, pk=None):
+        """Live hardware + health for this router. Also refreshes the stored
+        identity fields. Transient metrics (uptime, cpu, memory) are not stored."""
+        from .services import refresh_device_identity
+
+        router = self.get_object()
+        info = refresh_device_identity(router)
+        if info is None:
+            return Response(
+                {"detail": "Could not reach the router."}, status=status.HTTP_502_BAD_GATEWAY
+            )
+        return Response(
+            {
+                "routeros_version": info.routeros_version,
+                "board_name": info.board_name,
+                "serial_number": info.serial_number,
+                "architecture": info.architecture,
+                "identity_name": info.identity_name,
+                "uptime": info.uptime,
+                "cpu_load": info.cpu_load,
+                "free_memory": info.free_memory,
+                "total_memory": info.total_memory,
+                "active_users": info.active_users,
+            }
+        )
 
     @action(detail=True, methods=["get"])
     def active_sessions(self, request, pk=None):
@@ -117,6 +147,10 @@ def router_enroll(request):
         source_ip=source_ip,
         version=router.routeros_version,
     )
+    # Pull full hardware identity (model, serial, architecture) now that we can reach it
+    from .services import refresh_device_identity
+
+    refresh_device_identity(router)
     return Response({"detail": "enrolled", "router": router.name})
 
 

@@ -12,6 +12,28 @@ def _hotspot_password() -> str:
     return f"{secrets.randbelow(1_000_000):06d}"
 
 
+def refresh_device_identity(router) -> "object":
+    """Fetch the router's device info and persist its stable identity fields.
+    Returns the DeviceInfo (with live metrics) for the caller to surface.
+    Best-effort: never raises — identity is a nice-to-have, not critical path."""
+    from .adapters import ProvisioningError, get_adapter
+
+    try:
+        info = get_adapter(router).get_device_info()
+    except ProvisioningError:
+        return None
+    changed = []
+    for field in ("routeros_version", "board_name", "serial_number", "architecture"):
+        value = getattr(info, field)
+        if value and getattr(router, field) != value:
+            setattr(router, field, value)
+            changed.append(field)
+    router.identity_updated_at = timezone.now()
+    changed.append("identity_updated_at")
+    router.save(update_fields=[*changed, "updated_at"])
+    return info
+
+
 def pick_router(operator, preferred=None) -> Router:
     # SECURITY: a preferred router is only honoured if it belongs to this operator.
     # Otherwise a tenant could provision a session onto another ISP's physical
