@@ -16,14 +16,12 @@ import {
   Router as RouterIcon,
   HardDrive,
   Settings as SettingsIcon,
-  Building2,
   Loader2,
   Clock,
   Globe,
   Eye,
   Wifi as WifiIcon,
   RadioTower,
-  Scale,
 } from 'lucide-react';
 
 import { BandwidthProfile, Subscriber, OutboundCampaign } from './types';
@@ -56,14 +54,10 @@ import EmailsView from './components/EmailsView';
 import MessagingView from './components/MessagingView';
 import RoutersView from './components/RoutersView';
 import EquipmentView from './components/EquipmentView';
-import PlatformTenantsView from './components/PlatformTenantsView';
-import PlatformPayoutsView from './components/PlatformPayoutsView';
-import PlatformOverview from './components/PlatformOverview';
 import PppoePlansView from './components/PppoePlansView';
 import PppoeClientsView from './components/PppoeClientsView';
 import PppoeInvoicesView from './components/PppoeInvoicesView';
 import NetworkView from './components/NetworkView';
-import ReconciliationView from './components/ReconciliationView';
 import SettingsView from './components/SettingsView';
 import WalletView from './components/WalletView';
 
@@ -89,15 +83,7 @@ type TabId =
   | 'pppoe_clients'
   | 'pppoe_plans'
   | 'pppoe_invoices'
-  | 'network'
-  | 'platform_overview'
-  | 'platform_tenants'
-  | 'platform_payouts'
-  | 'platform_reconciliation';
-
-/** Which hat the console is wearing. Platform = cross-ISP screens only;
- * ISP = one tenant's console. They never mix. */
-type Hat = 'platform' | 'isp';
+  | 'network';
 
 interface NavItem {
   id: TabId;
@@ -157,26 +143,15 @@ const NAV_GROUPS: { title: string | null; items: NavItem[] }[] = [
   },
 ];
 
-const PLATFORM_NAV: { title: string | null; items: NavItem[] }[] = [
-  {
-    title: null,
-    items: [{ id: 'platform_overview', label: 'Overview', icon: Globe }],
-  },
-  {
-    title: 'Danamo Tech',
-    items: [
-      { id: 'platform_tenants', label: 'ISP Tenants', icon: Building2 },
-      { id: 'platform_payouts', label: 'Payouts', icon: Wallet },
-      { id: 'platform_reconciliation', label: 'Reconciliation', icon: Scale },
-    ],
-  },
-];
+/** This app is now PURELY the ISP console. Everything cross-tenant (tenants,
+ * payouts, reconciliation, audit, P&L) lives in the separate Platform Control
+ * app — so an ISP never downloads platform code, and the two deploy apart. */
+const PLATFORM_CONSOLE_URL = 'http://localhost:4800';
 
 export default function App() {
   const [authed, setAuthed] = useState<boolean>(isAuthenticated());
   const [me, setMe] = useState<Me | null>(null);
   const [meLoading, setMeLoading] = useState(false);
-  const [hat, setHat] = useState<Hat>('isp');
   const [tenants, setTenants] = useState<ApiTenant[]>([]);
   const [activeTab, setActiveTab] = useState<TabId>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -213,12 +188,6 @@ export default function App() {
   const loadMe = useCallback(async () => {
     const data = await api.me();
     setMe(data);
-    // Platform staff with no ISP of their own start on the platform hat —
-    // the backend will (correctly) refuse ISP data until they pick a tenant.
-    if (data.is_platform_staff && !data.acting_operator) {
-      setHat('platform');
-      setActiveTab('platform_overview');
-    }
     if (data.is_platform_staff) {
       api.platform.tenants
         .list()
@@ -226,6 +195,17 @@ export default function App() {
         .catch(() => {});
     }
     return data;
+  }, []);
+
+  // Hand-off from Platform Control (?act_as=<slug>): the super-admin console has
+  // ALREADY created an audited, time-boxed ImpersonationGrant. Without that grant
+  // the backend refuses this tenant, so setting the header here is not a bypass —
+  // it just carries the choice the grant already authorised.
+  useEffect(() => {
+    const slug = new URLSearchParams(window.location.search).get('act_as');
+    if (!slug) return;
+    setActingTenant(slug);
+    window.history.replaceState({}, '', window.location.pathname);
   }, []);
 
   useEffect(() => {
@@ -236,13 +216,12 @@ export default function App() {
       .finally(() => setMeLoading(false));
   }, [authed, loadMe]);
 
-  /** Platform staff switching which ISP they are acting for. */
+  /** Leave an impersonated ISP and return to your own (or none). */
   const switchTenant = useCallback(
     async (slug: string | null) => {
       setActingTenant(slug);
       const data = await loadMe();
       if (slug) {
-        setHat('isp');
         setActiveTab('dashboard');
         toast('info', `Now viewing ${data.acting_operator?.name ?? slug}.`);
       }
@@ -365,11 +344,10 @@ export default function App() {
   }
 
   const isPlatformStaff = !!me?.is_platform_staff;
-  const onPlatformHat = hat === 'platform' && isPlatformStaff;
-  // The two hats never share screens: platform = cross-ISP, ISP = one tenant.
-  const navGroups = onPlatformHat ? PLATFORM_NAV : NAV_GROUPS;
+  const navGroups = NAV_GROUPS;
   const acting = me?.acting_operator ?? null;
-  // Platform staff acting for an ISP that is not their own = support "view as"
+  // Platform staff inside an ISP that is not their own — only reachable via an
+  // audited ImpersonationGrant issued by Platform Control.
   const viewingAsOther =
     isPlatformStaff && acting !== null && acting.slug !== me?.operator?.slug;
 
@@ -491,46 +469,31 @@ export default function App() {
                 OPERATIONAL
               </span>
             </div>
-            {!onPlatformHat && (
-              <div className="hidden sm:flex flex-col border-l border-[#141414] pl-5 md:pl-8">
-                <span className="text-[10px] opacity-60 font-bold uppercase tracking-wider font-serif italic">Online Now</span>
-                <span className="font-mono text-[10px] sm:text-xs font-bold">{navCounts?.active_users ?? '—'} CLIENTS</span>
-              </div>
-            )}
+            <div className="hidden sm:flex flex-col border-l border-[#141414] pl-5 md:pl-8">
+              <span className="text-[10px] opacity-60 font-bold uppercase tracking-wider font-serif italic">Online Now</span>
+              <span className="font-mono text-[10px] sm:text-xs font-bold">{navCounts?.active_users ?? '—'} CLIENTS</span>
+            </div>
           </div>
 
           <div className="flex items-center gap-3 sm:gap-4 text-right font-mono text-[10px] sm:text-xs">
-            {/* Hat / tenant switcher — platform staff only */}
+            {/* Cross-ISP work lives in Platform Control now. Entering another
+                ISP's console is done THERE, through an audited grant — never by
+                flipping a dropdown here. */}
             {isPlatformStaff && (
-              <select
-                value={onPlatformHat ? '__platform__' : (acting?.slug ?? '')}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  if (v === '__platform__') {
-                    setHat('platform');
-                    setActiveTab('platform_overview');
-                  } else {
-                    switchTenant(v);
-                  }
-                }}
-                title="Switch between the platform view and an ISP console"
-                className="border border-[#141414] bg-[#E4E3E0] p-1.5 text-[11px] font-mono font-bold uppercase outline-none cursor-pointer max-w-[11rem]"
+              <a
+                href={PLATFORM_CONSOLE_URL}
+                target="_blank"
+                rel="noreferrer"
+                title="Open Platform Control (all ISPs, finance, audit)"
+                className="border border-[#141414] bg-[#E4E3E0] px-2 py-1.5 text-[11px] font-mono font-bold uppercase cursor-pointer hover:bg-[#141414] hover:text-white transition flex items-center gap-1.5"
               >
-                <option value="__platform__">🌐 Platform (all ISPs)</option>
-                {me?.operator && <option value={me.operator.slug}>🏠 {me.operator.name}</option>}
-                {tenants
-                  .filter((t) => t.slug !== me?.operator?.slug)
-                  .map((t) => (
-                    <option key={t.id} value={t.slug}>
-                      👁 {t.name}
-                    </option>
-                  ))}
-              </select>
+                <Globe className="h-3.5 w-3.5" /> Platform
+              </a>
             )}
 
             <div className="border-l border-[#141414] pl-3 sm:pl-4 text-right">
               <div className="text-[11px] opacity-50 uppercase truncate max-w-[10rem]">
-                {onPlatformHat ? 'Danamo Tech' : acting?.name ?? me?.operator?.name ?? 'No ISP'}
+                {acting?.name ?? me?.operator?.name ?? 'No ISP'}
                 {me?.is_read_only && ' · read-only'}
               </div>
               <button
@@ -548,12 +511,13 @@ export default function App() {
           </div>
         </header>
 
-        {/* Loud banner while a platform user is looking at someone else's ISP */}
-        {viewingAsOther && !onPlatformHat && (
+        {/* Loud banner while a platform user is inside someone else's ISP. This
+            access is time-boxed and recorded — the banner says so. */}
+        {viewingAsOther && (
           <div className="bg-[#2563EB] text-white px-4 py-1.5 text-[11px] font-mono flex items-center justify-between gap-3 shrink-0">
             <span className="flex items-center gap-2 truncate">
               <Eye className="h-3.5 w-3.5 shrink-0" />
-              Viewing <b>{acting?.name}</b> as platform staff — you are inside their ISP console.
+              Inside <b>{acting?.name}</b>'s console as platform staff — this session is recorded.
             </span>
             <button
               onClick={() => switchTenant(me?.operator?.slug ?? null)}
@@ -601,14 +565,6 @@ export default function App() {
             {activeTab === 'pppoe_plans' && <PppoePlansView />}
             {activeTab === 'pppoe_invoices' && <PppoeInvoicesView />}
             {activeTab === 'network' && <NetworkView />}
-            {activeTab === 'platform_reconciliation' && <ReconciliationView />}
-            {activeTab === 'platform_overview' && (
-              <PlatformOverview onNavigate={(t) => setActiveTab(t as TabId)} />
-            )}
-            {activeTab === 'platform_tenants' && (
-              <PlatformTenantsView onViewAs={(slug) => switchTenant(slug)} />
-            )}
-            {activeTab === 'platform_payouts' && <PlatformPayoutsView />}
           </div>
         </div>
 

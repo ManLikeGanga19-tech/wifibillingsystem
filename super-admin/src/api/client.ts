@@ -286,11 +286,12 @@ export interface SearchResults {
 
 export interface Payout {
   id: number;
-  operator_name?: string;
+  operator_name: string;
   amount: Money;
   method: string;
-  destination?: string;
+  destination: string;
   status: string;
+  mpesa_reference: string;
   created_at: string;
 }
 
@@ -334,7 +335,16 @@ export const api = {
     end: (tenant?: string) => post<{ ended: number }>('/platform/impersonation/end/', { tenant }),
   },
 
-  payouts: () => get<Page<Payout>>('/billing/platform/payouts/'),
+  payouts: {
+    list: (status = '') =>
+      get<Page<Payout>>(`/billing/platform/payouts/${status ? `?status=${status}` : ''}`),
+    /** We pay the ISP manually (M-Pesa / bank), then record the reference here. */
+    markPaid: (id: number, mpesa_reference: string) =>
+      post<Payout>(`/billing/platform/payouts/${id}/mark_paid/`, { mpesa_reference }),
+    /** Rejecting returns the held funds to the ISP's wallet. */
+    reject: (id: number, note: string) =>
+      post<Payout>(`/billing/platform/payouts/${id}/reject/`, { note }),
+  },
 };
 
 // ---- formatting --------------------------------------------------------------

@@ -1,7 +1,10 @@
-import { TrendingDown, TrendingUp } from 'lucide-react';
+import { useState } from 'react';
+import { Scale, TrendingDown, TrendingUp, Wallet } from 'lucide-react';
 import { api, ksh, num, type PnlRow } from '../api/client';
+import PayoutsPanel from './PayoutsPanel';
 import {
   Badge,
+  Btn,
   Empty,
   ErrorBox,
   Panel,
@@ -24,6 +27,23 @@ import { SERIES } from '../components/charts';
  * back against it. This is the only place that subtracts them per tenant.
  */
 export default function FinanceView({ onOpenTenant }: { onOpenTenant: (id: number) => void }) {
+  const [tab, setTab] = useState<'pnl' | 'payouts'>('pnl');
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center gap-1.5">
+        <Btn variant={tab === 'pnl' ? 'primary' : 'ghost'} onClick={() => setTab('pnl')}>
+          <Scale className="h-3.5 w-3.5" /> Tenant P&amp;L
+        </Btn>
+        <Btn variant={tab === 'payouts' ? 'primary' : 'ghost'} onClick={() => setTab('payouts')}>
+          <Wallet className="h-3.5 w-3.5" /> Payouts
+        </Btn>
+      </div>
+      {tab === 'pnl' ? <Pnl onOpenTenant={onOpenTenant} /> : <PayoutsPanel />}
+    </div>
+  );
+}
+
+function Pnl({ onOpenTenant }: { onOpenTenant: (id: number) => void }) {
   const { data, error, reload } = useLoad(() => api.pnl(), []);
 
   if (error) return <ErrorBox message={error} onRetry={reload} />;
