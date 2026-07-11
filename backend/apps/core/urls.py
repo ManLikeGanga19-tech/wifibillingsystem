@@ -1,6 +1,12 @@
 from django.urls import path
 from rest_framework.routers import SimpleRouter
 
+from .analytics_views import (
+    PlatformKpisView,
+    PlatformSearchView,
+    PlatformTimeseriesView,
+    TenantPnlView,
+)
 from .governance_views import (
     AuditLogViewSet,
     EndImpersonationView,
@@ -37,6 +43,15 @@ urlpatterns = [
         PlatformReconciliationView.as_view(),
         name="platform-reconciliation",
     ),
+    # Analytics — the Command Center + finance control surface
+    path("platform/kpis/", PlatformKpisView.as_view(), name="platform-kpis"),
+    path(
+        "platform/timeseries/",
+        PlatformTimeseriesView.as_view(),
+        name="platform-timeseries",
+    ),
+    path("platform/tenant-pnl/", TenantPnlView.as_view(), name="platform-tenant-pnl"),
+    path("platform/search/", PlatformSearchView.as_view(), name="platform-search"),
     # Impersonation is a recorded act, not a header flip — these are the only doors
     path(
         "platform/impersonation/start/",

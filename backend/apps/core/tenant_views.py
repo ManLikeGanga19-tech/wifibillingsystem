@@ -157,6 +157,67 @@ class PlatformTenantViewSet(viewsets.ModelViewSet):
         audit("tenant_approved", operator=operator, actor=request.user, target=operator)
         return Response({"status": operator.status, "trial_ends_at": operator.trial_ends_at})
 
+    @action(detail=True, methods=["get"])
+    def detail_stats(self, request, pk=None):
+        """Everything about ONE ISP on a single screen — so support rarely needs
+        to walk into their console at all."""
+        from django.db.models import Sum
+
+        from apps.billing.models import LedgerEntry, Payout
+        from apps.core.analytics_views import EARNING_TYPES
+        from apps.core.governance_views import AuditLogSerializer
+        from apps.core.models import AuditLog
+        from apps.payments.models import Transaction
+        from apps.pppoe.models import Client
+        from apps.provisioning.models import Router
+
+        op = self.get_object()
+
+        def total(qs, field="amount"):
+            return qs.aggregate(v=Sum(field))["v"] or 0
+
+        ledger = LedgerEntry.objects.filter(operator=op)
+        routers = Router.objects.filter(operator=op, is_active=True)
+        clients = Client.objects.filter(operator=op)
+
+        return Response(
+            {
+                "tenant": PlatformTenantSerializer(op).data,
+                "in_trial": op.in_base_fee_trial(),
+                "finance": {
+                    "gross_collected": total(
+                        ledger.filter(entry_type=LedgerEntry.Type.SALE)
+                    ),
+                    "platform_revenue": -total(ledger.filter(entry_type__in=EARNING_TYPES)),
+                    "wallet_balance": total(ledger),
+                    "payouts_paid": total(Payout.objects.filter(
+                        operator=op, status=Payout.Status.PAID
+                    )),
+                    "payouts_pending": total(Payout.objects.filter(
+                        operator=op, status=Payout.Status.REQUESTED
+                    )),
+                },
+                "usage": {
+                    "pppoe_billable": clients.filter(
+                        status__in=Client.BILLABLE_STATUSES
+                    ).count(),
+                    "pppoe_total": clients.count(),
+                    "routers_total": routers.count(),
+                    "routers_online": routers.filter(status=Router.Status.ONLINE).count(),
+                    "transactions": Transaction.objects.filter(
+                        operator=op, status__in=Transaction.SUCCESS_STATUSES
+                    ).count(),
+                    "staff": op.users.filter(is_staff=True).count(),
+                },
+                "recent_activity": AuditLogSerializer(
+                    AuditLog.objects.filter(operator=op).select_related(
+                        "actor", "operator"
+                    )[:15],
+                    many=True,
+                ).data,
+            }
+        )
+
     @action(detail=True, methods=["post"], url_path="charge-setup")
     def charge_setup(self, request, pk=None):
         """Bill the one-time setup fee — ONLY for ISPs who opt into assisted
