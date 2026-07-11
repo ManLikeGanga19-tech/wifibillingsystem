@@ -124,7 +124,8 @@ class TestSTKInitiation:
         mocker.patch("apps.payments.services.DarajaClient.__init__", return_value=None)
         resp = api_client.post(
             "/api/v1/payments/stk-push/",
-            {"phone": "0712 345 678", "plan_id": plan.id},
+            # router_id carries the tenant context (as the captive portal does)
+            {"phone": "0712 345 678", "plan_id": plan.id, "router_id": router.id},
             format="json",
         )
         assert resp.status_code == 201, resp.content

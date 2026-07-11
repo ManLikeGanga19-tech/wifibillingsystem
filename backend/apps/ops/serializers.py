@@ -1,11 +1,22 @@
 from django.utils import timezone
 from rest_framework import serializers
 
+from apps.accounts.models import Subscriber, User
+from apps.core.serializer_fields import TenantPrimaryKeyRelatedField
+from apps.provisioning.models import Router
+
 from .models import Equipment, Expense, Lead, Ticket
 
 
 class TicketSerializer(serializers.ModelSerializer):
     subscriber_phone = serializers.CharField(source="subscriber.phone", read_only=True, default="")
+    # Tenant-scoped: cannot attach another ISP's customer or assign to their staff
+    subscriber = TenantPrimaryKeyRelatedField(
+        queryset=Subscriber.objects.all(), required=False, allow_null=True
+    )
+    assigned_to = TenantPrimaryKeyRelatedField(
+        queryset=User.objects.filter(is_staff=True), required=False, allow_null=True
+    )
 
     class Meta:
         model = Ticket
@@ -41,6 +52,9 @@ class LeadSerializer(serializers.ModelSerializer):
 
 class ExpenseSerializer(serializers.ModelSerializer):
     router_name = serializers.CharField(source="router.name", read_only=True, default="")
+    router = TenantPrimaryKeyRelatedField(
+        queryset=Router.objects.all(), required=False, allow_null=True
+    )
 
     class Meta:
         model = Expense
@@ -58,6 +72,9 @@ class ExpenseSerializer(serializers.ModelSerializer):
 
 class EquipmentSerializer(serializers.ModelSerializer):
     router_name = serializers.CharField(source="router.name", read_only=True, default="")
+    router = TenantPrimaryKeyRelatedField(
+        queryset=Router.objects.all(), required=False, allow_null=True
+    )
 
     class Meta:
         model = Equipment

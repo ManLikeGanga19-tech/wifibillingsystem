@@ -13,7 +13,10 @@ def _hotspot_password() -> str:
 
 
 def pick_router(operator, preferred=None) -> Router:
-    if preferred and preferred.is_active:
+    # SECURITY: a preferred router is only honoured if it belongs to this operator.
+    # Otherwise a tenant could provision a session onto another ISP's physical
+    # router by passing its id (found in the voucher-redeem audit).
+    if preferred and preferred.is_active and preferred.operator_id == operator.id:
         return preferred
     router = Router.objects.filter(operator=operator, is_active=True).order_by("id").first()
     if router is None:

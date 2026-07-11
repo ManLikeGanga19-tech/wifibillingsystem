@@ -20,20 +20,30 @@ class STKPushRequestSerializer(serializers.Serializer):
             raise serializers.ValidationError(str(exc)) from exc
 
     def validate(self, attrs):
-        plans = Plan.objects.filter(is_active=True, plan_type=Plan.PlanType.HOTSPOT)
+        # Fail closed: resolve the tenant from the subdomain OR the router the
+        # customer is connected to. Without one, we do not accept a plan from an
+        # arbitrary ISP.
         request = self.context.get("request")
         tenant = getattr(request, "tenant", None) if request else None
-        if tenant is not None:
-            plans = plans.filter(operator=tenant)
+        router = None
+        if attrs.get("router_id"):
+            router = Router.objects.filter(pk=attrs["router_id"], is_active=True).first()
+        if tenant is None and router is not None:
+            tenant = router.operator
+        if tenant is None:
+            raise serializers.ValidationError(
+                {"detail": "Cannot determine the ISP. Open the payment page from the WiFi login."}
+            )
+
+        plans = Plan.objects.filter(
+            is_active=True, plan_type=Plan.PlanType.HOTSPOT, operator=tenant
+        )
         try:
             attrs["plan"] = plans.get(pk=attrs["plan_id"])
         except Plan.DoesNotExist as exc:
             raise serializers.ValidationError({"plan_id": "Unknown or inactive plan"}) from exc
-        attrs["router"] = None
-        if attrs.get("router_id"):
-            attrs["router"] = Router.objects.filter(
-                pk=attrs["router_id"], is_active=True, operator=attrs["plan"].operator
-            ).first()
+        # The router (if given) must belong to the same tenant as the plan.
+        attrs["router"] = router if (router and router.operator_id == tenant.id) else None
         return attrs
 
 
