@@ -99,6 +99,23 @@ their own statement / confirmation SMS**? __________
 > small B2B payment carrying a random reference and asking them to read it back. If
 > the recipient cannot see a reference we set, please tell us what they *can* see.
 
+### A2c. C2B External Validation (not a tariff question — but critical)
+
+Our customers pay by Paybill quoting an **account number** that routes the payment
+to the correct sub-merchant (ISP) and subscriber. A mistyped account number means
+money arrives attributed to nobody.
+
+1. Can **External Validation** be enabled on our shortcode, so Safaricom calls our
+   **Validation URL** *before* accepting a C2B payment and we may **reject** an
+   unrecognised account number? ☐ Yes ☐ No — __________
+2. If yes: what is the process/lead time to switch it on? __________
+3. What exactly does the payer see when we reject? __________
+4. Is there any charge for validation callbacks? __________
+
+> Without this, every customer typo becomes real money stranded on our paybill and
+> a subscriber cut off despite having paid. With it, the payer is simply told the
+> account number is wrong and keeps their money.
+
 ### A3. Tax, failures, and volume
 
 1. Are the fees above **inclusive or exclusive of Excise Duty** on transaction charges? If
