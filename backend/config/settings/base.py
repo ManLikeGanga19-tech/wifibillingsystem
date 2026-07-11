@@ -31,6 +31,7 @@ INSTALLED_APPS = [
     "apps.ops",
     "apps.billing",
     "apps.pppoe",
+    "apps.signup",
 ]
 
 MIDDLEWARE = [
@@ -119,7 +120,12 @@ REST_FRAMEWORK = {
         "anon": "60/min",
         "stk-push": "10/min",
         "voucher-redeem": "15/min",
-        "signup": "5/hour",
+        # The 5-step wizard makes several calls per applicant, so the old
+        # 5/hour would have blocked a legitimate signup halfway through. The real
+        # abuse control is PER-TARGET (SignupThrottle: 3 codes/email/hr,
+        # 10/IP/hr) — this is just a coarse backstop.
+        "signup": "60/hour",
+        "signup-check": "120/hour",  # slug/name availability, typed live
     },
 }
 
@@ -157,6 +163,10 @@ CELERY_TASK_TIME_LIMIT = 120
 from celery.schedules import crontab  # noqa: E402
 
 CELERY_BEAT_SCHEDULE = {
+    "sweep-expired-signups": {
+        "task": "apps.signup.tasks.sweep_expired_signups",
+        "schedule": crontab(minute=15, hour=3),
+    },
     "charge-monthly-base-fees": {
         "task": "apps.billing.tasks.charge_monthly_base_fees",
         "schedule": crontab(minute=30, hour=0, day_of_month=1),

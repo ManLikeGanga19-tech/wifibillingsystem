@@ -16,7 +16,10 @@ class OperatorFactory(factory.django.DjangoModelFactory):
         model = Operator
         django_get_or_create = ("slug",)
 
-    name = "Test WISP"
+    # Names must be UNIQUE (case-insensitively) — Daniel: "no duplicate slugs or
+    # company names". A hardcoded name here meant any test with two operators
+    # tripped the constraint, which is the constraint working as intended.
+    name = factory.Sequence(lambda n: f"Test WISP {n}")
     slug = "test-wisp"
     status = Operator.Status.ACTIVE
 

@@ -16,10 +16,14 @@ CACHES = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"
 
 PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
 
+# Loosen every throttle, whatever it is called. Listing the scopes by hand meant a
+# NEW scope blew up the suite with "No default throttle rate set for 'x'" — derive
+# them from base instead, so a scope can never be forgotten here.
+#
+# NB this only relaxes DRF's per-endpoint throttles. The per-TARGET abuse controls
+# (SignupThrottle: codes per email / per IP) are ordinary model logic and stay
+# fully in force — which is exactly what the abuse tests exercise.
 REST_FRAMEWORK = {**REST_FRAMEWORK}  # noqa: F405
 REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"] = {
-    "anon": "1000/min",
-    "stk-push": "1000/min",
-    "voucher-redeem": "1000/min",
-    "signup": "1000/min",
+    scope: "1000/min" for scope in REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]
 }

@@ -2,6 +2,7 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.db import models
+from django.db.models.functions import Lower
 
 from .fields import EncryptedTextField
 
@@ -34,6 +35,12 @@ class Operator(TimeStampedModel):
     owner_name = models.CharField(max_length=120, blank=True)
     contact_phone = models.CharField(max_length=20, blank=True)
     contact_email = models.EmailField(blank=True)
+
+    # Captured at signup
+    county = models.CharField(max_length=40, blank=True, help_text="County of operation")
+    referral_source = models.CharField(
+        max_length=40, blank=True, help_text="How they heard about us"
+    )
 
     # Per-operator M-Pesa credentials. Blank means "use the env-var defaults" (pilot).
     mpesa_shortcode = models.CharField(max_length=20, blank=True)
@@ -94,8 +101,24 @@ class Operator(TimeStampedModel):
 
     RESERVED_SLUGS = {
         "www", "api", "admin", "portal", "app", "mail", "platform", "billing",
-        "status", "docs", "static", "media",
+        "status", "docs", "static", "media", "signup", "signin", "help", "support",
+        "blog", "pricing", "about",
     }
+
+    class Meta:
+        constraints = [
+            # Daniel: "no duplicate slugs OR company names". The slug already has a
+            # unique index; this makes the NAME unique too, case-insensitively —
+            # "Homelink" and "homelink" are the same business.
+            #
+            # The signup wizard checks availability as you type, but that check is
+            # only advisory: between step 3 and step 5 someone else can take it.
+            # THIS is the referee. The service catches the IntegrityError and sends
+            # them back to rename.
+            models.UniqueConstraint(
+                Lower("name"), name="operator_name_unique_ci"
+            ),
+        ]
 
     def __str__(self):
         return f"{self.name} ({self.slug})"
