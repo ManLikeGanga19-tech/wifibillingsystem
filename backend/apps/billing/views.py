@@ -80,16 +80,28 @@ class MyPayoutsViewSet(TenantReadOnlyViewSet):
         operator = self.get_operator()
         serializer = WithdrawSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        try:
-            phone = normalize_msisdn(serializer.validated_data["phone"])
-        except InvalidPhoneError as exc:
-            return Response({"phone": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        data = serializer.validated_data
+        method = data["method"]
+
+        destination = {}
+        if method == "mpesa":
+            try:
+                destination["phone"] = normalize_msisdn(data.get("phone", ""))
+            except InvalidPhoneError as exc:
+                return Response({"phone": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            destination = {
+                "bank_name": data.get("bank_name", ""),
+                "bank_account_number": data.get("bank_account_number", ""),
+                "bank_account_name": data.get("bank_account_name", ""),
+            }
         try:
             payout = request_payout(
                 operator=operator,
-                amount=serializer.validated_data["amount"],
-                phone=phone,
+                amount=data["amount"],
                 user=request.user,
+                method=method,
+                destination=destination,
             )
         except WalletError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)

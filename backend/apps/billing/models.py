@@ -66,8 +66,20 @@ class Payout(OperatorOwnedModel):
         PAID = "paid", "Paid"
         REJECTED = "rejected", "Rejected"
 
+    class Method(models.TextChoices):
+        MPESA = "mpesa", "M-Pesa"
+        BANK = "bank", "Bank (EFT/Pesalink)"
+
     amount = models.DecimalField(max_digits=12, decimal_places=2)
-    phone = models.CharField(max_length=12, help_text="M-Pesa number to pay")
+    method = models.CharField(max_length=6, choices=Method.choices, default=Method.MPESA)
+    # M-Pesa destination
+    phone = models.CharField(max_length=12, blank=True, help_text="M-Pesa number to pay")
+    # Bank destination (paid manually now; the I&M H2H integration will execute
+    # bank-method payouts automatically later)
+    bank_name = models.CharField(max_length=80, blank=True)
+    bank_account_number = models.CharField(max_length=40, blank=True)
+    bank_account_name = models.CharField(max_length=120, blank=True)
+
     status = models.CharField(
         max_length=10, choices=Status.choices, default=Status.REQUESTED, db_index=True
     )
@@ -78,7 +90,8 @@ class Payout(OperatorOwnedModel):
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
     )
     processed_at = models.DateTimeField(null=True, blank=True)
-    mpesa_reference = models.CharField(max_length=30, blank=True)
+    # Reference of the actual transfer (M-Pesa code, or bank/Pesalink ref)
+    mpesa_reference = models.CharField(max_length=40, blank=True)
     note = models.CharField(max_length=200, blank=True)
 
     class Meta:
@@ -86,3 +99,9 @@ class Payout(OperatorOwnedModel):
 
     def __str__(self):
         return f"{self.operator.slug} payout KSh {self.amount} [{self.status}]"
+
+    @property
+    def destination(self) -> str:
+        if self.method == self.Method.BANK:
+            return f"{self.bank_name} · {self.bank_account_number} ({self.bank_account_name})"
+        return self.phone

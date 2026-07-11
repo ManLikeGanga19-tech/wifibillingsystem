@@ -172,6 +172,11 @@ class OperatorSettingsSerializer(serializers.ModelSerializer):
             "contact_phone",
             "contact_email",
             "commission_rate",
+            # Saved payout destinations (pre-fill the wallet withdraw form)
+            "payout_phone",
+            "payout_bank_name",
+            "payout_bank_account_number",
+            "payout_bank_account_name",
         ]
         read_only_fields = ["slug", "status", "commission_rate"]
 

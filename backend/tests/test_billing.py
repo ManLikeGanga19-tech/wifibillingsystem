@@ -96,37 +96,59 @@ class TestPayouts:
         operator.save()
         credit_sale(tx)
 
+    def _mpesa(self, operator, amount, user):
+        return request_payout(
+            operator=operator, amount=amount, user=user,
+            method="mpesa", destination={"phone": "254712345678"},
+        )
+
     def test_withdraw_holds_funds_immediately(self, operator):
         self._fund(operator)
         user = UserFactory(operator=operator, is_staff=True)
-        payout = request_payout(
-            operator=operator, amount=Decimal("400.00"), phone="254712345678", user=user
-        )
+        payout = self._mpesa(operator, Decimal("400.00"), user)
         assert payout.status == Payout.Status.REQUESTED
         assert wallet_balance(operator) == Decimal("600.00")
+
+    def test_bank_withdrawal_captures_details(self, operator):
+        self._fund(operator)
+        user = UserFactory(operator=operator, is_staff=True)
+        payout = request_payout(
+            operator=operator, amount=Decimal("400.00"), user=user, method="bank",
+            destination={
+                "bank_name": "I&M Bank", "bank_account_number": "12345678",
+                "bank_account_name": "My WISP Ltd",
+            },
+        )
+        assert payout.method == Payout.Method.BANK
+        assert payout.bank_account_number == "12345678"
+        assert "I&M Bank" in payout.destination
+        assert wallet_balance(operator) == Decimal("600.00")  # held the same way
+
+    def test_bank_withdrawal_requires_account(self, operator):
+        self._fund(operator)
+        user = UserFactory(operator=operator, is_staff=True)
+        with pytest.raises(WalletError, match="Bank name and account"):
+            request_payout(
+                operator=operator, amount=Decimal("400.00"), user=user, method="bank",
+                destination={"bank_name": "I&M Bank"},  # missing account number
+            )
 
     def test_withdraw_over_balance_rejected(self, operator):
         self._fund(operator, "200.00")
         user = UserFactory(operator=operator, is_staff=True)
         with pytest.raises(WalletError, match="exceeds"):
-            request_payout(
-                operator=operator, amount=Decimal("300.00"), phone="254712345678", user=user
-            )
+            self._mpesa(operator, Decimal("300.00"), user)
 
     def test_minimum_payout_enforced(self, operator):
         self._fund(operator)
         user = UserFactory(operator=operator, is_staff=True)
         with pytest.raises(WalletError, match="Minimum"):
-            request_payout(
-                operator=operator, amount=Decimal("50.00"), phone="254712345678", user=user
-            )
+            self._mpesa(operator, Decimal("50.00"), user)
 
     def test_mark_paid(self, operator):
         self._fund(operator)
         user = UserFactory(operator=operator, is_staff=True)
-        payout = request_payout(
-            operator=operator, amount=Decimal("500.00"), phone="254712345678", user=user
-        )
+        payout = self._mpesa(operator, Decimal("500.00"), user)
         admin = UserFactory(operator=None, is_staff=True, is_superuser=True)
         mark_payout_paid(payout, by=admin, mpesa_reference="QGH12345")
         payout.refresh_from_db()
@@ -136,9 +158,7 @@ class TestPayouts:
     def test_reject_refunds(self, operator):
         self._fund(operator)
         user = UserFactory(operator=operator, is_staff=True)
-        payout = request_payout(
-            operator=operator, amount=Decimal("500.00"), phone="254712345678", user=user
-        )
+        payout = self._mpesa(operator, Decimal("500.00"), user)
         admin = UserFactory(operator=None, is_staff=True, is_superuser=True)
         reject_payout(payout, by=admin, note="wrong number")
         assert wallet_balance(operator) == Decimal("1000.00")  # funds returned
@@ -146,9 +166,7 @@ class TestPayouts:
     def test_double_processing_blocked(self, operator):
         self._fund(operator)
         user = UserFactory(operator=operator, is_staff=True)
-        payout = request_payout(
-            operator=operator, amount=Decimal("500.00"), phone="254712345678", user=user
-        )
+        payout = self._mpesa(operator, Decimal("500.00"), user)
         admin = UserFactory(operator=None, is_staff=True, is_superuser=True)
         mark_payout_paid(payout, by=admin, mpesa_reference="QGH12345")
         with pytest.raises(WalletError, match="already"):
@@ -161,7 +179,7 @@ class TestPayouts:
         client.force_authenticate(user=user)
         resp = client.post(
             "/api/v1/billing/payouts/withdraw/",
-            {"amount": "250.00", "phone": "0712345678"},
+            {"amount": "250.00", "method": "mpesa", "phone": "0712345678"},
             format="json",
         )
         assert resp.status_code == 201, resp.content

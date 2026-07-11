@@ -18,7 +18,9 @@ export default function WalletView() {
   const [payouts, setPayouts] = useState<ApiPayout[]>([]);
   const [error, setError] = useState('');
   const [amount, setAmount] = useState('');
+  const [method, setMethod] = useState<'mpesa' | 'bank'>('mpesa');
   const [phone, setPhone] = useState('');
+  const [bank, setBank] = useState({ bank_name: '', bank_account_number: '', bank_account_name: '' });
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
@@ -46,7 +48,9 @@ export default function WalletView() {
     if (busy) return;
     setBusy(true);
     try {
-      await api.billing.payouts.withdraw({ amount, phone });
+      await api.billing.payouts.withdraw(
+        method === 'mpesa' ? { amount, method, phone } : { amount, method, ...bank }
+      );
       toast('success', 'Withdrawal requested — the platform will pay it out shortly.');
       setAmount('');
       load();
@@ -99,21 +103,54 @@ export default function WalletView() {
         </div>
       )}
 
-      <Panel title="Withdraw to M-Pesa">
+      <Panel title="Withdraw earnings">
+        <div className="flex border border-[#141414] mb-3 max-w-xs">
+          {(['mpesa', 'bank'] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => setMethod(m)}
+              className={`flex-1 py-2 text-xs font-bold font-mono uppercase transition cursor-pointer ${
+                method === m ? 'bg-[#141414] text-[#E4E3E0]' : 'bg-white text-[#141414]'
+              }`}
+            >
+              {m === 'mpesa' ? 'M-Pesa' : 'Bank'}
+            </button>
+          ))}
+        </div>
         <form onSubmit={withdraw} className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
           <Field label={`Amount (min ${fmtKsh(summary?.minimum_payout ?? 100)})`}>
             <input type="number" min="100" step="0.01" required value={amount} onChange={(e) => setAmount(e.target.value)} className={inputCls} />
           </Field>
-          <Field label="M-Pesa number">
-            <input type="tel" required value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="07XX…" className={inputCls} />
-          </Field>
+          {method === 'mpesa' ? (
+            <Field label="M-Pesa number">
+              <input type="tel" required value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="07XX…" className={inputCls} />
+            </Field>
+          ) : (
+            <>
+              <Field label="Bank">
+                <input required value={bank.bank_name} onChange={(e) => setBank({ ...bank, bank_name: e.target.value })} placeholder="e.g. I&M Bank" className={inputCls} />
+              </Field>
+              <Field label="Account number">
+                <input required value={bank.bank_account_number} onChange={(e) => setBank({ ...bank, bank_account_number: e.target.value })} className={inputCls} />
+              </Field>
+              <Field label="Account name">
+                <input value={bank.bank_account_name} onChange={(e) => setBank({ ...bank, bank_account_name: e.target.value })} className={inputCls} />
+              </Field>
+            </>
+          )}
           <Btn type="submit" variant="green" disabled={busy}>
             <ArrowDownToLine className="h-3.5 w-3.5" />
             {busy ? 'Requesting…' : 'Withdraw'}
           </Btn>
         </form>
+        <p className="text-[11px] font-mono text-[#141414]/50 mt-2">
+          {method === 'bank'
+            ? 'Bank withdrawals are sent by the platform via EFT/Pesalink and marked paid.'
+            : 'Paid to your M-Pesa number by the platform.'}
+        </p>
         {payouts.filter((p) => p.status === 'requested').length > 0 && (
-          <p className="text-[11px] font-mono text-[#B26B00] mt-3">
+          <p className="text-[11px] font-mono text-[#B26B00] mt-1">
             {payouts.filter((p) => p.status === 'requested').length} withdrawal(s) awaiting payment by the platform.
           </p>
         )}

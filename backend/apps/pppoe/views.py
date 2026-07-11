@@ -1,7 +1,9 @@
 from django.db.models import Count, Q
 from rest_framework import status
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from apps.core.viewsets import TenantModelViewSet, TenantReadOnlyViewSet
 from apps.provisioning.adapters import ProvisioningError, get_adapter
@@ -115,3 +117,101 @@ class InvoiceViewSet(TenantReadOnlyViewSet):
         if status_param:
             qs = qs.filter(status=status_param)
         return qs
+
+
+class SuspendedNoticeView(APIView):
+    """PUBLIC page a suspended PPPoE client is redirected to. Returns the ISP's
+    pay instructions, and (if the client's account is known) their balance/status.
+
+    Tenant context: ?router=<id> (the router that redirected them) or the
+    subdomain. The client's account may be supplied as ?account=<no> OR resolved
+    from their source IP via the router's live PPPoE sessions."""
+
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        from apps.provisioning.models import Router
+
+        # Resolve the ISP
+        operator = getattr(request, "tenant", None)
+        router = None
+        router_id = request.query_params.get("router", "")
+        if router_id.isdigit():
+            router = Router.objects.filter(pk=int(router_id), is_active=True).first()
+            if router and operator is None:
+                operator = router.operator
+        if operator is None:
+            return Response(
+                {"detail": "Unknown provider."}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        client = None
+        account = (request.query_params.get("account") or "").strip().upper()
+        if account:
+            client = Client.objects.filter(operator=operator, account_number=account).first()
+        # Fall back: identify by the client's current PPPoE IP on the router
+        if client is None and router is not None:
+            src_ip = request.META.get("HTTP_X_FORWARDED_FOR", "").split(",")[0].strip()
+            src_ip = src_ip or request.META.get("REMOTE_ADDR", "")
+            if src_ip:
+                try:
+                    active = get_adapter(router).get_active_pppoe()
+                    username = next((a.username for a in active if a.ip_address == src_ip), None)
+                    if username:
+                        client = Client.objects.filter(
+                            operator=operator, pppoe_username=username
+                        ).first()
+                except ProvisioningError:
+                    pass
+
+        body = {
+            "provider": operator.name,
+            "paybill": operator.mpesa_shortcode or None,
+            "how_to_pay": (
+                "Go to M-Pesa → Lipa na M-Pesa → Pay Bill. Enter the paybill "
+                "number, then your account number, then your monthly amount."
+            ),
+        }
+        if client:
+            body["client"] = {
+                "account_number": client.account_number,
+                "full_name": client.full_name,
+                "plan": client.plan.name,
+                "monthly": str(client.plan.price),
+                "balance": str(client.balance),
+                "status": client.status,
+                "suspended": client.status == Client.Status.SUSPENDED,
+            }
+        return Response(body)
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def account_lookup(request):
+    """Public: a suspended client types their account number to see their balance
+    and pay instructions. Scoped by ?router= or subdomain tenant."""
+    from apps.provisioning.models import Router
+
+    operator = getattr(request, "tenant", None)
+    router_id = request.query_params.get("router", "")
+    if operator is None and router_id.isdigit():
+        router = Router.objects.filter(pk=int(router_id), is_active=True).first()
+        operator = router.operator if router else None
+    account = (request.query_params.get("account") or "").strip().upper()
+    client = (
+        Client.objects.filter(operator=operator, account_number=account).first()
+        if operator and account
+        else None
+    )
+    if client is None:
+        return Response({"detail": "Account not found."}, status=status.HTTP_404_NOT_FOUND)
+    return Response(
+        {
+            "account_number": client.account_number,
+            "full_name": client.full_name,
+            "plan": client.plan.name,
+            "monthly": str(client.plan.price),
+            "balance": str(client.balance),
+            "status": client.status,
+        }
+    )

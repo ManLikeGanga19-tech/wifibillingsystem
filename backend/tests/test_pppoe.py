@@ -221,6 +221,45 @@ class TestApiAndIsolation:
         assert data["utilization"] == 40
 
 
+class TestSuspendedNotice:
+    def test_notice_returns_pay_info_and_client(self):
+        from apps.core.models import Operator
+
+        op = OperatorFactory(slug="paynet", name="PayNet ISP", mpesa_shortcode="123456")
+        Operator.objects.filter(pk=op.pk).update(status="active")
+        router = RouterFactory(operator=op)
+        client = PppoeClientFactory(
+            operator=op, router=router, status=Client.Status.SUSPENDED, plan__price=Decimal("2000")
+        )
+        resp = APIClient().get(
+            f"/api/v1/pppoe/suspended-notice/?router={router.id}&account={client.account_number}"
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["provider"] == "PayNet ISP"
+        assert body["paybill"] == "123456"
+        assert body["client"]["account_number"] == client.account_number
+        assert body["client"]["suspended"] is True
+
+    def test_account_lookup(self):
+        op = OperatorFactory(slug="paynet2")
+        router = RouterFactory(operator=op)
+        client = PppoeClientFactory(operator=op, router=router, plan__price=Decimal("1500"))
+        resp = APIClient().get(
+            f"/api/v1/pppoe/account-lookup/?router={router.id}&account={client.account_number}"
+        )
+        assert resp.status_code == 200
+        assert resp.json()["monthly"] == "1500.00"
+
+    def test_lookup_unknown_account_404(self):
+        op = OperatorFactory(slug="paynet3")
+        router = RouterFactory(operator=op)
+        resp = APIClient().get(
+            f"/api/v1/pppoe/account-lookup/?router={router.id}&account=NOPE99"
+        )
+        assert resp.status_code == 404
+
+
 class TestReconciliation:
     def test_platform_reconciliation(self):
         op = OperatorFactory()

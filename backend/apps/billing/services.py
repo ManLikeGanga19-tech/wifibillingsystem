@@ -109,28 +109,47 @@ def credit_sale(tx) -> None:
     )
 
 
-def request_payout(*, operator, amount: Decimal, phone: str, user) -> Payout:
+def request_payout(*, operator, amount: Decimal, user, method="mpesa", destination=None) -> Payout:
     """Funds are debited (held) immediately so concurrent requests can't
-    double-spend the balance."""
+    double-spend the balance. `destination` carries the method-specific details
+    (phone for M-Pesa; bank_name/account for bank)."""
+    destination = destination or {}
     amount = Decimal(amount).quantize(Decimal("0.01"))
     if amount < MINIMUM_PAYOUT:
         raise WalletError(f"Minimum withdrawal is KSh {MINIMUM_PAYOUT}.")
+
+    fields = {"method": method}
+    if method == Payout.Method.BANK:
+        if not (destination.get("bank_name") and destination.get("bank_account_number")):
+            raise WalletError("Bank name and account number are required for a bank withdrawal.")
+        fields.update(
+            bank_name=destination["bank_name"],
+            bank_account_number=destination["bank_account_number"],
+            bank_account_name=destination.get("bank_account_name", ""),
+        )
+        dest_label = f"{fields['bank_name']} {fields['bank_account_number']}"
+    else:
+        if not destination.get("phone"):
+            raise WalletError("An M-Pesa number is required.")
+        fields["phone"] = destination["phone"]
+        dest_label = fields["phone"]
+
     with db_transaction.atomic():
-        # Row-level lock on the operator serializes concurrent withdrawals
         op_locked = type(operator).objects.select_for_update().get(pk=operator.pk)
         if amount > wallet_balance(op_locked):
             raise WalletError("Withdrawal exceeds your wallet balance.")
         payout = Payout.objects.create(
-            operator=op_locked, amount=amount, phone=phone, requested_by=user
+            operator=op_locked, amount=amount, requested_by=user, **fields
         )
         LedgerEntry.objects.create(
             operator=op_locked,
             entry_type=LedgerEntry.Type.PAYOUT,
             amount=-amount,
             payout=payout,
-            memo=f"Withdrawal to {phone}",
+            memo=f"Withdrawal ({method}) to {dest_label}",
         )
-    audit("payout_requested", operator=operator, actor=user, target=payout, amount=str(amount))
+    audit("payout_requested", operator=operator, actor=user, target=payout,
+          amount=str(amount), method=method)
     return payout
 
 

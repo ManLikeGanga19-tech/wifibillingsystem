@@ -48,6 +48,14 @@ class Operator(TimeStampedModel):
         help_text="Platform's own ISP: exempt from all commission and platform fees.",
     )
 
+    # Saved payout destinations (the ISP fills these once; the wallet withdraw
+    # form pre-fills from them). Bank payouts are executed manually now, and by
+    # the I&M H2H integration later.
+    payout_phone = models.CharField(max_length=12, blank=True)
+    payout_bank_name = models.CharField(max_length=80, blank=True)
+    payout_bank_account_number = models.CharField(max_length=40, blank=True)
+    payout_bank_account_name = models.CharField(max_length=120, blank=True)
+
     # Platform billing rates (editable per tenant from the platform portal)
     base_fee = models.DecimalField(
         max_digits=10, decimal_places=2, default=0, help_text="Flat KSh/month for the subdomain"

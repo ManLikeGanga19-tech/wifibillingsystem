@@ -13,8 +13,9 @@ export default function PlatformPayoutsView() {
   );
 
   const markPaid = async (p: ApiPayout) => {
+    const how = p.method === 'bank' ? 'via EFT/Pesalink' : 'via M-Pesa';
     const ref = prompt(
-      `Pay ${fmtKsh(p.amount)} to ${p.phone} (${p.operator_name}) via M-Pesa first, then enter the M-Pesa transaction code:`
+      `Pay ${fmtKsh(p.amount)} ${how} to:\n${p.destination}\n(${p.operator_name})\n\nThen enter the transaction reference:`
     );
     if (!ref?.trim()) return;
     try {
@@ -51,7 +52,7 @@ export default function PlatformPayoutsView() {
       <FilterChips options={FILTERS} value={filter} onChange={setFilter} right={<span className="text-[11px] font-mono text-[#141414]/50">{count} payouts</span>} />
 
       <TableShell
-        headers={['Requested', 'ISP', 'Pay To', 'Amount', 'Status', 'Reference', '']}
+        headers={['Requested', 'ISP', 'Method', 'Pay To', 'Amount', 'Status', 'Reference', '']}
         loading={rows === null}
         error={error}
         empty="No payouts in this list."
@@ -60,7 +61,8 @@ export default function PlatformPayoutsView() {
           <tr key={p.id} className="hover:bg-[#f0efec]/40 transition">
             <td className={`${tdCls} font-mono whitespace-nowrap`}>{fmtDateTime(p.created_at)}</td>
             <td className={`${tdCls} font-bold`}>{p.operator_name}</td>
-            <td className={`${tdCls} font-mono`}>{p.phone}</td>
+            <td className={tdCls}><Badge color={p.method === 'bank' ? 'blue' : 'green'}>{p.method}</Badge></td>
+            <td className={`${tdCls} font-mono text-[11px] max-w-[16rem]`}>{p.destination}</td>
             <td className={`${tdCls} font-mono font-bold whitespace-nowrap`}>{fmtKsh(p.amount)}</td>
             <td className={tdCls}>
               <Badge color={p.status === 'paid' ? 'green' : p.status === 'rejected' ? 'red' : 'amber'}>{p.status}</Badge>

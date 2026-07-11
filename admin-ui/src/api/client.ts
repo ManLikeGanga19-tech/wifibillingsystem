@@ -357,12 +357,26 @@ export interface ApiPayout {
   operator_name: string;
   operator_slug: string;
   amount: string;
+  method: 'mpesa' | 'bank';
   phone: string;
+  bank_name: string;
+  bank_account_number: string;
+  bank_account_name: string;
+  destination: string;
   status: 'requested' | 'paid' | 'rejected';
   mpesa_reference: string;
   note: string;
   created_at: string;
   processed_at: string | null;
+}
+
+export interface WithdrawPayload {
+  amount: string;
+  method: 'mpesa' | 'bank';
+  phone?: string;
+  bank_name?: string;
+  bank_account_number?: string;
+  bank_account_name?: string;
 }
 
 export interface ApiTenant {
@@ -586,7 +600,7 @@ export const api = {
     ledger: () => request<Paginated<ApiLedgerEntry>>('/billing/ledger/'),
     payouts: {
       list: () => request<Paginated<ApiPayout>>('/billing/payouts/'),
-      withdraw: (data: { amount: string; phone: string }) =>
+      withdraw: (data: WithdrawPayload) =>
         request<ApiPayout>('/billing/payouts/withdraw/', { method: 'POST', body: JSON.stringify(data) }),
     },
   },
