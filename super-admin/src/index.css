@@ -1,0 +1,167 @@
+@import 'tailwindcss';
+
+/**
+ * WIFI.OS Platform Control — design tokens.
+ *
+ * Deliberately a different world from the ISP console (which is light, brutalist,
+ * mono). This is the operator's cockpit: deep space surface, glass panels, a cyan
+ * signal accent. Dark-only by intent — it is a control room, not a document.
+ *
+ * The series colors are NOT chosen by eye: they are the validated categorical
+ * palette (worst adjacent CVD ΔE 35.9 against --surface-1, all slots >= 3:1
+ * contrast). Do not swap a hue without re-running the validator.
+ */
+
+:root {
+  /* Surfaces */
+  --plane: #070a0f; /* page background */
+  --surface-1: #0f141b; /* panel / chart surface */
+  --surface-2: #151c25; /* raised panel */
+  --surface-3: #1d2733; /* hover / input */
+
+  /* Ink */
+  --text-primary: #ffffff;
+  --text-secondary: #9fb0c4;
+  --text-muted: #64748b;
+
+  /* Structure */
+  --hairline: rgba(255, 255, 255, 0.08);
+  --hairline-strong: rgba(255, 255, 255, 0.16);
+  --grid: #1b232e;
+
+  /* Signal accent (the "futuristic" cue — used for focus + live state, not data) */
+  --accent: #22d3ee;
+  --accent-dim: rgba(34, 211, 238, 0.12);
+
+  /* Categorical series — validated set, fixed order. Never cycle, never reorder. */
+  --series-1: #3987e5; /* blue    — earnings */
+  --series-2: #199e70; /* aqua    — net margin */
+  --series-3: #c98500; /* yellow  — gross volume */
+  --series-4: #e66767; /* red     — transaction costs */
+  --series-5: #9085e9; /* violet  — new tenants */
+
+  /* Status — reserved, never reused as a series */
+  --good: #0ca30c;
+  --warning: #fab219;
+  --serious: #ec835a;
+  --critical: #d03b3b;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--plane);
+  color: var(--text-primary);
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Columns that must align vertically get tabular figures; hero numbers keep
+   proportional figures (they read better large). */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Glass panel — the core surface of this console */
+.panel {
+  background: linear-gradient(180deg, var(--surface-2) 0%, var(--surface-1) 100%);
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+}
+
+.panel-flat {
+  background: var(--surface-1);
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+}
+
+/* A faint scanline sheen on the hero card — the one bit of pure atmosphere */
+.sheen {
+  position: relative;
+  overflow: hidden;
+}
+.sheen::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    120% 80% at 100% 0%,
+    rgba(34, 211, 238, 0.10) 0%,
+    transparent 60%
+  );
+  pointer-events: none;
+}
+
+/* Live pulse for the "operational" dot */
+@keyframes pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 rgba(34, 211, 238, 0.5);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(34, 211, 238, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(34, 211, 238, 0);
+  }
+}
+.pulse {
+  animation: pulse-ring 2s infinite;
+}
+
+input,
+select,
+textarea {
+  background: var(--surface-3);
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  color: var(--text-primary);
+  padding: 0.5rem 0.65rem;
+  font-size: 0.8125rem;
+  outline: none;
+  width: 100%;
+}
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim);
+}
+input::placeholder {
+  color: var(--text-muted);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--plane);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--surface-3);
+  border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #2a3745;
+}
+
+/* Recharts overrides — keep chrome recessive, never let the lib's defaults win */
+.recharts-cartesian-grid line {
+  stroke: var(--grid);
+}
+.recharts-cartesian-axis-line,
+.recharts-cartesian-axis-tick-line {
+  stroke: transparent;
+}
+.recharts-text {
+  fill: var(--text-muted);
+  font-size: 11px;
+}
+.recharts-surface {
+  overflow: visible;
+}
