@@ -1,10 +1,12 @@
 from django.db.models import Count, Max, Q
+from drf_spectacular.utils import extend_schema
 from rest_framework import viewsets
 from rest_framework.permissions import IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.core.permissions import RequireTenant, TenantIsOperational
+from apps.core.schema import OBJECT_RESPONSE
 from apps.core.tenancy import acting_tenant
 from apps.provisioning.models import Session
 
@@ -12,6 +14,7 @@ from .models import Subscriber
 from .serializers import SubscriberSerializer
 
 
+@extend_schema(responses=OBJECT_RESPONSE, summary="Who am I, and which ISP am I acting for")
 class MeView(APIView):
     """Who am I + my tenant context — routes the UI between platform view,
     ISP console, and the pending-approval gate."""

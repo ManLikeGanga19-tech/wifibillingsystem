@@ -6,12 +6,14 @@ from django.http import Http404, JsonResponse
 from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
+from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.generics import RetrieveAPIView
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 
 from apps.core.public import PublicAPIView, PublicEndpointMixin
+from apps.core.schema import OBJECT_RESPONSE
 from apps.core.viewsets import TenantReadOnlyViewSet
 
 from .daraja import DarajaError
@@ -26,6 +28,8 @@ from .services import initiate_stk_push, process_stk_callback
 logger = logging.getLogger(__name__)
 
 
+@extend_schema(request=STKPushRequestSerializer, responses=OBJECT_RESPONSE,
+               summary="Portal: start an M-Pesa STK push")
 class STKPushView(PublicAPIView):
     """Portal: start an M-Pesa payment. Returns a public_id to poll.
 

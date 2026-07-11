@@ -1,4 +1,5 @@
 from django.db.models import Count, Q
+from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.decorators import (
     action,
@@ -10,6 +11,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
 from apps.core.public import PublicAPIView
+from apps.core.schema import OBJECT_RESPONSE
 from apps.core.viewsets import TenantModelViewSet, TenantReadOnlyViewSet
 from apps.provisioning.adapters import ProvisioningError, get_adapter
 
@@ -132,6 +134,7 @@ class InvoiceViewSet(TenantReadOnlyViewSet):
         return qs
 
 
+@extend_schema(responses=OBJECT_RESPONSE, summary="Public: how a suspended subscriber pays")
 class SuspendedNoticeView(PublicAPIView):
     """PUBLIC page a suspended PPPoE client is redirected to. Returns the ISP's
     pay instructions, and (if the client's account is known) their balance/status.
@@ -198,6 +201,7 @@ class SuspendedNoticeView(PublicAPIView):
         return Response(body)
 
 
+@extend_schema(responses=OBJECT_RESPONSE, summary="Public: look up a subscriber account")
 @api_view(["GET"])
 @authentication_classes([])  # anonymous: a suspended subscriber, never staff
 @permission_classes([AllowAny])

@@ -2,6 +2,7 @@ import json
 
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
+from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.decorators import (
     action,
@@ -12,6 +13,7 @@ from rest_framework.decorators import (
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
+from apps.core.schema import OBJECT_REQUEST, OBJECT_RESPONSE
 from apps.core.services import audit
 from apps.core.viewsets import TenantModelViewSet, TenantReadOnlyViewSet
 
@@ -114,6 +116,8 @@ class RouterViewSet(TenantModelViewSet):
         return Response([vars(s) for s in sessions])
 
 
+@extend_schema(request=OBJECT_REQUEST, responses=OBJECT_RESPONSE,
+               summary="Router setup-script phone-home (enrollment token auth)")
 @csrf_exempt
 @api_view(["POST"])
 @authentication_classes([])  # the ROUTER calls this, never a browser/staff user

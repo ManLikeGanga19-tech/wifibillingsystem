@@ -16,6 +16,7 @@ from decimal import Decimal
 
 from django.db.models import Sum
 from django.utils import timezone
+from drf_spectacular.utils import extend_schema
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -23,6 +24,7 @@ from apps.payments.models import C2BPayment, Transaction
 from apps.provisioning.models import Router, Session
 
 from .permissions import IsPlatformStaff
+from .schema import OBJECT_RESPONSE
 
 OK, WARN, CRIT = "ok", "warn", "crit"
 _RANK = {OK: 0, WARN: 1, CRIT: 2}
@@ -40,6 +42,7 @@ def _check(key, label, state, value, detail):
     return {"key": key, "label": label, "state": state, "value": value, "detail": detail}
 
 
+@extend_schema(responses=OBJECT_RESPONSE, summary="System health across all ISPs")
 class PlatformHealthView(APIView):
     """Cross-tenant operational health. Platform staff only."""
 

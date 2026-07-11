@@ -3,12 +3,14 @@ from datetime import timedelta
 from django.db.models import Count, Q, Sum
 from django.db.models.functions import ExtractHour, TruncDate
 from django.utils import timezone
+from drf_spectacular.utils import extend_schema
 from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.models import Subscriber
 from apps.core.permissions import RequireTenant, TenantIsOperational
+from apps.core.schema import OBJECT_RESPONSE
 from apps.core.tenancy import acting_tenant
 from apps.notifications.models import Campaign
 from apps.ops.models import Equipment, Lead, Ticket
@@ -23,6 +25,7 @@ def _scoped(qs, operator):
     return qs.filter(operator=operator)
 
 
+@extend_schema(responses=OBJECT_RESPONSE, summary="Sidebar badge counts")
 class NavCountsView(APIView):
     """Live badge counts for the admin sidebar, scoped to the acting tenant."""
 
@@ -53,6 +56,7 @@ class NavCountsView(APIView):
         )
 
 
+@extend_schema(responses=OBJECT_RESPONSE, summary="ISP dashboard KPIs")
 class DashboardStatsView(APIView):
     """KPIs + chart series for the operator dashboard. One round trip, everything
     a WISP owner needs to run the business day-to-day."""

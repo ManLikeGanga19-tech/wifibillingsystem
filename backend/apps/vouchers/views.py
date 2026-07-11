@@ -1,9 +1,11 @@
+from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 
 from apps.core.public import PublicAPIView
+from apps.core.schema import OBJECT_REQUEST, OBJECT_RESPONSE
 from apps.core.viewsets import TenantReadOnlyViewSet
 from apps.plans.models import Plan
 from apps.provisioning.models import Router
@@ -51,6 +53,8 @@ class VoucherViewSet(TenantReadOnlyViewSet):
         )
 
 
+@extend_schema(request=OBJECT_REQUEST, responses=OBJECT_RESPONSE,
+               summary="Portal: redeem a voucher code")
 class RedeemVoucherView(PublicAPIView):
     """Portal: redeem a printed voucher code. Tenant safety comes from the voucher
     itself — the session lands on the voucher's operator. Anonymous by design."""

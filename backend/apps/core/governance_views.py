@@ -13,6 +13,7 @@ Two things live here:
 from datetime import timedelta
 
 from django.utils import timezone
+from drf_spectacular.utils import extend_schema
 from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -22,6 +23,7 @@ from apps.accounts.cookie_auth import clear_act_as_cookie, set_act_as_cookie
 
 from .models import AuditLog, ImpersonationGrant, Operator
 from .permissions import IsPlatformStaff
+from .schema import OBJECT_REQUEST, OBJECT_RESPONSE
 from .services import audit
 
 
@@ -117,6 +119,8 @@ class StartImpersonationSerializer(serializers.Serializer):
     )
 
 
+@extend_schema(request=StartImpersonationSerializer, responses=ImpersonationGrantSerializer,
+               summary="Open an audited, time-boxed door into one ISP console")
 class StartImpersonationView(APIView):
     """Open an audited, time-boxed door into one ISP's console. A reason is
     mandatory — 'why did you look at this ISP's data' must always be answerable."""
@@ -163,6 +167,8 @@ class StartImpersonationView(APIView):
         return set_act_as_cookie(resp, operator.slug)
 
 
+@extend_schema(request=OBJECT_REQUEST, responses=OBJECT_RESPONSE,
+               summary="Close ISP-console access")
 class EndImpersonationView(APIView):
     """Close the door. Idempotent — ending an already-ended session is fine."""
 

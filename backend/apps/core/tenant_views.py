@@ -5,6 +5,7 @@ from django.db import transaction as db_transaction
 from django.db.models import Count, Q
 from django.utils import timezone
 from django.utils.text import slugify
+from drf_spectacular.utils import extend_schema
 from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAdminUser
@@ -23,6 +24,7 @@ from .permissions import (
     RequireTenant,
 )
 from .public import PublicAPIView
+from .schema import OBJECT_RESPONSE
 from .services import audit
 from .tenancy import acting_tenant
 
@@ -54,6 +56,8 @@ class SignupSerializer(serializers.Serializer):
         return attrs
 
 
+@extend_schema(request=SignupSerializer, responses=OBJECT_RESPONSE,
+               summary="Public: an ISP applies for a tenant")
 class TenantSignupView(PublicAPIView):
     """Public: an ISP applies for a tenant. Anonymous by design — the applicant has
     no account yet, so authenticating them makes no sense and only invites CSRF."""
@@ -269,6 +273,8 @@ class OperatorSettingsSerializer(serializers.ModelSerializer):
         read_only_fields = ["slug", "status", "commission_rate"]
 
 
+@extend_schema(request=OperatorSettingsSerializer, responses=OperatorSettingsSerializer,
+               summary="This ISP business details")
 class OperatorSettingsView(APIView):
     """The ISP's own business details. Tenant-only: RequireTenant returns 403 for
     a platform user who has not selected an ISP (this used to 404 confusingly)."""
@@ -287,6 +293,7 @@ class OperatorSettingsView(APIView):
         return Response(OperatorSettingsSerializer(operator).data)
 
 
+@extend_schema(responses=OBJECT_RESPONSE, summary="Custody position across ALL ISPs")
 class PlatformReconciliationView(APIView):
     """Custody position across ALL ISPs — the money Danamo holds and owes. The
     aggregator's balance sheet: total collected vs owed to ISPs vs platform
@@ -350,6 +357,7 @@ class PlatformReconciliationView(APIView):
         )
 
 
+@extend_schema(responses=OBJECT_RESPONSE, summary="Cross-tenant aggregates")
 class PlatformOverviewView(APIView):
     """Cross-tenant aggregates — the ONLY legitimate place for platform-wide
     numbers. Explicitly labelled so they can never be mistaken for one ISP's."""

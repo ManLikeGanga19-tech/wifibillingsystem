@@ -15,6 +15,7 @@ from decimal import Decimal
 from django.db.models import Count, DecimalField, Q, Sum, Value
 from django.db.models.functions import Coalesce, TruncDate
 from django.utils import timezone
+from drf_spectacular.utils import extend_schema
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -23,6 +24,7 @@ from apps.payments.models import C2BPayment, Transaction
 
 from .models import Operator
 from .permissions import IsPlatformStaff
+from .schema import OBJECT_RESPONSE
 
 # Ledger types that are platform REVENUE (stored negative — they debit the ISP)
 EARNING_TYPES = [
@@ -50,6 +52,7 @@ def _month_start(now=None):
     return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
 
+@extend_schema(responses=OBJECT_RESPONSE, summary="Platform KPIs (all ISPs)")
 class PlatformKpisView(APIView):
     """The Command Center's headline numbers, plus the alerts that need a human."""
 
@@ -175,6 +178,7 @@ class PlatformKpisView(APIView):
         )
 
 
+@extend_schema(responses=OBJECT_RESPONSE, summary="Daily trend series (all ISPs)")
 class PlatformTimeseriesView(APIView):
     """Daily buckets for the trend graphs. ?days=30 (default), max 365."""
 
@@ -244,6 +248,7 @@ class PlatformTimeseriesView(APIView):
         return Response({"scope": "all_isps", "days": days, "series": series})
 
 
+@extend_schema(responses=OBJECT_RESPONSE, summary="Per-ISP profit and loss")
 class TenantPnlView(APIView):
     """Per-ISP profitability: what each tenant EARNS us versus what it COSTS us.
 
@@ -355,6 +360,7 @@ class TenantPnlView(APIView):
         )
 
 
+@extend_schema(responses=OBJECT_RESPONSE, summary="Cross-tenant support search")
 class PlatformSearchView(APIView):
     """Cross-tenant support search — the tool that means you rarely need to walk
     into an ISP's console at all. Finds a payment / phone / account / router

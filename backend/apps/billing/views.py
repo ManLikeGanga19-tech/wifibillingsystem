@@ -1,5 +1,6 @@
 from django.db.models import Sum
 from django.utils import timezone
+from drf_spectacular.utils import extend_schema
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAdminUser
@@ -14,6 +15,7 @@ from apps.core.permissions import (
     TenantIsOperational,
 )
 from apps.core.phone import InvalidPhoneError, normalize_msisdn
+from apps.core.schema import OBJECT_RESPONSE
 from apps.core.tenancy import acting_tenant
 from apps.core.viewsets import TenantReadOnlyViewSet
 
@@ -29,6 +31,7 @@ from .services import (
 )
 
 
+@extend_schema(responses=OBJECT_RESPONSE, summary="This ISP wallet balance")
 class WalletSummaryView(APIView):
     """ISP wallet: balance + this month's earnings picture. Tenant-only."""
 

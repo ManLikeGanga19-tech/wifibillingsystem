@@ -133,6 +133,20 @@ SPECTACULAR_SETTINGS = {
     "DESCRIPTION": "WISP hotspot billing: plans, M-Pesa, provisioning, vouchers, messaging",
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
+    # Many models have a `status` field. The generator names most of them from
+    # their model, but two collide and fall back to junk like "Status9e7Enum" — a
+    # client generated from the schema would not know which "status" it holds.
+    # Name those two explicitly.
+    #
+    # The values MUST be module-level (see apps/core/enums.py): overrides are
+    # resolved with import_string, which splits on the last dot, so a nested
+    # `Model.Status.choices` path cannot be imported.
+    # NB: an enum name must not collide with a SERIALIZER's component name either —
+    # "TransactionStatus" would clash with TransactionStatusSerializer.
+    "ENUM_NAME_OVERRIDES": {
+        "OperatorStatus": "apps.core.enums.OPERATOR_STATUS_CHOICES",
+        "PaymentStatus": "apps.core.enums.TRANSACTION_STATUS_CHOICES",
+    },
 }
 
 # Celery
