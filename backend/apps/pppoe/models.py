@@ -176,7 +176,17 @@ class Client(OperatorOwnedModel):
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL
     )
 
+    # A live service line: occupies a slot on the router/sector and is still
+    # invoiced. Used for CAPACITY and INVOICING — a suspended client still holds
+    # their AP slot and still owes their bill.
     ACTIVE_STATUSES = (Status.ACTIVE, Status.SUSPENDED)
+
+    # What the ISP is charged a platform fee for: ONLY users actually being
+    # served. A suspended client has not paid their ISP and has no internet, so
+    # billing the ISP for them would charge them for customers earning them
+    # nothing. No gaming risk: suspension cuts the customer off, so an ISP cannot
+    # dodge fees without dropping real subscribers.
+    BILLABLE_STATUSES = (Status.ACTIVE,)
 
     class Meta:
         ordering = ["-created_at"]
@@ -187,9 +197,8 @@ class Client(OperatorOwnedModel):
 
     @property
     def is_billable(self) -> bool:
-        """Counts toward the platform per-user fee: a live service (active or
-        merely suspended for non-payment), not pending-install or disabled."""
-        return self.status in self.ACTIVE_STATUSES
+        """Counts toward the platform per-user fee: only a live, served client."""
+        return self.status in self.BILLABLE_STATUSES
 
 
 class Invoice(OperatorOwnedModel):

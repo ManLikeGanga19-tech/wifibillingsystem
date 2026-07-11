@@ -39,10 +39,12 @@ def credit_pppoe_payment(operator, amount: Decimal, *, memo: str = "") -> None:
 
 
 def charge_pppoe_user_fees() -> int:
-    """Beat (monthly): deduct the platform's per-active-PPPoE-user fee from each
-    tenant's wallet. The fee is graduated by user count (apps.billing.pricing)
-    unless the tenant has a custom flat rate. Idempotent per (operator, month)
-    via the ledger constraint."""
+    """Beat (monthly): deduct the platform's per-user fee from each tenant's
+    wallet, counting ONLY clients actually being served (Client.BILLABLE_STATUSES
+    = active). Suspended clients have not paid their ISP and have no internet —
+    the ISP is not charged for them. The fee is graduated by user count
+    (apps.billing.pricing) unless the tenant has a custom flat rate. Idempotent
+    per (operator, month) via the ledger constraint."""
     from apps.core.models import Operator
     from apps.pppoe.models import Client
 
@@ -55,7 +57,7 @@ def charge_pppoe_user_fees() -> int:
     )
     for operator in operators:
         active = Client.objects.filter(
-            operator=operator, status__in=Client.ACTIVE_STATUSES
+            operator=operator, status__in=Client.BILLABLE_STATUSES
         ).count()
         if active == 0:
             continue

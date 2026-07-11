@@ -119,6 +119,58 @@ class TestDefaultPppoeRate:
         assert fee.amount == Decimal("-120.00")  # 3 users * 40
 
 
+class TestOnlyServedUsersAreBilled:
+    """The ISP pays a platform fee ONLY for clients actually being served. A
+    suspended client has not paid the ISP and has no internet — charging the ISP
+    for them would bill them for customers earning them nothing."""
+
+    def test_suspended_and_pending_are_not_billed(self):
+        from apps.billing.services import charge_pppoe_user_fees
+        from apps.pppoe.models import Client
+
+        op = OperatorFactory(pppoe_user_fee=Decimal("0.00"))
+        PppoeClientFactory.create_batch(3, operator=op, status=Client.Status.ACTIVE)
+        PppoeClientFactory.create_batch(2, operator=op, status=Client.Status.SUSPENDED)
+        PppoeClientFactory(operator=op, status=Client.Status.PENDING_INSTALL)
+        PppoeClientFactory(operator=op, status=Client.Status.DISABLED)
+
+        assert charge_pppoe_user_fees() == 1
+        fee = LedgerEntry.objects.get(operator=op, entry_type="pppoe_fee")
+        assert fee.amount == Decimal("-120.00")  # only the 3 ACTIVE * 40
+        assert "(3 users)" in fee.memo
+
+    def test_all_suspended_means_no_charge(self):
+        from apps.billing.services import charge_pppoe_user_fees
+        from apps.pppoe.models import Client
+
+        op = OperatorFactory(pppoe_user_fee=Decimal("0.00"))
+        PppoeClientFactory.create_batch(4, operator=op, status=Client.Status.SUSPENDED)
+        assert charge_pppoe_user_fees() == 0
+        assert not LedgerEntry.objects.filter(operator=op, entry_type="pppoe_fee").exists()
+
+    def test_suspended_still_counts_for_capacity(self):
+        """Capacity is a different question: a suspended client still occupies
+        its slot on the sector, so AP utilisation must still count it."""
+        from apps.pppoe.models import AccessPoint, Client, Tower
+
+        op = OperatorFactory()
+        tower = Tower.objects.create(operator=op, name="T")
+        ap = AccessPoint.objects.create(operator=op, tower=tower, name="S", capacity=10)
+        PppoeClientFactory.create_batch(
+            2, operator=op, access_point=ap, status=Client.Status.ACTIVE
+        )
+        PppoeClientFactory.create_batch(
+            2, operator=op, access_point=ap, status=Client.Status.SUSPENDED
+        )
+        c = APIClient()
+        c.force_authenticate(
+            user=UserFactory(operator=op, is_staff=True, role=Role.TENANT_OWNER)
+        )
+        row = c.get("/api/v1/pppoe/access-points/").json()["results"][0]
+        assert row["client_count"] == 4  # capacity: active + suspended
+        assert row["utilization"] == 40
+
+
 class TestCustomTierTableOverride:
     """A negotiated tier table can be swapped in via settings without a code
     change (e.g. a bespoke enterprise deal)."""
