@@ -129,11 +129,28 @@ class TestSignupAndApproval:
         staff = op.users.get()
         assert staff.is_staff and staff.phone == "254722000111"
 
-    def test_pending_tenant_staff_cannot_use_console(self, api_client):
+    def test_pending_tenant_staff_CAN_use_the_console(self, api_client):
+        """Changed deliberately in Phase B ("explore now, money later"): a pending
+        ISP gets their console immediately and can do real work. What they cannot do
+        is take a shilling — that is the separate money gate (see test_money_gate).
+        Locking them out until approval was a waiting room, and it killed the
+        momentum of someone who has just signed up."""
         api_client.post("/api/v1/tenants/signup/", self.SIGNUP, format="json")
         op = Operator.objects.get(slug="mtandao-wireless")
+        assert op.status == Operator.Status.PENDING
+
         resp = staff_client(op).get("/api/v1/payments/transactions/")
-        assert resp.status_code == 403
+        assert resp.status_code == 200
+        # ...but the money gate is shut.
+        assert op.can_transact is False
+
+    def test_suspended_tenant_staff_are_locked_out(self, api_client):
+        """Pending is a waiting room with the lights on. Suspended is a locked door."""
+        api_client.post("/api/v1/tenants/signup/", self.SIGNUP, format="json")
+        op = Operator.objects.get(slug="mtandao-wireless")
+        op.status = Operator.Status.SUSPENDED
+        op.save()
+        assert staff_client(op).get("/api/v1/payments/transactions/").status_code == 403
 
     def test_reserved_and_duplicate_slugs_rejected(self, api_client):
         bad = {**self.SIGNUP, "slug": "api"}

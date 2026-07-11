@@ -122,7 +122,16 @@ class C2BValidationView(View):
             payload = json.loads(request.body.decode("utf-8"))
         except (ValueError, UnicodeDecodeError):
             return JsonResponse({"ResultCode": "C2B00016", "ResultDesc": "Rejected"})
-        if find_client(payload.get("BillRefNumber", "")):
+
+        client = find_client(payload.get("BillRefNumber", ""))
+        # Reject BEFORE the money leaves the customer. If we accept here we are
+        # obliged to hold funds for an ISP we have not verified; refusing means the
+        # payer keeps their money and simply tries again once the ISP is live.
+        if client and not client.operator.can_transact:
+            return JsonResponse(
+                {"ResultCode": "C2B00012", "ResultDesc": "This account is not active yet"}
+            )
+        if client:
             return JsonResponse({"ResultCode": "0", "ResultDesc": "Accepted"})
         # C2B00012 = invalid account number
         return JsonResponse({"ResultCode": "C2B00012", "ResultDesc": "Invalid account number"})

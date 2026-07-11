@@ -48,9 +48,13 @@ class RequireTenant(BasePermission):
 
 
 class TenantIsOperational(BasePermission):
-    """Blocks staff of a tenant that is pending approval or suspended."""
+    """May this tenant's staff open the console at all?
 
-    message = "This ISP account is not active. Contact the platform administrator."
+    A PENDING tenant CAN — they signed up, they get to build. Only a SUSPENDED
+    tenant is locked out. Money is a separate gate (TenantCanTransact).
+    """
+
+    message = "This ISP account has been suspended. Contact the platform administrator."
 
     def has_permission(self, request, view):
         user = request.user
@@ -60,6 +64,29 @@ class TenantIsOperational(BasePermission):
         if operator is None:
             return True  # RequireTenant reports this case
         return operator.is_operational
+
+
+class TenantCanTransact(BasePermission):
+    """THE MONEY GATE. Nothing that moves money may happen for an unverified ISP.
+
+    Covers: collecting a payment, redeeming a voucher, provisioning a paying
+    customer, and withdrawing. An ISP can configure everything else meanwhile.
+
+    Why this is not optional: WE own the paybill. A business we have not verified
+    collecting real customer money through Danamo's shortcode is OUR anti-money-
+    laundering exposure. The ISP's convenience does not outrank that.
+    """
+
+    message = (
+        "Payments are not switched on for this ISP yet. Add your settlement "
+        "account (the paybill or bank account we pay you into) to go live."
+    )
+
+    def has_permission(self, request, view):
+        operator = acting_tenant(request)
+        if operator is None:
+            return True  # RequireTenant reports this case
+        return operator.can_transact
 
 
 class ReadOnlyForSupport(BasePermission):

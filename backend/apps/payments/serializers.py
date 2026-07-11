@@ -35,6 +35,15 @@ class STKPushRequestSerializer(serializers.Serializer):
                 {"detail": "Cannot determine the ISP. Open the payment page from the WiFi login."}
             )
 
+        # THE MONEY GATE, at the point where money would actually be taken. A
+        # customer must never be able to pay an ISP we have not verified — that
+        # money lands on OUR paybill, and we would be holding funds collected by an
+        # unchecked business. Refuse before the STK prompt, not after.
+        if not tenant.can_transact:
+            raise serializers.ValidationError(
+                {"detail": "This WiFi hotspot is not live yet. Please try again later."}
+            )
+
         plans = Plan.objects.filter(
             is_active=True, plan_type=Plan.PlanType.HOTSPOT, operator=tenant
         )

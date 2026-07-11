@@ -8,6 +8,8 @@ import {
   Ticket,
   AlertTriangle,
   Router as RouterIcon,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { api, DashboardStats } from '../api/client';
 
@@ -25,6 +27,10 @@ export default function LiveDashboard({ onNavigate }: { onNavigate: (tab: string
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [error, setError] = useState('');
   const [refreshing, setRefreshing] = useState(false);
+  /** Privacy toggle for the commercially sensitive figures. In-memory ONLY — this
+   *  system stores nothing in the browser, and a persisted "hidden" flag is exactly
+   *  the kind of stale state that later makes a product look broken. */
+  const [isPrivate, setPrivate] = useState(false);
 
   const load = useCallback(async () => {
     setRefreshing(true);
@@ -84,23 +90,40 @@ export default function LiveDashboard({ onNavigate }: { onNavigate: (tab: string
             Live revenue, sessions and network health. Auto-refreshes every 30 seconds.
           </p>
         </div>
-        <button
-          onClick={load}
-          className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold font-mono border border-[#141414] hover:bg-[#141414] hover:text-white transition cursor-pointer uppercase"
-        >
-          <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Hide the commercially sensitive figures — for demoing the console,
+              screen-sharing with a supplier, or working in a public place.
+              Deliberately NOT persisted (no browser storage anywhere), so it
+              resets on reload and can never leave someone's numbers hidden by a
+              setting they've forgotten about. */}
+          <button
+            onClick={() => setPrivate((p) => !p)}
+            title={isPrivate ? 'Show revenue figures' : 'Hide revenue figures'}
+            aria-pressed={isPrivate}
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold font-mono border border-[#141414] hover:bg-[#141414] hover:text-white transition cursor-pointer uppercase"
+          >
+            {isPrivate ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+            {isPrivate ? 'Show' : 'Hide'}
+          </button>
+          <button
+            onClick={load}
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold font-mono border border-[#141414] hover:bg-[#141414] hover:text-white transition cursor-pointer uppercase"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
+        </div>
       </div>
 
       {/* KPI tiles */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Tile label="Revenue Today" value={ksh(kpis.revenue_today)} accent />
+        <Tile label="Revenue Today" value={ksh(kpis.revenue_today)} accent hidden={isPrivate} />
         <Tile
           label="Revenue This Month"
           value={ksh(kpis.revenue_month)}
           sub={monthDelta !== null ? `${monthDelta >= 0 ? '+' : ''}${monthDelta}% vs last month` : undefined}
           accent
+          hidden={isPrivate}
         />
         <Tile label="Active Sessions" value={String(kpis.active_sessions)} sub={`${kpis.sessions_expiring_1h} expiring < 1h`} />
         <Tile
@@ -108,9 +131,19 @@ export default function LiveDashboard({ onNavigate }: { onNavigate: (tab: string
           value={kpis.success_rate_7d !== null ? `${kpis.success_rate_7d}%` : '—'}
           sub={`${kpis.failed_today} failed today`}
         />
-        <Tile label="Total Clients" value={kpis.total_subscribers.toLocaleString()} sub={`+${kpis.new_subscribers_7d} this week`} />
-        <Tile label="Avg Revenue / Client" value={kpis.arpu_month !== null ? ksh(kpis.arpu_month) : '—'} sub="this month" />
-        <Tile label="Payments Today" value={String(kpis.transactions_today)} />
+        <Tile
+          label="Total Clients"
+          value={kpis.total_subscribers.toLocaleString()}
+          sub={`+${kpis.new_subscribers_7d} this week`}
+          hidden={isPrivate}
+        />
+        <Tile
+          label="Avg Revenue / Client"
+          value={kpis.arpu_month !== null ? ksh(kpis.arpu_month) : '—'}
+          sub="this month"
+          hidden={isPrivate}
+        />
+        <Tile label="Payments Today" value={String(kpis.transactions_today)} hidden={isPrivate} />
         <Tile label="Vouchers In Stock" value={kpis.unused_vouchers.toLocaleString()} sub={`${kpis.vouchers_redeemed_7d} redeemed (7d)`} />
       </div>
 
@@ -182,12 +215,39 @@ export default function LiveDashboard({ onNavigate }: { onNavigate: (tab: string
 
 // ---- building blocks -------------------------------------------------------
 
-function Tile({ label, value, sub, accent }: { label: string; value: string; sub?: string; accent?: boolean }) {
+/** `hidden` masks the figure AND its sub-line — a "+12% vs last month" next to a
+ *  row of dots would leak the very thing we're hiding. The layout must not shift,
+ *  or the mask becomes a tell. */
+function Tile({
+  label,
+  value,
+  sub,
+  accent,
+  hidden,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  accent?: boolean;
+  hidden?: boolean;
+}) {
+  const MASK = '••••••';
   return (
     <div className="bg-white border border-[#141414] p-3.5">
       <p className="text-[11px] font-mono uppercase text-[#141414]/60">{label}</p>
-      <p className={`text-xl font-black font-mono mt-1 leading-none ${accent ? 'text-[#228B22]' : ''}`}>{value}</p>
-      {sub && <p className="text-[11px] font-mono text-[#141414]/50 mt-1.5">{sub}</p>}
+      <p
+        className={`text-xl font-black font-mono mt-1 leading-none ${
+          hidden ? 'text-[#141414]/30 select-none' : accent ? 'text-[#228B22]' : ''
+        }`}
+        aria-label={hidden ? `${label} hidden` : undefined}
+      >
+        {hidden ? MASK : value}
+      </p>
+      {sub && (
+        <p className="text-[11px] font-mono text-[#141414]/50 mt-1.5">
+          {hidden ? ' ' : sub}
+        </p>
+      )}
     </div>
   );
 }

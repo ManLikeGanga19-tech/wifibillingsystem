@@ -70,6 +70,11 @@ class C2BPayment(models.Model):
     class Status(models.TextChoices):
         MATCHED = "matched", "Matched to a client"
         UNMATCHED = "unmatched", "No matching account"
+        # We know exactly whose money this is — but that ISP is not cleared to
+        # receive it yet. We cannot refuse a C2B payment (Safaricom has already
+        # taken it), so we HOLD it: recorded, attributed, but not credited and not
+        # restoring service. Released automatically the moment the ISP goes live.
+        HELD = "held", "Held — ISP not yet cleared to transact"
 
     trans_id = models.CharField(max_length=30, unique=True, db_index=True)
     bill_ref = models.CharField(max_length=30, db_index=True, help_text="Account number typed")

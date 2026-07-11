@@ -64,6 +64,12 @@ def redeem(*, code: str, mac: str = "", router=None):
             raise VoucherError("Invalid voucher code")
         if voucher.status != Voucher.Status.UNUSED:
             raise VoucherError(f"Voucher already {voucher.status}")
+        # The money gate. A voucher is prepaid service — honouring one for an ISP we
+        # have not verified means putting a customer on the network for a business
+        # we cannot yet pay out to. Enforced HERE, in the service, so every caller
+        # is covered rather than just the one view.
+        if not voucher.operator.can_transact:
+            raise VoucherError("This WiFi hotspot is not live yet. Please try again later.")
 
         from django.utils import timezone
 

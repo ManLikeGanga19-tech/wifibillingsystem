@@ -123,8 +123,32 @@ class Operator(TimeStampedModel):
     def __str__(self):
         return f"{self.name} ({self.slug})"
 
+    # ---- THE TWO GATES ------------------------------------------------------
+    # "Can you USE the console?" and "Can MONEY move?" are different questions, and
+    # conflating them was the old design. A freshly signed-up ISP gets their console
+    # immediately (add routers, plans, branding — real work, real momentum) but
+    # cannot take a single shilling until we have verified who they are.
+    #
+    # That gate is not bureaucracy: WE hold the paybill. An unverified business
+    # collecting real customer money through Danamo's shortcode is our AML problem,
+    # not theirs. See docs/ONBOARDING_ARCHITECTURE.md §3.
+
     @property
     def is_operational(self) -> bool:
+        """May their staff open the console at all?
+
+        PENDING is allowed — that is the whole point of "explore now, money later".
+        SUSPENDED is not: that is a door we have deliberately shut.
+        """
+        return self.is_active and self.status != self.Status.SUSPENDED
+
+    @property
+    def can_transact(self) -> bool:
+        """May money move for this ISP — collect, provision, or withdraw?
+
+        Only once they are ACTIVE, which today means a human approved them and
+        (Phase B2) their settlement account is verified.
+        """
         return self.is_active and self.status == self.Status.ACTIVE
 
     @property

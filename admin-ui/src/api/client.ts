@@ -278,12 +278,24 @@ export type Role =
   | 'tenant_manager'
   | 'tenant_support';
 
+export interface GoLiveBlocker {
+  key: string;
+  label: string;
+  detail: string;
+  /** True if the ISP can do something about it themselves. */
+  actionable: boolean;
+}
+
 export interface MeOperator {
   id: number;
   name: string;
   slug: string;
   status: 'pending' | 'active' | 'suspended';
   is_platform_owned: boolean;
+  /** THE MONEY GATE. False => this ISP cannot collect, provision or withdraw. */
+  can_transact: boolean;
+  /** Why not, and what to do about it. Empty when they're live. */
+  go_live_blockers: GoLiveBlocker[];
 }
 
 export interface Me {

@@ -10,6 +10,7 @@ from rest_framework.decorators import (
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
+from apps.core.permissions import TenantCanTransact
 from apps.core.public import PublicAPIView
 from apps.core.schema import OBJECT_RESPONSE
 from apps.core.viewsets import TenantModelViewSet, TenantReadOnlyViewSet
@@ -64,6 +65,18 @@ class AccessPointViewSet(TenantModelViewSet):
 class ClientViewSet(TenantModelViewSet):
     serializer_class = ClientSerializer
     queryset = Client.objects.select_related("plan", "router").order_by("-created_at")
+
+    #: Switching a paying customer ON is the moment an ISP starts earning. An
+    #: unverified ISP may build their whole client list — they simply cannot turn
+    #: anyone on, because that would mean money flowing through our paybill for a
+    #: business we have not checked.
+    MONEY_ACTIONS = {"provision", "restore"}
+
+    def get_permissions(self):
+        perms = super().get_permissions()
+        if self.action in self.MONEY_ACTIONS:
+            perms = [*perms, TenantCanTransact()]
+        return perms
 
     def get_queryset(self):
         qs = super().get_queryset()

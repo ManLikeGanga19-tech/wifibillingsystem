@@ -20,18 +20,24 @@ class PlanViewSet(viewsets.ModelViewSet):
         return [IsAdminUser(), RequireTenant(), TenantIsOperational(), ReadOnlyForSupport()]
 
     def _portal_operator(self):
-        """Unauthenticated portal traffic: tenant from subdomain, else ?router=."""
+        """Unauthenticated portal traffic: tenant from subdomain, else ?router=.
+
+        Returns None for an ISP that cannot transact — a hotspot whose owner is not
+        verified is NOT LIVE, so it must not offer anything for sale. Showing plans
+        we would then refuse to charge for is worse than showing none.
+        """
         from apps.provisioning.models import Router
 
         tenant = getattr(self.request, "tenant", None)
-        if tenant is not None:
-            return tenant
-        router_id = self.request.query_params.get("router", "")
-        if router_id.isdigit():
-            router = Router.objects.filter(pk=int(router_id), is_active=True).first()
-            if router:
-                return router.operator
-        return None
+        if tenant is None:
+            router_id = self.request.query_params.get("router", "")
+            if router_id.isdigit():
+                router = Router.objects.filter(pk=int(router_id), is_active=True).first()
+                if router:
+                    tenant = router.operator
+        if tenant is None or not tenant.can_transact:
+            return None
+        return tenant
 
     def get_queryset(self):
         # PORTAL TRAFFIC WINS. `?router=` means a WiFi customer is standing in front

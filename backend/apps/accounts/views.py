@@ -35,6 +35,12 @@ class MeView(APIView):
                 "slug": op.slug,
                 "status": op.status,
                 "is_platform_owned": op.is_platform_owned,
+                # THE MONEY GATE, surfaced. The console uses this to explain itself:
+                # a pending ISP can build everything but cannot take a shilling, and
+                # they must be told exactly why and what to do about it — otherwise
+                # every blocked action just looks like a broken product.
+                "can_transact": op.can_transact,
+                "go_live_blockers": _go_live_blockers(op),
             }
 
         return Response(
@@ -52,6 +58,49 @@ class MeView(APIView):
                 "acting_operator": as_dict(acting),
             }
         )
+
+
+def _go_live_blockers(op) -> list[dict]:
+    """What is still standing between this ISP and taking their first payment.
+
+    An empty list means they are live. This is the honest answer to "why can't I
+    collect money?", and it is the difference between a product that feels
+    deliberate and one that feels broken.
+    """
+    if op.can_transact:
+        return []
+    if op.status == op.Status.SUSPENDED:
+        return [
+            {
+                "key": "suspended",
+                "label": "Account suspended",
+                "detail": "Contact the platform administrator.",
+                "actionable": False,
+            }
+        ]
+    # PENDING. Phase B2 adds the settlement-account check here; today the bar is a
+    # platform review.
+    return [
+        {
+            "key": "settlement_account",
+            "label": "Add your settlement account",
+            "detail": (
+                "Tell us the M-Pesa paybill or bank account we should pay YOU into. "
+                "Your customers always pay WIFI.OS; we hold the money, attribute it "
+                "to you, and settle it to this account."
+            ),
+            "actionable": True,
+        },
+        {
+            "key": "verification",
+            "label": "We verify your business",
+            "detail": (
+                "We check the settlement account really belongs to you. Once it does, "
+                "payments switch on and your free month starts."
+            ),
+            "actionable": False,
+        },
+    ]
 
 
 class SubscriberViewSet(viewsets.ReadOnlyModelViewSet):

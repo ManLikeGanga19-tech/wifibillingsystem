@@ -30,6 +30,7 @@ import { planToProfile, profileToPlan, campaignToUi, subscriberToUi } from './ap
 import { toast, ToastHost } from './components/ui';
 
 import LoginView from './components/LoginView';
+import GoLiveBanner from './components/GoLiveBanner';
 import LiveDashboard from './components/LiveDashboard';
 import ActiveUsersView from './components/ActiveUsersView';
 import UsersView from './components/UsersView';
@@ -294,19 +295,19 @@ export default function App() {
     );
   }
 
-  // Approval gate: ISP staff whose tenant is not active yet
-  if (me && me.operator && me.operator.status !== 'active') {
+  // SUSPENDED is a locked door. (PENDING is not: a freshly signed-up ISP gets their
+  // console immediately and can build everything — they just cannot take a shilling
+  // yet. That is the money gate, explained by GoLiveBanner rather than a wall.
+  // Locking them out until approval was a waiting room, and it killed the momentum
+  // of someone who had just signed up.)
+  if (me && me.operator && me.operator.status === 'suspended') {
     return (
       <div className="min-h-screen bg-[#E4E3E0] text-[#141414] flex items-center justify-center p-4">
         <div className="max-w-sm bg-white border border-[#141414] p-6 text-center space-y-4">
-          <Clock className="h-10 w-10 mx-auto text-[#B26B00]" />
-          <h1 className="font-bold font-mono uppercase">
-            {me.operator.status === 'pending' ? 'Awaiting approval' : 'Account suspended'}
-          </h1>
+          <Clock className="h-10 w-10 mx-auto text-[#B22222]" />
+          <h1 className="font-bold font-mono uppercase">Account suspended</h1>
           <p className="text-xs font-mono text-[#141414]/70 leading-relaxed">
-            {me.operator.status === 'pending'
-              ? `${me.operator.name} is pending review by the platform. You'll get access as soon as it's approved.`
-              : `${me.operator.name} has been suspended. Contact the platform administrator.`}
+            {me.operator.name} has been suspended. Contact the platform administrator.
           </p>
           <button
             onClick={async () => { await logout(); setMe(null); }}
@@ -516,6 +517,10 @@ export default function App() {
 
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 min-h-0">
           <div className="max-w-7xl mx-auto space-y-6">
+            {/* Pinned until they can take payments. Without it, every blocked
+                action just looks like a broken product. */}
+            {acting && !acting.can_transact && <GoLiveBanner operator={acting} />}
+
             {activeTab === 'dashboard' && <LiveDashboard onNavigate={(tab) => setActiveTab(tab as TabId)} />}
             {activeTab === 'active_users' && <ActiveUsersView />}
             {activeTab === 'users' && <UsersView />}

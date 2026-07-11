@@ -40,6 +40,17 @@ def process_c2b_confirmation(payload: dict) -> C2BPayment | None:
 
     from apps.billing.tariffs import collection_cost
 
+    # THE MONEY GATE, on the way in. We cannot refuse a C2B payment — Safaricom has
+    # already taken the customer's money by the time we hear about it. So when the
+    # account belongs to an ISP that is not cleared to transact, we HOLD it:
+    # recorded and attributed, but NOT credited to their wallet and NOT restoring
+    # service. It is released the instant they go live (release_held_payments).
+    held = bool(client) and not client.operator.can_transact
+    if client:
+        status = C2BPayment.Status.HELD if held else C2BPayment.Status.MATCHED
+    else:
+        status = C2BPayment.Status.UNMATCHED
+
     try:
         with db_transaction.atomic():
             payment = C2BPayment.objects.create(
@@ -50,7 +61,7 @@ def process_c2b_confirmation(payload: dict) -> C2BPayment | None:
                 first_name=str(payload.get("FirstName", ""))[:60],
                 operator=client.operator if client else None,
                 client=client,
-                status=C2BPayment.Status.MATCHED if client else C2BPayment.Status.UNMATCHED,
+                status=status,
                 raw_payload=payload,
                 platform_cost=collection_cost(amount),
             )
@@ -58,10 +69,49 @@ def process_c2b_confirmation(payload: dict) -> C2BPayment | None:
         # concurrent duplicate confirmation
         return C2BPayment.objects.filter(trans_id=trans_id).first()
 
-    if client:
+    if held:
+        logger.warning(
+            "C2B %s: KSh %s HELD — %s is not cleared to transact",
+            trans_id, amount, client.operator.slug,
+        )
+    elif client:
         from apps.pppoe.services import record_client_payment
 
         record_client_payment(client, amount, source="c2b", memo=f"M-Pesa {trans_id}")
     else:
         logger.warning("C2B %s: no client for account %r", trans_id, bill_ref)
     return payment
+
+
+def release_held_payments(operator) -> int:
+    """An ISP just went live. Everything their customers paid while they were being
+    verified is credited now — nobody loses a shilling for our waiting.
+
+    Idempotent: a payment can only leave HELD once, so re-running credits nothing
+    twice.
+    """
+    from apps.pppoe.services import record_client_payment
+
+    released = 0
+    held = C2BPayment.objects.select_related("client").filter(
+        operator=operator, status=C2BPayment.Status.HELD, client__isnull=False
+    )
+    for payment in held:
+        with db_transaction.atomic():
+            # Re-read under lock: two approvals racing must not double-credit.
+            row = (
+                C2BPayment.objects.select_for_update()
+                .filter(pk=payment.pk, status=C2BPayment.Status.HELD)
+                .first()
+            )
+            if row is None:
+                continue
+            row.status = C2BPayment.Status.MATCHED
+            row.save(update_fields=["status"])
+            record_client_payment(
+                row.client, row.amount, source="c2b", memo=f"M-Pesa {row.trans_id} (released)"
+            )
+            released += 1
+    if released:
+        logger.info("Released %s held payment(s) for %s", released, operator.slug)
+    return released

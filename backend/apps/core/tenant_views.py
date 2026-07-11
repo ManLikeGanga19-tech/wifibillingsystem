@@ -148,7 +148,10 @@ class PlatformTenantViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def approve(self, request, pk=None):
+        """Flip the money gate ON. This is the moment an ISP can actually earn."""
         from datetime import timedelta
+
+        from apps.payments.c2b import release_held_payments
 
         operator = self.get_object()
         operator.status = Operator.Status.ACTIVE
@@ -159,8 +162,25 @@ class PlatformTenantViewSet(viewsets.ModelViewSet):
         operator.save(
             update_fields=["status", "approved_at", "trial_ends_at", "updated_at"]
         )
-        audit("tenant_approved", operator=operator, actor=request.user, target=operator)
-        return Response({"status": operator.status, "trial_ends_at": operator.trial_ends_at})
+
+        # Anything their customers paid while we were verifying them is credited
+        # now. Nobody loses a shilling because WE made them wait.
+        released = release_held_payments(operator)
+
+        audit(
+            "tenant_approved",
+            operator=operator,
+            actor=request.user,
+            target=operator,
+            released_payments=released,
+        )
+        return Response(
+            {
+                "status": operator.status,
+                "trial_ends_at": operator.trial_ends_at,
+                "released_payments": released,
+            }
+        )
 
     @action(detail=True, methods=["get"])
     def detail_stats(self, request, pk=None):

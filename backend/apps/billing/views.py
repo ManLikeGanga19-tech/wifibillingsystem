@@ -12,6 +12,7 @@ from apps.core.permissions import (
     IsPlatformOwner,
     IsPlatformStaff,
     RequireTenant,
+    TenantCanTransact,
     TenantIsOperational,
 )
 from apps.core.phone import InvalidPhoneError, normalize_msisdn
@@ -77,6 +78,14 @@ class MyPayoutsViewSet(TenantReadOnlyViewSet):
         *TenantReadOnlyViewSet.permission_classes,
         CanManageMoney,
     ]
+
+    def get_permissions(self):
+        perms = super().get_permissions()
+        if self.action == "withdraw":
+            # Money leaving our custody. An unverified ISP cannot pull funds out —
+            # they may not even be who they say they are.
+            perms = [*perms, TenantCanTransact()]
+        return perms
 
     @action(detail=False, methods=["post"])
     def withdraw(self, request):
