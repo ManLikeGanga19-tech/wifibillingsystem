@@ -115,6 +115,14 @@ All models operator-scoped via TenantScopedMixin. Roles: owner/manager manage cl
 + plans + network; support read-only. Money actions (write-offs, manual credits) =
 owner. Platform staff view-as as usual.
 
+## Payments / custody (see docs/PAYMENTS_ARCHITECTURE.md)
+
+Central custody: all money to Danamo first, ledger-attributed per ISP, then
+disbursed. Collection via Daraja (STK+C2B). Payouts stay MANUAL for now; automate
+via I&M H2H (banks/Pesalink) as a later phase. Provider-abstracted
+(CollectionProvider / DisbursementProvider). Add a basic platform float/
+reconciliation view as part of Phase 3.
+
 ## Build order (when we start)
 
 1. Models + migrations (pppoe app: ServicePlan, Client, Invoice, Tower, AccessPoint) +
@@ -122,11 +130,12 @@ owner. Platform staff view-as as usual.
 2. Provisioning: PPPoE adapter methods + profile sync + suspend/restore (redirect).
 3. Billing engine: anniversary invoicing beat, overdue→suspend, grace.
 4. C2B: register URLs, confirmation matching, wallet credit, auto-restore, idempotency.
-5. Platform per-user fee metering (monthly).
-6. UI: Broadband section (clients wizard/detail, plans, invoices, network, account sheet).
+5. Platform per-user fee metering (monthly) + basic float/reconciliation view.
+6. UI: Broadband section (clients wizard/detail, plans, invoices, network, account
+   sheet) — same ISP console as hotspot, new sidebar group. Platform reconciliation.
 7. Tests: account-number uniqueness/routing, C2B idempotency + matching, invoice
    anniversary, overdue→suspend→pay→restore, AP capacity, tenant isolation.
 8. Verify on real RB951 (create PPPoE server, provision a test secret, dial in).
 
-Deferred: static-IP + Simple Queue mode (adapter designed to accept it), customer
-self-service portal, multi-service-per-customer.
+Deferred: static-IP + Simple Queue mode (adapter designed to accept it), I&M H2H
+payout automation, Daraja B2C, customer self-service portal, multi-service-per-customer.
