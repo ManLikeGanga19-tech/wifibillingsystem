@@ -31,7 +31,7 @@ def sync_router_sessions(router) -> dict:
     db_active = Session.objects.filter(router=router, status=Session.Status.ACTIVE)
     report = {"reprovisioned": 0, "expired": 0, "checked": db_active.count()}
 
-    for session in db_active.select_related("plan", "operator", "user"):
+    for session in db_active.select_related("plan", "operator", "subscriber"):
         if session.expires_at <= now:
             # Overdue — belongs off the router
             session.status = Session.Status.EXPIRED

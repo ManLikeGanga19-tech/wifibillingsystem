@@ -104,7 +104,9 @@ def router_enroll(request):
 
 class SessionViewSet(TenantReadOnlyViewSet):
     serializer_class = SessionSerializer
-    queryset = Session.objects.select_related("plan", "router", "user").order_by("-created_at")
+    queryset = Session.objects.select_related("plan", "router", "subscriber").order_by(
+        "-created_at"
+    )
 
     def get_queryset(self):
         qs = super().get_queryset()

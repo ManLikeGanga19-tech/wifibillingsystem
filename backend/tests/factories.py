@@ -3,7 +3,7 @@ from datetime import timedelta
 import factory
 from django.utils import timezone
 
-from apps.accounts.models import User
+from apps.accounts.models import Subscriber, User
 from apps.core.models import Operator
 from apps.payments.models import Transaction
 from apps.plans.models import Plan
@@ -22,11 +22,24 @@ class OperatorFactory(factory.django.DjangoModelFactory):
 
 
 class UserFactory(factory.django.DjangoModelFactory):
+    """Login accounts: platform admins and ISP staff."""
+
     class Meta:
         model = User
 
     operator = factory.SubFactory(OperatorFactory)
     phone = factory.Sequence(lambda n: f"2547{n:08d}")
+    name = factory.Faker("name")
+
+
+class SubscriberFactory(factory.django.DjangoModelFactory):
+    """Customers: a phone that buys WiFi from one ISP."""
+
+    class Meta:
+        model = Subscriber
+
+    operator = factory.SubFactory(OperatorFactory)
+    phone = factory.Sequence(lambda n: f"2547{n + 50_000_000:08d}")
     name = factory.Faker("name")
 
 
@@ -57,9 +70,11 @@ class TransactionFactory(factory.django.DjangoModelFactory):
         model = Transaction
 
     operator = factory.SubFactory(OperatorFactory)
-    user = factory.SubFactory(UserFactory)
-    plan = factory.SubFactory(PlanFactory)
-    phone = factory.LazyAttribute(lambda o: o.user.phone)
+    subscriber = factory.SubFactory(
+        SubscriberFactory, operator=factory.SelfAttribute("..operator")
+    )
+    plan = factory.SubFactory(PlanFactory, operator=factory.SelfAttribute("..operator"))
+    phone = factory.LazyAttribute(lambda o: o.subscriber.phone)
     amount = factory.LazyAttribute(lambda o: o.plan.price)
     checkout_request_id = factory.Sequence(lambda n: f"ws_CO_test_{n:06d}")
 
@@ -69,11 +84,15 @@ class SessionFactory(factory.django.DjangoModelFactory):
         model = Session
 
     operator = factory.SubFactory(OperatorFactory)
-    user = factory.SubFactory(UserFactory)
-    plan = factory.SubFactory(PlanFactory)
-    router = factory.SubFactory(RouterFactory)
-    transaction = factory.SubFactory(TransactionFactory)
-    hotspot_username = factory.LazyAttribute(lambda o: o.user.phone)
+    subscriber = factory.SubFactory(
+        SubscriberFactory, operator=factory.SelfAttribute("..operator")
+    )
+    plan = factory.SubFactory(PlanFactory, operator=factory.SelfAttribute("..operator"))
+    router = factory.SubFactory(RouterFactory, operator=factory.SelfAttribute("..operator"))
+    transaction = factory.SubFactory(
+        TransactionFactory, operator=factory.SelfAttribute("..operator")
+    )
+    hotspot_username = factory.LazyAttribute(lambda o: o.subscriber.phone)
     hotspot_password = "123456"
     starts_at = factory.LazyFunction(timezone.now)
     expires_at = factory.LazyFunction(lambda: timezone.now() + timedelta(hours=1))

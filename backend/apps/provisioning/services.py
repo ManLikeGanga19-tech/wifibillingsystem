@@ -31,7 +31,7 @@ def create_session_for_transaction(tx) -> Session:
     now = timezone.now()
     return Session.objects.create(
         operator=tx.operator,
-        user=tx.user,
+        subscriber=tx.subscriber,
         plan=tx.plan,
         router=pick_router(tx.operator, tx.router),
         transaction=tx,
@@ -51,7 +51,7 @@ def create_session_for_voucher(voucher, mac: str = "", router=None) -> Session:
     now = timezone.now()
     return Session.objects.create(
         operator=voucher.operator,
-        user=voucher.redeemed_by,
+        subscriber=voucher.redeemed_by,
         plan=voucher.plan,
         router=pick_router(voucher.operator, router),
         voucher=voucher,

@@ -21,7 +21,7 @@ class Voucher(OperatorOwnedModel):
         max_length=10, choices=Status.choices, default=Status.UNUSED, db_index=True
     )
     redeemed_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL
+        "accounts.Subscriber", null=True, blank=True, on_delete=models.SET_NULL
     )
     redeemed_at = models.DateTimeField(null=True, blank=True)
     printed = models.BooleanField(default=False)

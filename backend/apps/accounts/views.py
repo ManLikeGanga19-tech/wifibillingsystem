@@ -8,13 +8,13 @@ from apps.core.permissions import TenantIsOperational
 from apps.core.tenancy import request_operator
 from apps.provisioning.models import Session
 
-from .models import User
+from .models import Subscriber
 from .serializers import SubscriberSerializer
 
 
 class MeView(APIView):
-    """Who am I + my tenant context. The UI uses this to route between the
-    platform view, the ISP console, and the pending-approval gate."""
+    """Who am I + my tenant context — routes the UI between platform view,
+    ISP console, and the pending-approval gate."""
 
     permission_classes = [IsAuthenticated]
 
@@ -42,25 +42,20 @@ class MeView(APIView):
 
 
 class SubscriberViewSet(viewsets.ReadOnlyModelViewSet):
-    """Hotspot customers with session summary, scoped to the tenant. A customer
-    belongs to the tenants they have transacted with (phone numbers are global)."""
+    """ISP customers, scoped to the tenant. Subscribers are per-operator by
+    construction, so scoping is a plain operator filter — no cross-tenant joins."""
 
     serializer_class = SubscriberSerializer
     permission_classes = [IsAdminUser, TenantIsOperational]
 
     def get_queryset(self):
         operator = request_operator(self.request)
-        qs = User.objects.filter(is_staff=False)
+        qs = Subscriber.objects.all()
         if operator is not None:
-            qs = qs.filter(
-                Q(operator=operator)
-                | Q(transactions__operator=operator)
-                | Q(sessions__operator=operator)
-            ).distinct()
-        session_filter = Q(sessions__status=Session.Status.ACTIVE)
-        if operator is not None:
-            session_filter &= Q(sessions__operator=operator)
+            qs = qs.filter(operator=operator)
         return qs.annotate(
             last_session_expires=Max("sessions__expires_at"),
-            active_sessions=Count("sessions", filter=session_filter),
-        ).order_by("-date_joined")
+            active_sessions=Count(
+                "sessions", filter=Q(sessions__status=Session.Status.ACTIVE)
+            ),
+        ).order_by("-created_at")

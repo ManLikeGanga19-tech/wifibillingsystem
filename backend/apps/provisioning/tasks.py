@@ -22,7 +22,7 @@ def provision_transaction(self, transaction_id: int):
 
     from . import services
 
-    tx = Transaction.objects.select_related("plan", "operator", "user", "router").get(
+    tx = Transaction.objects.select_related("plan", "operator", "subscriber", "router").get(
         pk=transaction_id
     )
     if tx.status not in Transaction.SUCCESS_STATUSES:

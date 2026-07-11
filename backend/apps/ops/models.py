@@ -24,7 +24,7 @@ class Ticket(OperatorOwnedModel):
     subject = models.CharField(max_length=200)
     description = models.TextField(blank=True)
     subscriber = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
+        "accounts.Subscriber",
         null=True,
         blank=True,
         on_delete=models.SET_NULL,

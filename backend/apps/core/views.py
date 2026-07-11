@@ -7,7 +7,7 @@ from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.accounts.models import User
+from apps.accounts.models import Subscriber
 from apps.notifications.models import Campaign
 from apps.ops.models import Equipment, Lead, Ticket
 from apps.payments.models import Transaction
@@ -29,17 +29,12 @@ class NavCountsView(APIView):
         from apps.core.tenancy import request_operator
 
         op = request_operator(request)
-        users = User.objects.filter(is_staff=False)
-        if op is not None:
-            users = users.filter(
-                Q(operator=op) | Q(transactions__operator=op) | Q(sessions__operator=op)
-            ).distinct()
         return Response(
             {
                 "active_users": _scoped(
                     Session.objects.filter(status=Session.Status.ACTIVE), op
                 ).count(),
-                "users": users.count(),
+                "users": _scoped(Subscriber.objects.all(), op).count(),
                 "tickets": _scoped(
                     Ticket.objects.filter(status__in=Ticket.OPEN_STATUSES), op
                 ).count(),
@@ -99,7 +94,7 @@ class DashboardStatsView(APIView):
             status__in=Transaction.SUCCESS_STATUSES
         ).count()
         paying_users_month = (
-            paid_month.exclude(user=None).values("user").distinct().count()
+            paid_month.exclude(subscriber=None).values("subscriber").distinct().count()
         )
 
         kpis = {
@@ -135,19 +130,9 @@ class DashboardStatsView(APIView):
                 ),
                 op,
             ).count(),
-            "total_subscribers": (
-                User.objects.filter(is_staff=False)
-                if op is None
-                else User.objects.filter(is_staff=False)
-                .filter(Q(operator=op) | Q(transactions__operator=op) | Q(sessions__operator=op))
-                .distinct()
-            ).count(),
-            "new_subscribers_7d": (
-                User.objects.filter(is_staff=False, date_joined__gte=d7)
-                if op is None
-                else User.objects.filter(is_staff=False, date_joined__gte=d7)
-                .filter(Q(operator=op) | Q(transactions__operator=op) | Q(sessions__operator=op))
-                .distinct()
+            "total_subscribers": _scoped(Subscriber.objects.all(), op).count(),
+            "new_subscribers_7d": _scoped(
+                Subscriber.objects.filter(created_at__gte=d7), op
             ).count(),
             "arpu_month": (
                 round(float(revenue_month) / paying_users_month, 2)

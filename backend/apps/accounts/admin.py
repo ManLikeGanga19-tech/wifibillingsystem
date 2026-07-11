@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 
-from .models import User
+from .models import Subscriber, User
 
 
 @admin.register(User)
@@ -19,3 +19,10 @@ class UserAdmin(BaseUserAdmin):
     add_fieldsets = (
         (None, {"classes": ("wide",), "fields": ("phone", "name", "password1", "password2")}),
     )
+
+
+@admin.register(Subscriber)
+class SubscriberAdmin(admin.ModelAdmin):
+    list_display = ("phone", "name", "operator", "is_blocked", "created_at")
+    list_filter = ("operator", "is_blocked")
+    search_fields = ("phone", "name", "email")

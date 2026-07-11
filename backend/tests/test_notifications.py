@@ -4,7 +4,7 @@ from apps.notifications.models import Campaign, Message
 from apps.notifications.providers.dummy import DummyProvider
 from apps.notifications.tasks import dispatch_campaign
 
-from .factories import SessionFactory, UserFactory
+from .factories import SessionFactory, SubscriberFactory, UserFactory
 
 pytestmark = pytest.mark.django_db
 
@@ -21,8 +21,8 @@ def _campaign(operator, audience=Campaign.Audience.ALL, **kwargs):
 
 
 def test_dispatch_to_all_clients(operator):
-    UserFactory.create_batch(3, operator=operator)
-    UserFactory(operator=operator, is_staff=True)  # staff excluded
+    SubscriberFactory.create_batch(3, operator=operator)
+    UserFactory(operator=operator, is_staff=True)  # staff are not customers
     campaign = _campaign(operator)
 
     assert dispatch_campaign(campaign.pk) == 3
@@ -36,19 +36,19 @@ def test_dispatch_to_all_clients(operator):
 
 
 def test_dispatch_to_active_only(operator, router):
-    active_user = UserFactory(operator=operator)
-    SessionFactory(user=active_user, operator=operator, router=router)
-    UserFactory(operator=operator)  # no session -> excluded
+    active_sub = SubscriberFactory(operator=operator)
+    SessionFactory(subscriber=active_sub, operator=operator, router=router)
+    SubscriberFactory(operator=operator)  # no session -> excluded
 
     campaign = _campaign(operator, audience=Campaign.Audience.ACTIVE)
     assert dispatch_campaign(campaign.pk) == 1
-    assert DummyProvider.sent[0][0] == active_user.phone
+    assert DummyProvider.sent[0][0] == active_sub.phone
 
 
 def test_campaign_api_queues_dispatch(
     admin_client, operator, django_capture_on_commit_callbacks
 ):
-    UserFactory.create_batch(2, operator=operator)
+    SubscriberFactory.create_batch(2, operator=operator)
     with django_capture_on_commit_callbacks(execute=True):
         resp = admin_client.post(
             "/api/v1/notifications/campaigns/",

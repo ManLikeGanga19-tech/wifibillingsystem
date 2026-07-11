@@ -1,6 +1,5 @@
 import uuid
 
-from django.conf import settings
 from django.db import models
 
 from apps.core.models import OperatorOwnedModel
@@ -17,8 +16,8 @@ class Transaction(OperatorOwnedModel):
 
     # Public UUID so the portal can poll status without exposing sequential IDs
     public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
-    user = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
+    subscriber = models.ForeignKey(
+        "accounts.Subscriber",
         null=True,
         blank=True,
         on_delete=models.SET_NULL,

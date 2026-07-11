@@ -40,7 +40,7 @@ class RouterSerializer(serializers.ModelSerializer):
 class SessionSerializer(serializers.ModelSerializer):
     plan_name = serializers.CharField(source="plan.name", read_only=True)
     router_name = serializers.CharField(source="router.name", read_only=True)
-    phone = serializers.CharField(source="user.phone", read_only=True, default="")
+    phone = serializers.CharField(source="subscriber.phone", read_only=True, default="")
 
     class Meta:
         model = Session

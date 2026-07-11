@@ -1,6 +1,5 @@
 import secrets
 
-from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
@@ -93,8 +92,8 @@ class Session(OperatorOwnedModel):
         SUSPENDED = "suspended", "Suspended"
         FAILED = "failed", "Provisioning failed"
 
-    user = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
+    subscriber = models.ForeignKey(
+        "accounts.Subscriber",
         null=True,
         blank=True,
         on_delete=models.SET_NULL,

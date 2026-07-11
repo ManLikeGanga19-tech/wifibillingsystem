@@ -41,19 +41,13 @@ def send_message(self, message_id: int):
 @shared_task
 def dispatch_campaign(campaign_id: int):
     """Resolve the audience into Message rows and queue individual sends."""
-    from django.db.models import Q
-
-    from apps.accounts.models import User
+    from apps.accounts.models import Subscriber
     from apps.provisioning.models import Session
 
     from .models import Campaign, Channel, Message
 
     campaign = Campaign.objects.get(pk=campaign_id)
-    customers = User.objects.filter(is_staff=False, is_active=True).filter(
-        Q(operator=campaign.operator)
-        | Q(transactions__operator=campaign.operator)
-        | Q(sessions__operator=campaign.operator)
-    )
+    customers = Subscriber.objects.filter(operator=campaign.operator, is_blocked=False)
     if campaign.channel == Channel.EMAIL:
         customers = customers.exclude(email="")
     else:

@@ -6,7 +6,7 @@ import logging
 from django.db import transaction as db_transaction
 from django.utils import timezone
 
-from apps.accounts.models import User
+from apps.accounts.models import Subscriber
 from apps.core.phone import normalize_msisdn
 from apps.core.services import audit
 
@@ -21,12 +21,10 @@ def initiate_stk_push(*, phone: str, plan, mac: str = "", router=None) -> Transa
     the operator who owns the plan being bought."""
     phone = normalize_msisdn(phone)
     operator = plan.operator
-    user, _ = User.objects.get_or_create(
-        phone=phone, defaults={"operator": operator}
-    )
+    subscriber, _ = Subscriber.get_or_create_for(operator, phone)
     tx = Transaction.objects.create(
         operator=operator,
-        user=user,
+        subscriber=subscriber,
         plan=plan,
         router=router,
         phone=phone,

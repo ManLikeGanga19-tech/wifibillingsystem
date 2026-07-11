@@ -3,6 +3,7 @@
 import pytest
 from rest_framework.test import APIClient
 
+from apps.accounts.models import User
 from apps.core.models import Operator
 from apps.core.tenancy import _slug_from_host
 
@@ -161,6 +162,69 @@ class TestSignupAndApproval:
         op_a, _ = two_tenants
         resp = staff_client(op_a).get("/api/v1/platform/tenants/")
         assert resp.status_code == 403
+
+
+class TestIdentitySeparation:
+    """Login accounts (User) and customers (Subscriber) are separate identities.
+    A phone can be a customer at several ISPs AND own an ISP account."""
+
+    SIGNUP = {
+        "business_name": "Mtandao Wireless",
+        "owner_name": "Jane Owner",
+        "phone": "0722000111",
+        "email": "jane@mtandao.co.ke",
+        "password": "s3cure-pass!",
+    }
+
+    def test_existing_customer_can_register_an_isp(self, api_client, two_tenants):
+        """The reported bug: a phone that bought WiFi as a customer must still be
+        able to sign up as an ISP owner."""
+        from apps.accounts.models import Subscriber
+
+        op_a, _ = two_tenants
+        Subscriber.objects.create(operator=op_a, phone="254722000111", name="Jane the customer")
+
+        resp = api_client.post("/api/v1/tenants/signup/", self.SIGNUP, format="json")
+        assert resp.status_code == 201, resp.content
+        # Both identities coexist
+        assert Subscriber.objects.filter(operator=op_a, phone="254722000111").exists()
+        assert User.objects.filter(phone="254722000111", is_staff=True).exists()
+
+    def test_same_phone_is_a_distinct_customer_at_each_isp(self, two_tenants):
+        """Previously the second ISP's get_or_create returned the FIRST ISP's row,
+        silently mis-attributing the customer."""
+        from apps.accounts.models import Subscriber
+
+        op_a, op_b = two_tenants
+        sub_a, created_a = Subscriber.get_or_create_for(op_a, "0733111222")
+        sub_b, created_b = Subscriber.get_or_create_for(op_b, "0733111222")
+
+        assert created_a and created_b
+        assert sub_a.pk != sub_b.pk
+        assert sub_a.operator == op_a and sub_b.operator == op_b
+
+    def test_subscriber_is_idempotent_within_one_isp(self, two_tenants):
+        from apps.accounts.models import Subscriber
+
+        op_a, _ = two_tenants
+        first, _ = Subscriber.get_or_create_for(op_a, "0733111222")
+        again, created = Subscriber.get_or_create_for(op_a, "254733111222")  # same, normalized
+        assert not created
+        assert first.pk == again.pk
+
+    def test_duplicate_login_phone_still_rejected(self, api_client):
+        """Two ISP owners cannot share a login phone — that would break auth."""
+        first = api_client.post("/api/v1/tenants/signup/", self.SIGNUP, format="json")
+        assert first.status_code == 201
+        dup = {**self.SIGNUP, "business_name": "Other ISP", "email": "x@y.co.ke"}
+        assert api_client.post("/api/v1/tenants/signup/", dup, format="json").status_code == 400
+
+    def test_customers_are_not_login_accounts(self, two_tenants):
+        from apps.accounts.models import Subscriber
+
+        op_a, _ = two_tenants
+        Subscriber.objects.create(operator=op_a, phone="254799888777")
+        assert not User.objects.filter(phone="254799888777").exists()
 
 
 class TestMe:
