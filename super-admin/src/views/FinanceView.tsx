@@ -14,7 +14,6 @@ import {
   STATUS_TONE,
   Table,
   td,
-  tdStyle,
   useLoad,
 } from '../components/ui';
 import { SERIES } from '../components/charts';
@@ -31,10 +30,10 @@ export default function FinanceView({ onOpenTenant }: { onOpenTenant: (id: numbe
   return (
     <div className="space-y-5">
       <div className="flex items-center gap-1.5">
-        <Btn variant={tab === 'pnl' ? 'primary' : 'ghost'} onClick={() => setTab('pnl')}>
+        <Btn variant={tab === 'pnl' ? 'dark' : 'outline'} onClick={() => setTab('pnl')}>
           <Scale className="h-3.5 w-3.5" /> Tenant P&amp;L
         </Btn>
-        <Btn variant={tab === 'payouts' ? 'primary' : 'ghost'} onClick={() => setTab('payouts')}>
+        <Btn variant={tab === 'payouts' ? 'dark' : 'outline'} onClick={() => setTab('payouts')}>
           <Wallet className="h-3.5 w-3.5" /> Payouts
         </Btn>
       </div>
@@ -130,37 +129,37 @@ function Row({ r, onOpen }: { r: PnlRow; onOpen: () => void }) {
   const healthy = r.margin_pct >= 50;
 
   return (
-    <tr className="hover:bg-white/[0.03] cursor-pointer transition" onClick={onOpen}>
-      <td className={td} style={tdStyle}>
-        <span className="font-medium text-white">{r.name}</span>
+    <tr className="hover:bg-[#f0efec] cursor-pointer transition" onClick={onOpen}>
+      <td className={td}>
+        <span className="font-medium text-[#141414]">{r.name}</span>
         <span className="block text-[11px]" style={{ color: 'var(--text-muted)' }}>
           {r.slug}
         </span>
       </td>
-      <td className={td} style={tdStyle}>
+      <td className={td}>
         <div className="flex flex-wrap gap-1">
-          <Badge tone={STATUS_TONE[r.status] ?? 'neutral'}>{r.status}</Badge>
-          {r.in_trial && <Badge tone="accent">trial</Badge>}
-          {r.is_platform_owned && <Badge tone="neutral">ours</Badge>}
+          <Badge tone={STATUS_TONE[r.status] ?? 'gray'}>{r.status}</Badge>
+          {r.in_trial && <Badge tone="blue">trial</Badge>}
+          {r.is_platform_owned && <Badge tone="gray">ours</Badge>}
         </div>
       </td>
-      <td className={`${td} tnum`} style={{ ...tdStyle, color: 'var(--text-secondary)' }}>
+      <td className={`${td} tnum`} style={{ color: 'var(--text-secondary)' }}>
         {ksh(r.gross_collected, true)}
       </td>
-      <td className={`${td} tnum`} style={tdStyle}>
+      <td className={`${td} tnum`}>
         {ksh(r.revenue, true)}
       </td>
-      <td className={`${td} tnum`} style={{ ...tdStyle, color: SERIES.costs }}>
+      <td className={`${td} tnum`} style={{ color: SERIES.costs }}>
         {Number(r.transaction_costs) > 0 ? `−${ksh(r.transaction_costs, true)}` : '—'}
       </td>
-      <td className={`${td} tnum font-medium`} style={{ ...tdStyle, color: SERIES.net }}>
+      <td className={`${td} tnum font-medium`} style={{ color: SERIES.net }}>
         {ksh(r.net_margin, true)}
       </td>
-      <td className={td} style={tdStyle}>
+      <td className={td}>
         {revenue > 0 ? (
           <span
             className="inline-flex items-center gap-1 tnum"
-            style={{ color: healthy ? '#3ecf3e' : 'var(--warning)' }}
+            style={{ color: healthy ? '#228B22' : 'var(--warning)' }}
           >
             {healthy ? (
               <TrendingUp className="h-3 w-3" />
@@ -173,10 +172,10 @@ function Row({ r, onOpen }: { r: PnlRow; onOpen: () => void }) {
           <span style={{ color: 'var(--text-muted)' }}>—</span>
         )}
       </td>
-      <td className={`${td} tnum`} style={{ ...tdStyle, color: 'var(--text-secondary)' }}>
+      <td className={`${td} tnum`} style={{ color: 'var(--text-secondary)' }}>
         {num(r.pppoe_users)}
       </td>
-      <td className={`${td} tnum`} style={{ ...tdStyle, color: 'var(--text-secondary)' }}>
+      <td className={`${td} tnum`} style={{ color: 'var(--text-secondary)' }}>
         {ksh(r.wallet_balance, true)}
       </td>
     </tr>

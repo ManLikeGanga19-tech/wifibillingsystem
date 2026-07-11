@@ -85,12 +85,12 @@ export default function LoginView({ onLoggedIn }: { onLoggedIn: () => void }) {
         </label>
 
         {error && (
-          <p className="text-xs" style={{ color: '#f07373' }}>
+          <p className="text-xs" style={{ color: '#B22222' }}>
             {error}
           </p>
         )}
 
-        <Btn variant="primary" type="submit" disabled={busy || !phone || !password}>
+        <Btn variant="dark" type="submit" disabled={busy || !phone || !password}>
           {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
           {busy ? 'Signing in…' : 'Sign in'}
         </Btn>

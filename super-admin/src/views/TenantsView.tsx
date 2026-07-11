@@ -13,7 +13,6 @@ import {
   STATUS_TONE,
   Table,
   td,
-  tdStyle,
   toast,
   useLoad,
 } from '../components/ui';
@@ -43,10 +42,10 @@ function TenantList({ onOpen }: { onOpen: (id: number) => void }) {
   const act = async (fn: Promise<unknown>, msg: string) => {
     try {
       await fn;
-      toast('good', msg);
+      toast('green', msg);
       reload();
     } catch {
-      toast('critical', 'Action failed.');
+      toast('red', 'Action failed.');
     }
   };
 
@@ -63,47 +62,47 @@ function TenantList({ onOpen }: { onOpen: (id: number) => void }) {
           {data.results.map((t) => (
             <tr
               key={t.id}
-              className="hover:bg-white/[0.03] cursor-pointer transition"
+              className="hover:bg-[#f0efec] cursor-pointer transition"
               onClick={() => onOpen(t.id)}
             >
-              <td className={td} style={tdStyle}>
-                <span className="font-medium text-white">{t.name}</span>
+              <td className={td}>
+                <span className="font-medium text-[#141414]">{t.name}</span>
                 <span className="block text-[11px]" style={{ color: 'var(--text-muted)' }}>
                   {t.slug}
                 </span>
               </td>
-              <td className={td} style={{ ...tdStyle, color: 'var(--text-secondary)' }}>
+              <td className={td} style={{ color: 'var(--text-secondary)' }}>
                 {t.owner_name || '—'}
                 <span className="block text-[11px] tnum" style={{ color: 'var(--text-muted)' }}>
                   {t.contact_phone}
                 </span>
               </td>
-              <td className={td} style={tdStyle}>
+              <td className={td}>
                 <div className="flex flex-wrap gap-1">
-                  <Badge tone={STATUS_TONE[t.status] ?? 'neutral'}>{t.status}</Badge>
-                  {inTrial(t.trial_ends_at) && <Badge tone="accent">trial</Badge>}
+                  <Badge tone={STATUS_TONE[t.status] ?? 'gray'}>{t.status}</Badge>
+                  {inTrial(t.trial_ends_at) && <Badge tone="blue">trial</Badge>}
                 </div>
               </td>
               <td
                 className={`${td} text-[11px] tnum whitespace-nowrap`}
-                style={{ ...tdStyle, color: 'var(--text-secondary)' }}
+                style={{ color: 'var(--text-secondary)' }}
               >
                 {rateSummary(t)}
               </td>
-              <td className={`${td} tnum`} style={{ ...tdStyle, color: 'var(--text-secondary)' }}>
+              <td className={`${td} tnum`} style={{ color: 'var(--text-secondary)' }}>
                 {num(t.router_count)}
               </td>
               <td
                 className={`${td} whitespace-nowrap tnum`}
-                style={{ ...tdStyle, color: 'var(--text-muted)' }}
+                style={{ color: 'var(--text-muted)' }}
               >
                 {dt(t.created_at)}
               </td>
-              <td className={td} style={tdStyle} onClick={(e) => e.stopPropagation()}>
+              <td className={td} onClick={(e) => e.stopPropagation()}>
                 <div className="flex gap-1.5">
                   {t.status === 'pending' && (
                     <Btn
-                      variant="primary"
+                      variant="dark"
                       onClick={() => act(api.tenants.approve(t.id), `${t.name} approved.`)}
                     >
                       <Check className="h-3.5 w-3.5" /> Approve
@@ -151,7 +150,7 @@ function TenantDetail({ id, onBack }: { id: number; onBack: () => void }) {
       toast(r.charged ? 'good' : 'warning', r.detail);
       reload();
     } catch {
-      toast('critical', 'Could not bill the setup fee.');
+      toast('red', 'Could not bill the setup fee.');
     }
   };
 
@@ -168,15 +167,15 @@ function TenantDetail({ id, onBack }: { id: number; onBack: () => void }) {
               {t.slug}.wifios.co.ke · {t.owner_name} · {t.contact_phone}
             </p>
           </div>
-          <Badge tone={STATUS_TONE[t.status] ?? 'neutral'}>{t.status}</Badge>
-          {data.in_trial && <Badge tone="accent">trial ends {t.trial_ends_at}</Badge>}
+          <Badge tone={STATUS_TONE[t.status] ?? 'gray'}>{t.status}</Badge>
+          {data.in_trial && <Badge tone="blue">trial ends {t.trial_ends_at}</Badge>}
         </div>
         <div className="flex gap-2">
           <Btn onClick={chargeSetup} title="Only for ISPs who opted into assisted onboarding">
             <Receipt className="h-3.5 w-3.5" /> Bill setup fee
           </Btn>
           {/* The audited door. Everything above exists so this is rarely needed. */}
-          <Btn variant="primary" onClick={() => setImpersonating(true)}>
+          <Btn variant="dark" onClick={() => setImpersonating(true)}>
             <Eye className="h-3.5 w-3.5" /> Enter their console
           </Btn>
         </div>
@@ -232,17 +231,17 @@ function TenantDetail({ id, onBack }: { id: number; onBack: () => void }) {
               <tr key={a.id}>
                 <td
                   className={`${td} whitespace-nowrap tnum`}
-                  style={{ ...tdStyle, color: 'var(--text-muted)' }}
+                  style={{ color: 'var(--text-muted)' }}
                 >
                   {dt(a.created_at)}
                 </td>
-                <td className={td} style={tdStyle}>
-                  <Badge tone="neutral">{a.action}</Badge>
+                <td className={td}>
+                  <Badge tone="gray">{a.action}</Badge>
                 </td>
-                <td className={td} style={{ ...tdStyle, color: 'var(--text-secondary)' }}>
+                <td className={td} style={{ color: 'var(--text-secondary)' }}>
                   {a.actor_name || 'system'}
                 </td>
-                <td className={td} style={{ ...tdStyle, color: 'var(--text-muted)' }}>
+                <td className={td} style={{ color: 'var(--text-muted)' }}>
                   {a.target_type ? `${a.target_type}#${a.target_id}` : '—'}
                 </td>
               </tr>
@@ -280,10 +279,10 @@ function RateCard({ tenant, onSaved }: { tenant: Tenant; onSaved: () => void }) 
     setSaving(true);
     try {
       await api.tenants.update(tenant.id, form);
-      toast('good', 'Rates updated.');
+      toast('green', 'Rates updated.');
       onSaved();
     } catch {
-      toast('critical', 'Could not save rates.');
+      toast('red', 'Could not save rates.');
     } finally {
       setSaving(false);
     }
@@ -313,7 +312,7 @@ function RateCard({ tenant, onSaved }: { tenant: Tenant; onSaved: () => void }) 
         {field('pppoe_user_fee', 'PPPoE flat (KSh)', '0 = use the platform tiers (40/35/30)')}
         {field('setup_fee', 'Setup fee (KSh)', 'Only billed if you bill it — opt-in')}
       </div>
-      <Btn variant="primary" onClick={save} disabled={saving}>
+      <Btn variant="dark" onClick={save} disabled={saving}>
         {saving ? 'Saving…' : 'Save rates'}
       </Btn>
     </div>

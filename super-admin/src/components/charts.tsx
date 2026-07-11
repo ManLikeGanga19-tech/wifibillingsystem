@@ -1,15 +1,14 @@
 /**
- * Chart layer.
+ * Chart layer — light/brutalist, matching the ISP console.
  *
- * Colors come from the VALIDATED categorical palette (see index.css) — worst
- * adjacent CVD ΔE 35.9 on this surface, every slot >= 3:1 contrast. Hues are
- * assigned to entities in fixed order and never cycled: a filter that drops a
- * series must not repaint the survivors.
+ * Colors are VALIDATED against the white panel surface, not eyeballed: every slot
+ * clears 3:1 contrast, worst adjacent CVD ΔE 12.8, and the net-vs-costs pair that
+ * shares the main chart separates at ΔE 18.0 under protanopia (the red/green
+ * deficiency that would otherwise make that exact chart unreadable for ~8% of men).
  *
- * Rules held to here: one y-axis only (never dual); recessive grid/axes; a
- * legend whenever there are >= 2 series (and none when there is one — the title
- * names it); values in text tokens, never in the series color; crosshair +
- * tooltip on every time series.
+ * Rules held to: one y-axis, never dual; recessive grid/axes; a legend whenever
+ * there are >= 2 series (and none for one — the title names it); values in ink,
+ * never in the series color; crosshair + tooltip on every time series.
  */
 
 import {
@@ -27,14 +26,14 @@ import {
 import { day, ksh, type SeriesPoint } from '../api/client';
 
 export const SERIES = {
-  earnings: '#3987e5', // slot 1 blue
-  net: '#199e70', // slot 2 aqua
-  volume: '#c98500', // slot 3 yellow
-  costs: '#e66767', // slot 4 red
-  tenants: '#9085e9', // slot 5 violet
+  earnings: '#2a78d6', // blue
+  net: '#0f8a5f', // green
+  volume: '#a86e00', // amber
+  costs: '#c9302c', // red
+  tenants: '#5b3fa8', // violet
 } as const;
 
-const AXIS = { stroke: 'transparent', tick: { fill: '#64748b', fontSize: 11 } };
+const AXIS = { stroke: 'transparent', tick: { fill: '#8a8880', fontSize: 11 } };
 
 /* ---- tooltip ------------------------------------------------------------- */
 
@@ -58,27 +57,16 @@ function ChartTip({
 }) {
   if (!active || !payload?.length) return null;
   return (
-    <div
-      className="rounded-lg border px-3 py-2 text-xs shadow-xl"
-      style={{
-        background: 'var(--surface-2)',
-        borderColor: 'var(--hairline-strong)',
-        color: 'var(--text-primary)',
-      }}
-    >
-      <p className="mb-1.5 font-medium" style={{ color: 'var(--text-secondary)' }}>
+    <div className="bg-white border border-[#141414] px-3 py-2 text-[11px] font-mono">
+      <p className="mb-1.5 font-bold uppercase text-[#141414]/60">
         {typeof label === 'string' ? day(label) : label}
       </p>
       {payload.map((p) => (
         <div key={String(p.dataKey)} className="flex items-center gap-2 py-0.5">
-          {/* the chip carries identity; the text stays in ink tokens */}
-          <span
-            className="h-2 w-2 rounded-sm shrink-0"
-            style={{ background: p.color }}
-            aria-hidden
-          />
-          <span style={{ color: 'var(--text-secondary)' }}>{p.name}</span>
-          <span className="ml-auto tnum font-medium">
+          {/* the swatch carries identity; the text stays in ink */}
+          <span className="h-2 w-2 shrink-0" style={{ background: p.color }} aria-hidden />
+          <span className="text-[#141414]/70">{p.name}</span>
+          <span className="ml-auto font-bold tnum pl-3">
             {money ? ksh(p.value as number) : p.value}
           </span>
         </div>
@@ -87,7 +75,7 @@ function ChartTip({
   );
 }
 
-/* ---- legend (never color-alone: chip + label) ---------------------------- */
+/* ---- legend (never color-alone: swatch + label) -------------------------- */
 
 export function Legend({ items }: { items: { label: string; color: string }[] }) {
   return (
@@ -95,10 +83,9 @@ export function Legend({ items }: { items: { label: string; color: string }[] })
       {items.map((i) => (
         <span
           key={i.label}
-          className="inline-flex items-center gap-1.5 text-[11px]"
-          style={{ color: 'var(--text-secondary)' }}
+          className="inline-flex items-center gap-1.5 text-[10px] font-mono font-bold uppercase text-[#141414]/70"
         >
-          <span className="h-2 w-2 rounded-sm" style={{ background: i.color }} aria-hidden />
+          <span className="h-2 w-2" style={{ background: i.color }} aria-hidden />
           {i.label}
         </span>
       ))}
@@ -108,8 +95,8 @@ export function Legend({ items }: { items: { label: string; color: string }[] })
 
 /* ---- earnings composition ------------------------------------------------
    Stacked: net margin + transaction costs = gross platform earnings. Stacking is
-   honest here because the parts genuinely sum to the whole — it shows how much
-   of what we earn the M-Pesa/bank rails take back. */
+   honest here because the parts genuinely sum to the whole — it shows how much of
+   what we bill the M-Pesa/bank rails take straight back. */
 
 export function EarningsChart({ series }: { series: SeriesPoint[] }) {
   const data = series.map((p) => ({
@@ -129,8 +116,8 @@ export function EarningsChart({ series }: { series: SeriesPoint[] }) {
         <AreaChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
           <CartesianGrid vertical={false} />
           <XAxis dataKey="date" tickFormatter={day} {...AXIS} minTickGap={28} />
-          <YAxis tickFormatter={(v) => ksh(v, true)} width={64} {...AXIS} />
-          <Tooltip content={<ChartTip />} cursor={{ stroke: 'var(--hairline-strong)' }} />
+          <YAxis tickFormatter={(v) => ksh(v, true)} width={62} {...AXIS} />
+          <Tooltip content={<ChartTip />} cursor={{ stroke: '#141414', strokeOpacity: 0.3 }} />
           <Area
             type="monotone"
             dataKey="net"
@@ -139,7 +126,7 @@ export function EarningsChart({ series }: { series: SeriesPoint[] }) {
             stroke={SERIES.net}
             strokeWidth={2}
             fill={SERIES.net}
-            fillOpacity={0.22}
+            fillOpacity={0.18}
           />
           <Area
             type="monotone"
@@ -149,7 +136,7 @@ export function EarningsChart({ series }: { series: SeriesPoint[] }) {
             stroke={SERIES.costs}
             strokeWidth={2}
             fill={SERIES.costs}
-            fillOpacity={0.22}
+            fillOpacity={0.18}
           />
         </AreaChart>
       </ResponsiveContainer>
@@ -157,7 +144,7 @@ export function EarningsChart({ series }: { series: SeriesPoint[] }) {
   );
 }
 
-/* ---- gross volume (single series -> no legend; the title names it) ------- */
+/* ---- gross volume (single series -> no legend; the title names it) -------- */
 
 export function VolumeChart({ series }: { series: SeriesPoint[] }) {
   const data = series.map((p) => ({ date: p.date, volume: Number(p.gross_volume) }));
@@ -166,8 +153,8 @@ export function VolumeChart({ series }: { series: SeriesPoint[] }) {
       <AreaChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
         <CartesianGrid vertical={false} />
         <XAxis dataKey="date" tickFormatter={day} {...AXIS} minTickGap={28} />
-        <YAxis tickFormatter={(v) => ksh(v, true)} width={64} {...AXIS} />
-        <Tooltip content={<ChartTip />} cursor={{ stroke: 'var(--hairline-strong)' }} />
+        <YAxis tickFormatter={(v) => ksh(v, true)} width={62} {...AXIS} />
+        <Tooltip content={<ChartTip />} cursor={{ stroke: '#141414', strokeOpacity: 0.3 }} />
         <Area
           type="monotone"
           dataKey="volume"
@@ -175,19 +162,19 @@ export function VolumeChart({ series }: { series: SeriesPoint[] }) {
           stroke={SERIES.volume}
           strokeWidth={2}
           fill={SERIES.volume}
-          fillOpacity={0.18}
+          fillOpacity={0.15}
         />
       </AreaChart>
     </ResponsiveContainer>
   );
 }
 
-/* ---- revenue by stream (categorical magnitude -> bars, one per stream) ---- */
+/* ---- revenue by stream (categorical magnitude -> bars) -------------------- */
 
 const STREAM_LABEL: Record<string, string> = {
   commission: 'Hotspot 3%',
   base_fee: 'Base fee',
-  pppoe_fee: 'PPPoE per-user',
+  pppoe_fee: 'PPPoE / user',
   setup_fee: 'Setup (one-off)',
 };
 
@@ -205,10 +192,9 @@ export function StreamChart({ streams }: { streams: Record<string, string | numb
     name: STREAM_LABEL[k] ?? k,
     value: Number(v),
   }));
-  const empty = data.every((d) => d.value === 0);
-  if (empty) {
+  if (data.every((d) => d.value === 0)) {
     return (
-      <p className="text-center text-xs py-12" style={{ color: 'var(--text-muted)' }}>
+      <p className="text-center text-xs font-mono text-[#141414]/50 py-12">
         No platform revenue booked this month yet.
       </p>
     );
@@ -218,10 +204,9 @@ export function StreamChart({ streams }: { streams: Record<string, string | numb
       <BarChart data={data} layout="vertical" margin={{ top: 0, right: 12, bottom: 0, left: 0 }}>
         <CartesianGrid horizontal={false} />
         <XAxis type="number" tickFormatter={(v) => ksh(v, true)} {...AXIS} />
-        <YAxis type="category" dataKey="name" width={104} {...AXIS} />
-        <Tooltip content={<ChartTip />} cursor={{ fill: 'rgba(255,255,255,0.03)' }} />
-        {/* 4px rounded data-end, anchored to the baseline */}
-        <Bar dataKey="value" name="Revenue" radius={[0, 4, 4, 0]} barSize={18}>
+        <YAxis type="category" dataKey="name" width={106} {...AXIS} />
+        <Tooltip content={<ChartTip />} cursor={{ fill: 'rgba(20,20,20,0.04)' }} />
+        <Bar dataKey="value" name="Revenue" barSize={18}>
           {data.map((d) => (
             <Cell key={d.key} fill={STREAM_COLOR[d.key] ?? SERIES.earnings} />
           ))}
@@ -236,16 +221,13 @@ export function StreamChart({ streams }: { streams: Record<string, string | numb
 export function SignupChart({ series }: { series: SeriesPoint[] }) {
   const data = series.map((p) => ({ date: p.date, n: p.new_tenants }));
   return (
-    <ResponsiveContainer width="100%" height={160}>
+    <ResponsiveContainer width="100%" height={180}>
       <BarChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
         <CartesianGrid vertical={false} />
         <XAxis dataKey="date" tickFormatter={day} {...AXIS} minTickGap={28} />
-        <YAxis allowDecimals={false} width={32} {...AXIS} />
-        <Tooltip
-          content={<ChartTip money={false} />}
-          cursor={{ fill: 'rgba(255,255,255,0.03)' }}
-        />
-        <Bar dataKey="n" name="New ISPs" fill={SERIES.tenants} radius={[4, 4, 0, 0]} />
+        <YAxis allowDecimals={false} width={30} {...AXIS} />
+        <Tooltip content={<ChartTip money={false} />} cursor={{ fill: 'rgba(20,20,20,0.04)' }} />
+        <Bar dataKey="n" name="New ISPs" fill={SERIES.tenants} />
       </BarChart>
     </ResponsiveContainer>
   );

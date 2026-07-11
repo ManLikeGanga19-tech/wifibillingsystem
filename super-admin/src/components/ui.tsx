@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { AlertTriangle, Loader2, RefreshCw } from 'lucide-react';
 
+/**
+ * Primitives — matched to the ISP console's brutalist kit so the two consoles
+ * read as one product: square borders, hairline #141414 rules, mono uppercase
+ * labels, paper-white panels.
+ */
+
 /* ---- panels ------------------------------------------------------------- */
 
 export function Panel({
@@ -17,32 +23,29 @@ export function Panel({
   className?: string;
 }) {
   return (
-    <section className={`panel p-4 sm:p-5 ${className}`}>
+    <section className={`bg-white border border-[#141414] ${className}`}>
       {(title || right) && (
-        <header className="flex items-start justify-between gap-3 mb-4">
+        <header className="flex items-start justify-between gap-3 px-4 pt-4 pb-3">
           <div className="min-w-0">
             {title && (
-              <h2 className="text-[13px] font-semibold tracking-wide uppercase text-white">
-                {title}
-              </h2>
+              <h2 className="text-xs font-bold font-mono uppercase tracking-wide">{title}</h2>
             )}
             {subtitle && (
-              <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+              <p className="text-[11px] font-mono text-[#141414]/60 mt-1 leading-relaxed">
                 {subtitle}
               </p>
             )}
           </div>
-          {right && <div className="shrink-0">{right}</div>}
+          {right && <div className="shrink-0 flex gap-2">{right}</div>}
         </header>
       )}
-      {children}
+      <div className={title ? 'px-4 pb-4' : 'p-4'}>{children}</div>
     </section>
   );
 }
 
 /* ---- stat tile ----------------------------------------------------------
-   A bare number with a label. Per the form heuristic: when the job is "one
-   headline value", the right form is NOT a chart. */
+   When the job is "one headline value", the right form is NOT a chart. */
 
 export function Stat({
   label,
@@ -58,20 +61,18 @@ export function Stat({
   size?: 'md' | 'lg';
 }) {
   return (
-    <div className="panel-flat p-4">
-      <p className="text-[11px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+    <div className="bg-white border border-[#141414] p-3.5">
+      <p className="text-[10px] font-bold font-mono uppercase tracking-wider text-[#141414]/60">
         {label}
       </p>
       <p
-        className={`${size === 'lg' ? 'text-3xl' : 'text-xl'} font-semibold mt-1.5`}
-        style={{ color: accent ?? 'var(--text-primary)' }}
+        className={`${size === 'lg' ? 'text-2xl' : 'text-lg'} font-black font-mono mt-1.5 tnum`}
+        style={accent ? { color: accent } : undefined}
       >
         {value}
       </p>
       {hint && (
-        <p className="text-[11px] mt-1.5 leading-snug" style={{ color: 'var(--text-muted)' }}>
-          {hint}
-        </p>
+        <p className="text-[10px] font-mono text-[#141414]/50 mt-1.5 leading-snug">{hint}</p>
       )}
     </div>
   );
@@ -79,22 +80,20 @@ export function Stat({
 
 /* ---- badge --------------------------------------------------------------- */
 
-type Tone = 'good' | 'warning' | 'critical' | 'neutral' | 'accent';
-
-const TONE: Record<Tone, { bg: string; fg: string }> = {
-  good: { bg: 'rgba(12,163,12,0.14)', fg: '#3ecf3e' },
-  warning: { bg: 'rgba(250,178,25,0.14)', fg: '#fab219' },
-  critical: { bg: 'rgba(208,59,59,0.16)', fg: '#f07373' },
-  neutral: { bg: 'rgba(255,255,255,0.06)', fg: 'var(--text-secondary)' },
-  accent: { bg: 'var(--accent-dim)', fg: 'var(--accent)' },
+const BADGE: Record<string, string> = {
+  green: 'text-[#228B22] border-[#228B22]/40 bg-[#228B22]/5',
+  red: 'text-[#B22222] border-[#B22222]/40 bg-[#B22222]/5',
+  amber: 'text-[#B26B00] border-[#B26B00]/40 bg-[#B26B00]/5',
+  gray: 'text-[#141414]/70 border-[#141414]/30 bg-[#141414]/5',
+  blue: 'text-[#2563EB] border-[#2563EB]/40 bg-[#2563EB]/5',
 };
 
-export function Badge({ tone = 'neutral', children }: { tone?: Tone; children: ReactNode }) {
-  const t = TONE[tone];
+export type Tone = keyof typeof BADGE;
+
+export function Badge({ tone = 'gray', children }: { tone?: Tone; children: ReactNode }) {
   return (
     <span
-      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium whitespace-nowrap"
-      style={{ background: t.bg, color: t.fg }}
+      className={`inline-block px-1.5 py-0.5 border text-[10px] font-bold font-mono uppercase whitespace-nowrap ${BADGE[tone]}`}
     >
       {children}
     </span>
@@ -102,18 +101,18 @@ export function Badge({ tone = 'neutral', children }: { tone?: Tone; children: R
 }
 
 export const STATUS_TONE: Record<string, Tone> = {
-  active: 'good',
-  pending: 'warning',
-  suspended: 'critical',
-  paid: 'good',
-  requested: 'warning',
-  rejected: 'critical',
-  success: 'good',
-  failed: 'critical',
-  matched: 'good',
-  unmatched: 'critical',
-  online: 'good',
-  offline: 'critical',
+  active: 'green',
+  pending: 'amber',
+  suspended: 'red',
+  paid: 'green',
+  requested: 'amber',
+  rejected: 'red',
+  success: 'green',
+  failed: 'red',
+  matched: 'green',
+  unmatched: 'red',
+  online: 'green',
+  offline: 'red',
 };
 
 /* ---- buttons ------------------------------------------------------------- */
@@ -121,23 +120,23 @@ export const STATUS_TONE: Record<string, Tone> = {
 export function Btn({
   children,
   onClick,
-  variant = 'ghost',
+  variant = 'outline',
   disabled,
   title,
   type = 'button',
 }: {
   children: ReactNode;
   onClick?: () => void;
-  variant?: 'primary' | 'ghost' | 'danger';
+  variant?: 'dark' | 'outline' | 'green' | 'danger';
   disabled?: boolean;
   title?: string;
   type?: 'button' | 'submit';
 }) {
-  const styles: Record<string, string> = {
-    primary: 'bg-[var(--accent)] text-[#04141a] hover:opacity-90 font-semibold',
-    ghost:
-      'bg-[var(--surface-3)] text-[var(--text-secondary)] hover:text-white border border-[var(--hairline)]',
-    danger: 'bg-[rgba(208,59,59,0.16)] text-[#f07373] hover:bg-[rgba(208,59,59,0.26)]',
+  const styles = {
+    dark: 'bg-[#141414] text-[#E4E3E0] border-[#141414] hover:bg-[#228B22]',
+    outline: 'bg-white text-[#141414] border-[#141414] hover:bg-[#141414] hover:text-white',
+    green: 'bg-[#228B22] text-white border-[#228B22] hover:opacity-85',
+    danger: 'bg-white text-[#B22222] border-[#B22222]/50 hover:bg-[#B22222] hover:text-white',
   };
   return (
     <button
@@ -145,7 +144,7 @@ export function Btn({
       onClick={onClick}
       disabled={disabled}
       title={title}
-      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${styles[variant]}`}
+      className={`inline-flex items-center gap-1.5 px-3 py-2 text-[11px] font-bold font-mono uppercase border transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${styles[variant]}`}
     >
       {children}
     </button>
@@ -154,9 +153,36 @@ export function Btn({
 
 export function RefreshBtn({ onClick }: { onClick: () => void }) {
   return (
-    <Btn onClick={onClick} title="Refresh">
+    <Btn variant="outline" onClick={onClick} title="Refresh">
       <RefreshCw className="h-3.5 w-3.5" /> Refresh
     </Btn>
+  );
+}
+
+/* ---- view header --------------------------------------------------------- */
+
+export function ViewHeader({
+  icon,
+  title,
+  subtitle,
+  children,
+}: {
+  icon: ReactNode;
+  title: string;
+  subtitle: string;
+  children?: ReactNode;
+}) {
+  return (
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="flex items-start gap-2.5">
+        <div className="bg-[#141414] text-[#E4E3E0] p-1.5 mt-0.5">{icon}</div>
+        <div>
+          <h1 className="font-bold font-mono uppercase tracking-tight">{title}</h1>
+          <p className="text-xs font-mono text-[#141414]/70 mt-0.5">{subtitle}</p>
+        </div>
+      </div>
+      {children && <div className="flex items-center gap-2 self-start">{children}</div>}
+    </div>
   );
 }
 
@@ -164,15 +190,14 @@ export function RefreshBtn({ onClick }: { onClick: () => void }) {
 
 export function Table({ head, children }: { head: string[]; children: ReactNode }) {
   return (
-    <div className="overflow-x-auto -mx-4 sm:-mx-5 px-4 sm:px-5">
-      <table className="w-full text-xs border-collapse min-w-[640px]">
+    <div className="overflow-x-auto">
+      <table className="w-full border-collapse min-w-[680px]">
         <thead>
-          <tr>
+          <tr className="border-b border-[#141414]">
             {head.map((h) => (
               <th
                 key={h}
-                className="text-left font-medium uppercase tracking-wider text-[10px] pb-2 border-b whitespace-nowrap"
-                style={{ color: 'var(--text-muted)', borderColor: 'var(--hairline)' }}
+                className="text-left text-[10px] font-bold font-mono uppercase tracking-wider text-[#141414]/60 py-2 px-3 whitespace-nowrap"
               >
                 {h}
               </th>
@@ -185,37 +210,30 @@ export function Table({ head, children }: { head: string[]; children: ReactNode 
   );
 }
 
-export const td = 'py-2.5 border-b align-middle';
-export const tdStyle = { borderColor: 'var(--hairline)' };
+export const td = 'py-2.5 px-3 text-xs border-b border-[#141414]/10 align-middle';
 
 /* ---- states -------------------------------------------------------------- */
 
 export function Spinner() {
   return (
     <div className="flex justify-center py-20">
-      <Loader2 className="h-7 w-7 animate-spin" style={{ color: 'var(--text-muted)' }} />
+      <Loader2 className="h-7 w-7 animate-spin text-[#141414]/40" />
     </div>
   );
 }
 
 export function ErrorBox({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
-    <div className="panel p-8 text-center space-y-3">
-      <AlertTriangle className="h-7 w-7 mx-auto" style={{ color: 'var(--critical)' }} />
-      <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-        {message}
-      </p>
+    <div className="bg-white border border-[#141414] p-8 text-center space-y-3">
+      <AlertTriangle className="h-7 w-7 mx-auto text-[#B22222]" />
+      <p className="text-xs font-mono">{message}</p>
       <Btn onClick={onRetry}>Retry</Btn>
     </div>
   );
 }
 
 export function Empty({ message }: { message: string }) {
-  return (
-    <p className="text-center text-xs py-10" style={{ color: 'var(--text-muted)' }}>
-      {message}
-    </p>
-  );
+  return <p className="text-center text-xs font-mono text-[#141414]/50 py-10">{message}</p>;
 }
 
 /* ---- data-loading hook --------------------------------------------------- */
@@ -268,8 +286,7 @@ export function ToastHost() {
       {items.map((t) => (
         <div
           key={t.id}
-          className="panel px-3.5 py-2.5 text-xs shadow-lg max-w-xs"
-          style={{ color: TONE[t.tone].fg }}
+          className={`border px-3 py-2 text-[11px] font-mono font-bold uppercase max-w-xs ${BADGE[t.tone]}`}
         >
           {t.msg}
         </div>

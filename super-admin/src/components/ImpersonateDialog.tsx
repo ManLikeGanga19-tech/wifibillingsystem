@@ -32,11 +32,11 @@ export default function ImpersonateDialog({
       // console then simply picks it up — we pass nothing, and it stores nothing.
       // The cookie and the grant that authorises it can never drift apart.
       await api.impersonation.start(tenant.slug, reason.trim(), minutes);
-      toast('good', `Access to ${tenant.name} opened for ${minutes} minutes — and recorded.`);
+      toast('green', `Access to ${tenant.name} opened for ${minutes} minutes — and recorded.`);
       window.open(ISP_CONSOLE, '_blank');
       onStarted();
     } catch {
-      toast('critical', 'Could not open access.');
+      toast('red', 'Could not open access.');
     } finally {
       setBusy(false);
     }
@@ -97,7 +97,7 @@ export default function ImpersonateDialog({
 
         <div className="flex justify-end gap-2 pt-1">
           <Btn onClick={onClose}>Cancel</Btn>
-          <Btn variant="primary" onClick={start} disabled={busy || reason.trim().length < 5}>
+          <Btn variant="dark" onClick={start} disabled={busy || reason.trim().length < 5}>
             <Eye className="h-3.5 w-3.5" />
             {busy ? 'Opening…' : 'Open access'}
           </Btn>

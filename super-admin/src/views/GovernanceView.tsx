@@ -11,7 +11,6 @@ import {
   Spinner,
   Table,
   td,
-  tdStyle,
   toast,
   useLoad,
 } from '../components/ui';
@@ -30,10 +29,10 @@ export default function GovernanceView() {
   return (
     <div className="space-y-5">
       <div className="flex items-center gap-1.5">
-        <Btn variant={tab === 'audit' ? 'primary' : 'ghost'} onClick={() => setTab('audit')}>
+        <Btn variant={tab === 'audit' ? 'dark' : 'outline'} onClick={() => setTab('audit')}>
           <ShieldCheck className="h-3.5 w-3.5" /> Audit trail
         </Btn>
-        <Btn variant={tab === 'access' ? 'primary' : 'ghost'} onClick={() => setTab('access')}>
+        <Btn variant={tab === 'access' ? 'dark' : 'outline'} onClick={() => setTab('access')}>
           <Eye className="h-3.5 w-3.5" /> ISP console access
         </Btn>
       </div>
@@ -103,33 +102,33 @@ function AuditLine({ r }: { r: AuditRow }) {
     .map(([k, v]) => `${k}=${String(v)}`)
     .join(' · ');
   return (
-    <tr className="hover:bg-white/[0.03] transition">
+    <tr className="hover:bg-[#f0efec] transition">
       <td
         className={`${td} whitespace-nowrap tnum`}
-        style={{ ...tdStyle, color: 'var(--text-muted)' }}
+        style={{ color: 'var(--text-muted)' }}
       >
         {dt(r.created_at)}
       </td>
-      <td className={td} style={tdStyle}>
-        <Badge tone={SENSITIVE.test(r.action) ? 'warning' : 'neutral'}>{r.action}</Badge>
+      <td className={td}>
+        <Badge tone={SENSITIVE.test(r.action) ? 'amber' : 'gray'}>{r.action}</Badge>
       </td>
-      <td className={td} style={tdStyle}>
+      <td className={td}>
         {r.actor_name || <span style={{ color: 'var(--text-muted)' }}>system</span>}
       </td>
-      <td className={td} style={{ ...tdStyle, color: 'var(--text-secondary)' }}>
+      <td className={td} style={{ color: 'var(--text-secondary)' }}>
         {r.operator_slug || '—'}
       </td>
-      <td className={td} style={{ ...tdStyle, color: 'var(--text-muted)' }}>
+      <td className={td} style={{ color: 'var(--text-muted)' }}>
         {r.target_type ? `${r.target_type}#${r.target_id}` : '—'}
       </td>
       <td
         className={`${td} max-w-[22rem] truncate`}
-        style={{ ...tdStyle, color: 'var(--text-secondary)' }}
+        style={{ color: 'var(--text-secondary)' }}
         title={detail}
       >
         {detail || '—'}
       </td>
-      <td className={`${td} tnum`} style={{ ...tdStyle, color: 'var(--text-muted)' }}>
+      <td className={`${td} tnum`} style={{ color: 'var(--text-muted)' }}>
         {r.ip_address ?? '—'}
       </td>
     </tr>
@@ -144,10 +143,10 @@ function AccessHistory() {
   const endAll = async () => {
     try {
       const { ended } = await api.impersonation.end();
-      toast('good', ended ? `Closed ${ended} open session(s).` : 'No open sessions.');
+      toast('green', ended ? `Closed ${ended} open session(s).` : 'No open sessions.');
       reload();
     } catch {
-      toast('critical', 'Could not close sessions.');
+      toast('red', 'Could not close sessions.');
     }
   };
 
@@ -188,39 +187,39 @@ function AccessHistory() {
 
 function GrantLine({ g }: { g: Grant }) {
   return (
-    <tr className="hover:bg-white/[0.03] transition">
+    <tr className="hover:bg-[#f0efec] transition">
       <td
         className={`${td} whitespace-nowrap tnum`}
-        style={{ ...tdStyle, color: 'var(--text-muted)' }}
+        style={{ color: 'var(--text-muted)' }}
       >
         {dt(g.started_at)}
       </td>
-      <td className={td} style={tdStyle}>
+      <td className={td}>
         {g.actor_name}
       </td>
-      <td className={td} style={{ ...tdStyle, color: 'var(--text-secondary)' }}>
+      <td className={td} style={{ color: 'var(--text-secondary)' }}>
         {g.operator_name}
         <span className="block text-[11px]" style={{ color: 'var(--text-muted)' }}>
           {g.operator_slug}
         </span>
       </td>
-      <td className={`${td} max-w-[20rem]`} style={tdStyle} title={g.reason}>
+      <td className={`${td} max-w-[20rem]`} title={g.reason}>
         {g.reason}
       </td>
       <td
         className={`${td} whitespace-nowrap tnum`}
-        style={{ ...tdStyle, color: 'var(--text-muted)' }}
+        style={{ color: 'var(--text-muted)' }}
       >
         {dt(g.expires_at)}
       </td>
       <td
         className={`${td} whitespace-nowrap tnum`}
-        style={{ ...tdStyle, color: 'var(--text-muted)' }}
+        style={{ color: 'var(--text-muted)' }}
       >
         {g.ended_at ? dt(g.ended_at) : '—'}
       </td>
-      <td className={td} style={tdStyle}>
-        {g.is_live ? <Badge tone="warning">live</Badge> : <Badge tone="neutral">closed</Badge>}
+      <td className={td}>
+        {g.is_live ? <Badge tone="amber">live</Badge> : <Badge tone="gray">closed</Badge>}
       </td>
     </tr>
   );

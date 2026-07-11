@@ -1,50 +1,75 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Playfair+Display:ital,wght@0,600;0,700;1,600;1,700&display=swap');
 @import 'tailwindcss';
 
 /**
- * WIFI.OS Platform Control — design tokens.
+ * Platform Control — SAME design system as the ISP console and the captive portal.
  *
- * Deliberately a different world from the ISP console (which is light, brutalist,
- * mono). This is the operator's cockpit: deep space surface, glass panels, a cyan
- * signal accent. Dark-only by intent — it is a control room, not a document.
+ * Deliberately NOT a separate look: an operator moving between the platform
+ * console and an ISP's console should feel one product, not two. Brutalist /
+ * industrial — square borders, hairline #141414 rules, mono uppercase labels,
+ * paper-white panels on a warm grey plane. No glass, no neon, no gradients.
  *
- * The series colors are NOT chosen by eye: they are the validated categorical
- * palette (worst adjacent CVD ΔE 35.9 against --surface-1, all slots >= 3:1
- * contrast). Do not swap a hue without re-running the validator.
+ * The series colors are NOT chosen by eye. They are validated against the WHITE
+ * panel surface: every slot clears 3:1 contrast, worst adjacent CVD ΔE 12.8, and
+ * the net-vs-costs pair that shares the main chart separates at ΔE 18.0 under
+ * protanopia. Do not swap a hue without re-running the validator.
  */
 
+@theme {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --font-serif: 'Playfair Display', Georgia, Cambria, 'Times New Roman', Times, serif;
+}
+
 :root {
-  /* Surfaces */
-  --plane: #070a0f; /* page background */
-  --surface-1: #0f141b; /* panel / chart surface */
-  --surface-2: #151c25; /* raised panel */
-  --surface-3: #1d2733; /* hover / input */
+  /* Surfaces — identical to the ISP console */
+  --plane: #e4e3e0; /* page / sidebar */
+  --main: #f0efec; /* content area */
+  --panel: #ffffff; /* cards, tables, charts */
 
-  /* Ink */
-  --text-primary: #ffffff;
-  --text-secondary: #9fb0c4;
-  --text-muted: #64748b;
+  --ink: #141414;
+  --rule: #141414; /* every border is a hairline of the ink */
 
-  /* Structure */
-  --hairline: rgba(255, 255, 255, 0.08);
-  --hairline-strong: rgba(255, 255, 255, 0.16);
-  --grid: #1b232e;
+  /* Status — the brand set, reserved. Never reused as a data series. */
+  --good: #228b22;
+  --bad: #b22222;
+  --warn: #b26b00;
+  --info: #2563eb;
 
-  /* Signal accent (the "futuristic" cue — used for focus + live state, not data) */
-  --accent: #22d3ee;
-  --accent-dim: rgba(34, 211, 238, 0.12);
+  /* Categorical series — validated on the WHITE panel. Fixed order, never cycled. */
+  --series-1: #2a78d6; /* blue   — earnings */
+  --series-2: #0f8a5f; /* green  — net margin */
+  --series-3: #a86e00; /* amber  — gross volume */
+  --series-4: #c9302c; /* red    — transaction costs */
+  --series-5: #5b3fa8; /* violet — new ISPs */
 
-  /* Categorical series — validated set, fixed order. Never cycle, never reorder. */
-  --series-1: #3987e5; /* blue    — earnings */
-  --series-2: #199e70; /* aqua    — net margin */
-  --series-3: #c98500; /* yellow  — gross volume */
-  --series-4: #e66767; /* red     — transaction costs */
-  --series-5: #9085e9; /* violet  — new tenants */
+  --grid: #e1e0d9; /* recessive gridline */
+  --axis: #8a8880; /* axis labels */
 
-  /* Status — reserved, never reused as a series */
-  --good: #0ca30c;
-  --warning: #fab219;
-  --serious: #ec835a;
-  --critical: #d03b3b;
+  /* Ink scale — text tokens. Values wear these, never a series color. */
+  --text-primary: #141414;
+  --text-secondary: rgba(20, 20, 20, 0.7);
+  --text-muted: rgba(20, 20, 20, 0.5);
+
+  /* Status aliases (same brand set, named by role) */
+  --accent: #2563eb;
+  --good-fg: #228b22;
+  --warning: #b26b00;
+  --critical: #b22222;
+
+  --hairline: rgba(20, 20, 20, 0.15);
+  --hairline-strong: #141414;
+
+  --surface-1: #ffffff;
+  --surface-2: #ffffff;
+  --surface-3: #f8f8f6;
+}
+
+/* Panels are paper: white, square, hairline-ruled. No glass, no gradients. */
+.panel,
+.panel-flat {
+  background: #fff;
+  border: 1px solid var(--ink);
 }
 
 html,
@@ -55,102 +80,63 @@ body,
 
 body {
   margin: 0;
-  background: var(--plane);
-  color: var(--text-primary);
-  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  background: var(--main);
+  color: var(--ink);
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 
-/* Columns that must align vertically get tabular figures; hero numbers keep
-   proportional figures (they read better large). */
+/* Columns that must align vertically get tabular figures. */
 .tnum {
   font-variant-numeric: tabular-nums;
-}
-
-/* Glass panel — the core surface of this console */
-.panel {
-  background: linear-gradient(180deg, var(--surface-2) 0%, var(--surface-1) 100%);
-  border: 1px solid var(--hairline);
-  border-radius: 10px;
-}
-
-.panel-flat {
-  background: var(--surface-1);
-  border: 1px solid var(--hairline);
-  border-radius: 10px;
-}
-
-/* A faint scanline sheen on the hero card — the one bit of pure atmosphere */
-.sheen {
-  position: relative;
-  overflow: hidden;
-}
-.sheen::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(
-    120% 80% at 100% 0%,
-    rgba(34, 211, 238, 0.10) 0%,
-    transparent 60%
-  );
-  pointer-events: none;
-}
-
-/* Live pulse for the "operational" dot */
-@keyframes pulse-ring {
-  0% {
-    box-shadow: 0 0 0 0 rgba(34, 211, 238, 0.5);
-  }
-  70% {
-    box-shadow: 0 0 0 6px rgba(34, 211, 238, 0);
-  }
-  100% {
-    box-shadow: 0 0 0 0 rgba(34, 211, 238, 0);
-  }
-}
-.pulse {
-  animation: pulse-ring 2s infinite;
 }
 
 input,
 select,
 textarea {
-  background: var(--surface-3);
-  border: 1px solid var(--hairline);
-  border-radius: 6px;
-  color: var(--text-primary);
-  padding: 0.5rem 0.65rem;
-  font-size: 0.8125rem;
-  outline: none;
   width: 100%;
+  background: #fff;
+  border: 1px solid var(--ink);
+  border-radius: 0; /* square. always. */
+  padding: 0.5rem;
+  font-size: 0.75rem;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  outline: none;
 }
 input:focus,
 select:focus,
 textarea:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-dim);
-}
-input::placeholder {
-  color: var(--text-muted);
+  background: #f8f8f6;
 }
 
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 6px;
+  height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: var(--plane);
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--surface-3);
-  border-radius: 6px;
+  background: rgba(20, 20, 20, 0.25);
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #2a3745;
+  background: rgba(20, 20, 20, 0.45);
 }
 
-/* Recharts overrides — keep chrome recessive, never let the lib's defaults win */
+@keyframes pulse-subtle {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+.pulse-active {
+  animation: pulse-subtle 2s infinite ease-in-out;
+}
+
+/* Recharts chrome — keep it recessive; never let the library's defaults win. */
 .recharts-cartesian-grid line {
   stroke: var(--grid);
 }
@@ -159,8 +145,9 @@ input::placeholder {
   stroke: transparent;
 }
 .recharts-text {
-  fill: var(--text-muted);
+  fill: var(--axis);
   font-size: 11px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
 }
 .recharts-surface {
   overflow: visible;

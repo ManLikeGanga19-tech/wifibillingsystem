@@ -1,32 +1,25 @@
 import { useState } from 'react';
-import {
-  Activity,
-  AlertTriangle,
-  ArrowRight,
-  Building2,
-  Radio,
-  TrendingUp,
-  Wallet,
-} from 'lucide-react';
+import { AlertTriangle, ArrowRight, Gauge } from 'lucide-react';
 import { api, ksh, num, type Kpis } from '../api/client';
 import { EarningsChart, SignupChart, StreamChart, VolumeChart } from '../components/charts';
-import { Btn, ErrorBox, Panel, RefreshBtn, Spinner, Stat, useLoad } from '../components/ui';
+import { Btn, ErrorBox, Panel, RefreshBtn, Spinner, Stat, useLoad, ViewHeader } from '../components/ui';
+import { SERIES } from '../components/charts';
 
 const RANGES = [7, 30, 90] as const;
 
 /** Every alert is a number that SHOULD be zero. If it isn't, a human must act —
- * so each one is a link to the place where you act on it. */
+ * so each one links to the place where you act on it. */
 const ALERTS: {
   key: keyof Kpis['alerts'];
   label: string;
   tab: string;
-  tone: 'warning' | 'critical';
+  bad?: boolean;
 }[] = [
-  { key: 'pending_approvals', label: 'ISPs awaiting approval', tab: 'tenants', tone: 'warning' },
-  { key: 'payouts_stale_2d', label: 'Payouts pending >2 days', tab: 'finance', tone: 'critical' },
-  { key: 'unmatched_payments', label: 'Payments matching no account', tab: 'ops', tone: 'critical' },
-  { key: 'trials_expiring_7d', label: 'Trials ending this week', tab: 'tenants', tone: 'warning' },
-  { key: 'routers_offline', label: 'Routers offline', tab: 'ops', tone: 'warning' },
+  { key: 'pending_approvals', label: 'ISPs awaiting approval', tab: 'tenants' },
+  { key: 'payouts_stale_2d', label: 'Payouts pending >2 days', tab: 'finance', bad: true },
+  { key: 'unmatched_payments', label: 'Payments matching no account', tab: 'ops', bad: true },
+  { key: 'trials_expiring_7d', label: 'Trials ending this week', tab: 'tenants' },
+  { key: 'routers_offline', label: 'Routers offline', tab: 'ops' },
 ];
 
 export default function CommandCenter({ onNavigate }: { onNavigate: (tab: string) => void }) {
@@ -42,108 +35,119 @@ export default function CommandCenter({ onNavigate }: { onNavigate: (tab: string
 
   return (
     <div className="space-y-5">
-      {/* ---- Hero: the one number that matters, and what it cost to get it ---- */}
-      <section className="panel sheen p-5 sm:p-6">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <p
-              className="text-[11px] uppercase tracking-[0.2em] mb-2"
-              style={{ color: 'var(--accent)' }}
-            >
-              Net margin · this month
-            </p>
-            <p className="text-4xl sm:text-5xl font-semibold tracking-tight">
-              {ksh(k.net_margin_month)}
-            </p>
-            <p className="text-xs mt-2.5" style={{ color: 'var(--text-secondary)' }}>
-              {ksh(k.earnings_month)} earned − {ksh(k.transaction_costs_month)} absorbed in M-Pesa
-              / bank costs
-              <span className="mx-2" style={{ color: 'var(--hairline-strong)' }}>
-                |
-              </span>
-              <span style={{ color: k.margin_pct >= 50 ? '#3ecf3e' : 'var(--warning)' }}>
-                {k.margin_pct}% kept
-              </span>
-            </p>
-          </div>
-          <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--text-muted)' }}>
-            <span className="h-2 w-2 rounded-full pulse" style={{ background: 'var(--accent)' }} />
-            LIVE
-            <RefreshBtn
-              onClick={() => {
-                kpis.reload();
-                ts.reload();
-              }}
-            />
-          </div>
-        </div>
+      <ViewHeader
+        icon={<Gauge className="h-4.5 w-4.5" />}
+        title="Platform Dashboard"
+        subtitle="Danamo Tech across every ISP — what we earn, what the rails take, and what needs a human."
+      >
+        <RefreshBtn
+          onClick={() => {
+            kpis.reload();
+            ts.reload();
+          }}
+        />
+      </ViewHeader>
 
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-6">
-          <Stat label="MRR" value={ksh(k.mrr)} hint={`${ksh(k.arr)} annualised`} />
-          <Stat
-            label="Float held for ISPs"
-            value={ksh(k.float_held)}
-            hint="Their money, in our custody"
-          />
-          <Stat
-            label="Gross volume"
-            value={ksh(k.gross_volume_month)}
-            hint="Collected this month"
-          />
-          <Stat
-            label="Active ISPs"
-            value={num(k.tenants_active)}
-            hint={`${k.new_tenants_30d} joined in 30d`}
-          />
-        </div>
-      </section>
+      {/* ================= CARDS — all of them, up top ================= */}
 
-      {/* ---- Alerts: only rendered when something actually needs a human ---- */}
+      {/* The headline: what we actually keep after the rails take their cut. */}
+      <div className="bg-white border border-[#141414] p-5">
+        <p className="text-[10px] font-bold font-mono uppercase tracking-widest text-[#141414]/60">
+          Net margin · this month
+        </p>
+        <p className="text-4xl font-black font-mono mt-1.5 tnum">{ksh(k.net_margin_month)}</p>
+        <p className="text-[11px] font-mono text-[#141414]/60 mt-2">
+          {ksh(k.earnings_month)} earned − {ksh(k.transaction_costs_month)} absorbed in M-Pesa /
+          bank costs ·{' '}
+          <b style={{ color: k.margin_pct >= 50 ? '#228B22' : '#B26B00' }}>{k.margin_pct}% kept</b>
+        </p>
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <Stat label="MRR" value={ksh(k.mrr)} hint={`${ksh(k.arr)} annualised`} />
+        <Stat
+          label="Float held for ISPs"
+          value={ksh(k.float_held)}
+          hint="Their money, in our custody"
+        />
+        <Stat label="Gross volume" value={ksh(k.gross_volume_month)} hint="Collected this month" />
+        <Stat
+          label="Active ISPs"
+          value={num(k.tenants_active)}
+          hint={`${k.new_tenants_30d} joined in 30d`}
+        />
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <Stat
+          label="Platform earnings"
+          value={ksh(k.earnings_month)}
+          accent={SERIES.earnings}
+          hint="Gross, before rail costs"
+        />
+        <Stat
+          label="Transaction costs"
+          value={ksh(k.transaction_costs_month)}
+          accent={SERIES.costs}
+          hint="Absorbed by us, not the ISP"
+        />
+        <Stat
+          label="Routers online"
+          value={`${num(k.routers_online)} / ${num(k.routers_total)}`}
+          accent={k.routers_online < k.routers_total ? '#B26B00' : undefined}
+        />
+        <Stat label="Active sessions" value={num(k.active_sessions)} hint="Customers online now" />
+      </div>
+
+      {/* Only rendered when something actually needs a human. */}
       {live.length > 0 && (
-        <section className="panel p-4">
-          <h2 className="text-[11px] uppercase tracking-wider mb-3 flex items-center gap-1.5">
-            <AlertTriangle className="h-3.5 w-3.5" style={{ color: 'var(--warning)' }} />
-            <span style={{ color: 'var(--text-secondary)' }}>Needs attention</span>
-          </h2>
+        <Panel title="Needs attention">
           <div className="flex flex-col sm:flex-row flex-wrap gap-2">
             {live.map((a) => (
               <button
                 key={a.key}
                 onClick={() => onNavigate(a.tab)}
-                className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs cursor-pointer transition hover:brightness-125 text-left"
-                style={{
-                  background:
-                    a.tone === 'critical' ? 'rgba(208,59,59,0.12)' : 'rgba(250,178,25,0.10)',
-                  color: a.tone === 'critical' ? '#f07373' : '#fab219',
-                }}
+                className={`flex items-center gap-2.5 px-3 py-2 border text-[11px] font-mono font-bold uppercase cursor-pointer transition text-left hover:bg-[#141414] hover:text-white ${
+                  a.bad
+                    ? 'border-[#B22222]/50 text-[#B22222] bg-[#B22222]/5'
+                    : 'border-[#B26B00]/50 text-[#B26B00] bg-[#B26B00]/5'
+                }`}
               >
-                <span className="text-base font-semibold tnum">{k.alerts[a.key]}</span>
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                <span className="text-sm font-black tnum">{k.alerts[a.key]}</span>
                 <span>{a.label}</span>
                 <ArrowRight className="h-3 w-3 opacity-60" />
               </button>
             ))}
           </div>
-        </section>
+        </Panel>
       )}
 
-      {/* ---- Range filter: one row above the charts ---- */}
-      <div className="flex items-center gap-1.5">
-        {RANGES.map((r) => (
-          <Btn key={r} variant={days === r ? 'primary' : 'ghost'} onClick={() => setDays(r)}>
-            {r}d
-          </Btn>
-        ))}
+      {/* ================= GRAPHS — bottom half ================= */}
+
+      <div className="flex items-center justify-between border-t border-[#141414] pt-5">
+        <h2 className="text-xs font-bold font-mono uppercase tracking-wide">Trends</h2>
+        <div className="flex items-center gap-1.5">
+          {RANGES.map((r) => (
+            <Btn key={r} variant={days === r ? 'dark' : 'outline'} onClick={() => setDays(r)}>
+              {r}d
+            </Btn>
+          ))}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
         <Panel
           title="Where the money goes"
-          subtitle="What we keep vs what the rails take back. The gap is the true cost of being an aggregator."
+          subtitle="What we keep vs what the rails take back — the true cost of being an aggregator."
         >
           {ts.data ? <EarningsChart series={ts.data.series} /> : <Spinner />}
         </Panel>
 
-        <Panel title="Gross volume collected" subtitle="All ISPs' customer payments, in our custody">
+        <Panel
+          title="Gross volume collected"
+          subtitle="All ISPs' customer payments, held in our custody"
+        >
           {ts.data ? <VolumeChart series={ts.data.series} /> : <Spinner />}
         </Panel>
 
@@ -157,36 +161,6 @@ export default function CommandCenter({ onNavigate }: { onNavigate: (tab: string
         <Panel title="New ISPs" subtitle="Signups per day">
           {ts.data ? <SignupChart series={ts.data.series} /> : <Spinner />}
         </Panel>
-      </div>
-
-      {/* ---- Fleet strip ---- */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <Stat
-          label="Routers online"
-          value={`${num(k.routers_online)} / ${num(k.routers_total)}`}
-          accent={k.routers_online < k.routers_total ? 'var(--warning)' : undefined}
-        />
-        <Stat label="Active sessions" value={num(k.active_sessions)} />
-        <Stat label="Payouts pending" value={num(k.alerts.payouts_pending)} />
-        <Stat label="ISPs (all states)" value={num(k.tenants_total)} />
-      </div>
-
-      <div className="flex flex-wrap gap-2">
-        <Btn onClick={() => onNavigate('finance')}>
-          <TrendingUp className="h-3.5 w-3.5" /> Tenant P&amp;L
-        </Btn>
-        <Btn onClick={() => onNavigate('tenants')}>
-          <Building2 className="h-3.5 w-3.5" /> ISPs
-        </Btn>
-        <Btn onClick={() => onNavigate('ops')}>
-          <Activity className="h-3.5 w-3.5" /> System health
-        </Btn>
-        <Btn onClick={() => onNavigate('search')}>
-          <Radio className="h-3.5 w-3.5" /> Search
-        </Btn>
-        <Btn onClick={() => onNavigate('finance')}>
-          <Wallet className="h-3.5 w-3.5" /> Payouts
-        </Btn>
       </div>
     </div>
   );

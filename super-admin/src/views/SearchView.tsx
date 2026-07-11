@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Search } from 'lucide-react';
 import { api, dt, ksh, type SearchResults } from '../api/client';
-import { Badge, Btn, Empty, Panel, Spinner, STATUS_TONE, Table, td, tdStyle } from '../components/ui';
+import { Badge, Btn, Empty, Panel, Spinner, STATUS_TONE, Table, td } from '../components/ui';
 
 /**
  * Cross-tenant search.
@@ -42,7 +42,7 @@ export default function SearchView() {
             onChange={(e) => setQ(e.target.value)}
             placeholder="e.g. QWE123XYZ, 254712345678, HOME10432…"
           />
-          <Btn variant="primary" type="submit" disabled={busy || q.trim().length < 3}>
+          <Btn variant="dark" type="submit" disabled={busy || q.trim().length < 3}>
             <Search className="h-3.5 w-3.5" />
             {busy ? 'Searching…' : 'Search'}
           </Btn>
@@ -69,17 +69,17 @@ export default function SearchView() {
                 {r.transactions.map((t) => (
                   <tr key={t.id}>
                     <Tenant slug={t.tenant} />
-                    <td className={`${td} tnum`} style={tdStyle}>
+                    <td className={`${td} tnum`}>
                       {t.phone}
                     </td>
-                    <td className={`${td} tnum`} style={tdStyle}>
+                    <td className={`${td} tnum`}>
                       {ksh(t.amount)}
                     </td>
-                    <td className={`${td} tnum`} style={tdStyle}>
+                    <td className={`${td} tnum`}>
                       {t.mpesa_receipt || '—'}
                     </td>
-                    <td className={td} style={tdStyle}>
-                      <Badge tone={STATUS_TONE[t.status] ?? 'neutral'}>{t.status}</Badge>
+                    <td className={td}>
+                      <Badge tone={STATUS_TONE[t.status] ?? 'gray'}>{t.status}</Badge>
                     </td>
                     <Muted>{dt(t.created_at)}</Muted>
                   </tr>
@@ -97,20 +97,20 @@ export default function SearchView() {
                 {r.c2b_payments.map((p) => (
                   <tr key={p.id}>
                     <Tenant slug={p.tenant} />
-                    <td className={`${td} tnum`} style={tdStyle}>
+                    <td className={`${td} tnum`}>
                       {p.trans_id}
                     </td>
-                    <td className={`${td} tnum`} style={tdStyle}>
+                    <td className={`${td} tnum`}>
                       {p.bill_ref}
                     </td>
-                    <td className={`${td} tnum`} style={tdStyle}>
+                    <td className={`${td} tnum`}>
                       {p.msisdn}
                     </td>
-                    <td className={`${td} tnum`} style={tdStyle}>
+                    <td className={`${td} tnum`}>
                       {ksh(p.amount)}
                     </td>
-                    <td className={td} style={tdStyle}>
-                      <Badge tone={STATUS_TONE[p.status] ?? 'neutral'}>{p.status}</Badge>
+                    <td className={td}>
+                      <Badge tone={STATUS_TONE[p.status] ?? 'gray'}>{p.status}</Badge>
                     </td>
                     <Muted>{dt(p.received_at)}</Muted>
                   </tr>
@@ -125,18 +125,18 @@ export default function SearchView() {
                 {r.pppoe_clients.map((c) => (
                   <tr key={c.id}>
                     <Tenant slug={c.tenant} />
-                    <td className={`${td} tnum`} style={tdStyle}>
+                    <td className={`${td} tnum`}>
                       {c.account_number}
                     </td>
-                    <td className={td} style={tdStyle}>
+                    <td className={td}>
                       {c.full_name}
                     </td>
-                    <td className={`${td} tnum`} style={tdStyle}>
+                    <td className={`${td} tnum`}>
                       {c.phone || '—'}
                     </td>
                     <Muted>{c.plan}</Muted>
-                    <td className={td} style={tdStyle}>
-                      <Badge tone={STATUS_TONE[c.status] ?? 'neutral'}>{c.status}</Badge>
+                    <td className={td}>
+                      <Badge tone={STATUS_TONE[c.status] ?? 'gray'}>{c.status}</Badge>
                     </td>
                   </tr>
                 ))}
@@ -150,10 +150,10 @@ export default function SearchView() {
                 {r.subscribers.map((s) => (
                   <tr key={s.id}>
                     <Tenant slug={s.tenant} />
-                    <td className={`${td} tnum`} style={tdStyle}>
+                    <td className={`${td} tnum`}>
                       {s.phone}
                     </td>
-                    <td className={td} style={tdStyle}>
+                    <td className={td}>
                       {s.name || '—'}
                     </td>
                   </tr>
@@ -168,14 +168,14 @@ export default function SearchView() {
                 {r.routers.map((x) => (
                   <tr key={x.id}>
                     <Tenant slug={x.tenant} />
-                    <td className={td} style={tdStyle}>
+                    <td className={td}>
                       {x.name}
                     </td>
-                    <td className={`${td} tnum`} style={tdStyle}>
+                    <td className={`${td} tnum`}>
                       {x.host}
                     </td>
-                    <td className={td} style={tdStyle}>
-                      <Badge tone={STATUS_TONE[x.status] ?? 'neutral'}>{x.status}</Badge>
+                    <td className={td}>
+                      <Badge tone={STATUS_TONE[x.status] ?? 'gray'}>{x.status}</Badge>
                     </td>
                   </tr>
                 ))}
@@ -188,14 +188,14 @@ export default function SearchView() {
               <Table head={['Name', 'Slug', 'Status']}>
                 {r.tenants.map((t) => (
                   <tr key={t.id}>
-                    <td className={td} style={tdStyle}>
+                    <td className={td}>
                       {t.name}
                     </td>
-                    <td className={`${td} tnum`} style={tdStyle}>
+                    <td className={`${td} tnum`}>
                       {t.slug}
                     </td>
-                    <td className={td} style={tdStyle}>
-                      <Badge tone={STATUS_TONE[t.status] ?? 'neutral'}>{t.status}</Badge>
+                    <td className={td}>
+                      <Badge tone={STATUS_TONE[t.status] ?? 'gray'}>{t.status}</Badge>
                     </td>
                   </tr>
                 ))}
@@ -211,8 +211,8 @@ export default function SearchView() {
 /** Every hit says whose data it is — you should never be unsure. */
 function Tenant({ slug }: { slug: string }) {
   return (
-    <td className={td} style={tdStyle}>
-      <Badge tone="accent">{slug || 'unmatched'}</Badge>
+    <td className={td}>
+      <Badge tone="blue">{slug || 'unmatched'}</Badge>
     </td>
   );
 }
@@ -221,7 +221,7 @@ function Muted({ children }: { children: React.ReactNode }) {
   return (
     <td
       className={`${td} whitespace-nowrap tnum`}
-      style={{ ...tdStyle, color: 'var(--text-muted)' }}
+      style={{ color: 'var(--text-muted)' }}
     >
       {children}
     </td>

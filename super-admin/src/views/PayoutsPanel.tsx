@@ -12,7 +12,6 @@ import {
   STATUS_TONE,
   Table,
   td,
-  tdStyle,
   toast,
   useLoad,
 } from '../components/ui';
@@ -42,10 +41,10 @@ export default function PayoutsPanel() {
     if (!ref?.trim()) return;
     try {
       await api.payouts.markPaid(p.id, ref.trim().toUpperCase());
-      toast('good', `Payout to ${p.operator_name} recorded as paid.`);
+      toast('green', `Payout to ${p.operator_name} recorded as paid.`);
       reload();
     } catch (e) {
-      toast('critical', e instanceof Error ? e.message : 'Could not record the payout.');
+      toast('red', e instanceof Error ? e.message : 'Could not record the payout.');
     }
   };
 
@@ -54,10 +53,10 @@ export default function PayoutsPanel() {
     if (note === null) return;
     try {
       await api.payouts.reject(p.id, note.trim() || 'Rejected');
-      toast('warning', 'Payout rejected — funds returned to their wallet.');
+      toast('amber', 'Payout rejected — funds returned to their wallet.');
       reload();
     } catch (e) {
-      toast('critical', e instanceof Error ? e.message : 'Could not reject.');
+      toast('red', e instanceof Error ? e.message : 'Could not reject.');
     }
   };
 
@@ -71,7 +70,7 @@ export default function PayoutsPanel() {
     >
       <div className="flex gap-1.5 mb-4">
         {FILTERS.map((f) => (
-          <Btn key={f} variant={filter === f ? 'primary' : 'ghost'} onClick={() => setFilter(f)}>
+          <Btn key={f} variant={filter === f ? 'dark' : 'outline'} onClick={() => setFilter(f)}>
             {LABEL[f]}
           </Btn>
         ))}
@@ -84,31 +83,31 @@ export default function PayoutsPanel() {
       ) : (
         <Table head={['Requested', 'ISP', 'Amount', 'Method', 'Destination', 'Status', '']}>
           {data.results.map((p) => (
-            <tr key={p.id} className="hover:bg-white/[0.03] transition">
+            <tr key={p.id} className="hover:bg-[#f0efec] transition">
               <td
                 className={`${td} whitespace-nowrap tnum`}
-                style={{ ...tdStyle, color: 'var(--text-muted)' }}
+                style={{ color: 'var(--text-muted)' }}
               >
                 {dt(p.created_at)}
               </td>
-              <td className={td} style={tdStyle}>
+              <td className={td}>
                 {p.operator_name}
               </td>
-              <td className={`${td} tnum font-medium`} style={tdStyle}>
+              <td className={`${td} tnum font-medium`}>
                 {ksh(p.amount)}
               </td>
-              <td className={td} style={{ ...tdStyle, color: 'var(--text-secondary)' }}>
+              <td className={td} style={{ color: 'var(--text-secondary)' }}>
                 {p.method}
               </td>
               <td
                 className={`${td} tnum max-w-[16rem] truncate`}
-                style={{ ...tdStyle, color: 'var(--text-secondary)' }}
+                style={{ color: 'var(--text-secondary)' }}
                 title={p.destination}
               >
                 {p.destination}
               </td>
-              <td className={td} style={tdStyle}>
-                <Badge tone={STATUS_TONE[p.status] ?? 'neutral'}>{p.status}</Badge>
+              <td className={td}>
+                <Badge tone={STATUS_TONE[p.status] ?? 'gray'}>{p.status}</Badge>
                 {p.mpesa_reference && (
                   <span
                     className="block text-[10px] tnum mt-0.5"
@@ -118,10 +117,10 @@ export default function PayoutsPanel() {
                   </span>
                 )}
               </td>
-              <td className={td} style={tdStyle}>
+              <td className={td}>
                 {p.status === 'requested' && (
                   <div className="flex gap-1.5">
-                    <Btn variant="primary" onClick={() => markPaid(p)}>
+                    <Btn variant="dark" onClick={() => markPaid(p)}>
                       <Check className="h-3.5 w-3.5" /> Mark paid
                     </Btn>
                     <Btn variant="danger" onClick={() => reject(p)}>

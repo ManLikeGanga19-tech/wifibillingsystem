@@ -10,10 +10,9 @@ import {
   type Plan,
   type SessionInfo,
 } from './api/client';
-import { getCaptiveParams, submitRouterLogin } from './captive';
+import { getCaptiveParams, readPending, submitRouterLogin, writePending } from './captive';
 import { formatDuration, formatExpiry, formatKsh, formatSpeed, isValidKenyanPhone } from './format';
 
-const PENDING_KEY = 'wifios_pending_tx';
 const POLL_INTERVAL_MS = 3000;
 const POLL_TIMEOUT_MS = 120_000;
 
@@ -31,13 +30,14 @@ export default function App() {
   const [loadError, setLoadError] = useState('');
   const [tab, setTab] = useState<'mpesa' | 'voucher'>('mpesa');
   const [stage, setStage] = useState<Stage>(() => {
-    // Resume polling if the customer refreshed mid-payment
-    const saved = sessionStorage.getItem(PENDING_KEY);
-    if (saved) {
-      const pending = JSON.parse(saved) as { txId: string; planName: string; startedAt: number };
-      if (Date.now() - pending.startedAt < POLL_TIMEOUT_MS) return { kind: 'waiting', ...pending };
-      sessionStorage.removeItem(PENDING_KEY);
+    // Resume polling if the customer refreshed mid-payment. The in-flight payment
+    // lives in the URL, not in storage — so a refresh (or a deploy) can never
+    // leave them holding a stale object, and they never lose a payment they made.
+    const pending = readPending();
+    if (pending && Date.now() - pending.startedAt < POLL_TIMEOUT_MS) {
+      return { kind: 'waiting', ...pending };
     }
+    if (pending) writePending(null); // too old to still be in flight
     return { kind: 'browse' };
   });
 
@@ -63,19 +63,19 @@ export default function App() {
       }
       if (status.status === 'success' || status.status === 'reconciled') {
         if (status.session_active) {
-          sessionStorage.removeItem(PENDING_KEY);
+          writePending(null);
           setStage({ kind: 'paid', status });
         }
         // paid but session still provisioning: keep polling until session_active
       } else if (status.status !== 'pending') {
-        sessionStorage.removeItem(PENDING_KEY);
+        writePending(null);
         const reason =
           status.status === 'timeout'
             ? 'The M-Pesa prompt expired before the PIN was entered.'
             : status.result_desc || 'Payment was not completed.';
         setStage({ kind: 'failed', reason, planName: stage.planName });
       } else if (Date.now() - stage.startedAt > POLL_TIMEOUT_MS) {
-        sessionStorage.removeItem(PENDING_KEY);
+        writePending(null);
         setStage({
           kind: 'failed',
           reason:
@@ -97,7 +97,7 @@ export default function App() {
       router_id: captive.routerId,
     });
     const pending = { txId: resp.transaction_id, planName: plan.name, startedAt: Date.now() };
-    sessionStorage.setItem(PENDING_KEY, JSON.stringify(pending));
+    writePending(pending);
     setStage({ kind: 'waiting', ...pending });
   };
 
