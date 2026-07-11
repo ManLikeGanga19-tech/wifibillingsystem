@@ -14,7 +14,18 @@ from decimal import Decimal
 from django.conf import settings
 
 # (upper_bound_inclusive | None for unbounded, KSh per user in that bracket)
+#
+# DEFAULT: a single flat rate that MATCHES Centipid's ~$0.25 (~KES 32.5) per
+# user. PROVISIONAL — confirm this still profits once the real Paybill C2B
+# collection tariff (which the platform absorbs) is known; nudge up if margin on
+# high-value packages is thin. The graduated multi-tier form below is retained
+# for custom large-ISP deals (set PPPOE_USER_FEE_TIERS in settings).
 DEFAULT_PPPOE_TIERS = [
+    (None, "30"),
+]
+
+# A ready-made graduated table for large-ISP negotiations (not the default):
+GRADUATED_PPPOE_TIERS = [
     (500, "50"),
     (2000, "40"),
     (None, "30"),

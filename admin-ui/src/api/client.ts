@@ -391,6 +391,7 @@ export interface ApiTenant {
   hotspot_commission_pct: string;
   pppoe_user_fee: string;
   setup_fee: string;
+  trial_ends_at: string | null;
   approved_at: string | null;
   created_at: string;
   router_count: number;

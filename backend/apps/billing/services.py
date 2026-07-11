@@ -242,6 +242,8 @@ def charge_monthly_base_fees() -> int:
         fee = operator.effective_base_fee
         if fee <= 0:
             continue
+        if operator.in_base_fee_trial():
+            continue  # first month free — base fee not yet started
         try:
             # Savepoint per charge: a duplicate-month conflict must not poison
             # the surrounding transaction

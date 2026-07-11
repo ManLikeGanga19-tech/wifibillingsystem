@@ -114,12 +114,13 @@ class PlatformTenantSerializer(serializers.ModelSerializer):
             "hotspot_commission_pct",
             "pppoe_user_fee",
             "setup_fee",
+            "trial_ends_at",
             "approved_at",
             "created_at",
             "router_count",
             "staff_count",
         ]
-        read_only_fields = ["slug", "status", "approved_at"]
+        read_only_fields = ["slug", "status", "approved_at", "trial_ends_at"]
 
 
 class PlatformTenantViewSet(viewsets.ModelViewSet):
@@ -142,12 +143,19 @@ class PlatformTenantViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def approve(self, request, pk=None):
+        from datetime import timedelta
+
         operator = self.get_object()
         operator.status = Operator.Status.ACTIVE
         operator.approved_at = timezone.now()
-        operator.save(update_fields=["status", "approved_at", "updated_at"])
+        # One month free before the base fee starts (only set on first approval)
+        if operator.trial_ends_at is None:
+            operator.trial_ends_at = timezone.localdate() + timedelta(days=30)
+        operator.save(
+            update_fields=["status", "approved_at", "trial_ends_at", "updated_at"]
+        )
         audit("tenant_approved", operator=operator, actor=request.user, target=operator)
-        return Response({"status": operator.status})
+        return Response({"status": operator.status, "trial_ends_at": operator.trial_ends_at})
 
     @action(detail=True, methods=["post"], url_path="charge-setup")
     def charge_setup(self, request, pk=None):

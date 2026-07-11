@@ -71,24 +71,54 @@ class TestCostRecordedOnSettle:
         assert tx.platform_cost == Decimal("5.50")
 
 
-class TestGraduatedPppoeTiers:
-    def test_within_first_tier_flat(self):
-        # 300 users, all in the 50-bracket
+class TestDefaultPppoeRate:
+    """Default is a flat KES 30/user — matches Centipid's ~$0.25 (provisional
+    until the real C2B tariff is confirmed)."""
+
+    def test_flat_default_rate(self):
+        assert pppoe_user_fee_total(300) == Decimal("9000.00")  # 300 * 30
+        assert pppoe_user_fee_total(5000) == Decimal("150000.00")  # 5000 * 30
+
+    def test_blended_rate_is_flat(self):
+        assert pppoe_blended_rate(300) == Decimal("30.00")
+        assert pppoe_blended_rate(5000) == Decimal("30.00")
+
+    def test_custom_flat_rate_overrides_default(self):
+        op = OperatorFactory(pppoe_user_fee=Decimal("25.00"))
+        assert pppoe_user_fee_total(5000, op) == Decimal("125000.00")  # 5000 * 25
+
+    def test_charge_uses_default_rate(self):
+        from apps.billing.services import charge_pppoe_user_fees
+        from apps.pppoe.models import Client
+
+        op = OperatorFactory(pppoe_user_fee=Decimal("0.00"))
+        PppoeClientFactory.create_batch(3, operator=op, status=Client.Status.ACTIVE)
+        assert charge_pppoe_user_fees() == 1
+        fee = LedgerEntry.objects.get(operator=op, entry_type="pppoe_fee")
+        assert fee.amount == Decimal("-90.00")  # 3 users * 30
+
+
+# The graduated engine stays available for custom large-ISP deals (set via
+# settings.PPPOE_USER_FEE_TIERS). Test it explicitly, independent of the default.
+GRADUATED = [[500, "50"], [2000, "40"], [None, "30"]]
+
+
+class TestGraduatedPppoeEngine:
+    @pytest.fixture(autouse=True)
+    def _graduated(self, settings):
+        settings.PPPOE_USER_FEE_TIERS = GRADUATED
+
+    def test_within_first_tier(self):
         assert pppoe_user_fee_total(300) == Decimal("15000.00")  # 300 * 50
 
-    def test_boundary_of_first_tier(self):
-        assert pppoe_user_fee_total(500) == Decimal("25000.00")  # 500 * 50
-
     def test_spans_two_tiers(self):
-        # 800 = 500*50 + 300*40 = 25000 + 12000
-        assert pppoe_user_fee_total(800) == Decimal("37000.00")
+        assert pppoe_user_fee_total(800) == Decimal("37000.00")  # 500*50 + 300*40
 
     def test_spans_all_three_tiers(self):
-        # 5000 = 500*50 + 1500*40 + 3000*30 = 25000 + 60000 + 90000
+        # 500*50 + 1500*40 + 3000*30 = 175000
         assert pppoe_user_fee_total(5000) == Decimal("175000.00")
 
-    def test_total_is_monotonic_no_cliff(self):
-        # graduated tiers never let the bill fall as users grow
+    def test_monotonic_no_cliff(self):
         prev = Decimal("-1")
         for n in (0, 1, 499, 500, 501, 1999, 2000, 2001, 10000):
             cur = pppoe_user_fee_total(n)
@@ -97,21 +127,7 @@ class TestGraduatedPppoeTiers:
 
     def test_blended_rate_drops_with_scale(self):
         assert pppoe_blended_rate(300) == Decimal("50.00")
-        assert pppoe_blended_rate(5000) == Decimal("35.00")  # 175000 / 5000
-
-    def test_custom_flat_rate_overrides_tiers(self):
-        op = OperatorFactory(pppoe_user_fee=Decimal("25.00"))
-        assert pppoe_user_fee_total(5000, op) == Decimal("125000.00")  # 5000 * 25
-
-    def test_charge_uses_tiers_when_no_custom_rate(self):
-        from apps.billing.services import charge_pppoe_user_fees
-        from apps.pppoe.models import Client
-
-        op = OperatorFactory(pppoe_user_fee=Decimal("0.00"))
-        PppoeClientFactory.create_batch(3, operator=op, status=Client.Status.ACTIVE)
-        assert charge_pppoe_user_fees() == 1
-        fee = LedgerEntry.objects.get(operator=op, entry_type="pppoe_fee")
-        assert fee.amount == Decimal("-150.00")  # 3 users graduated at 50
+        assert pppoe_blended_rate(5000) == Decimal("35.00")
 
 
 class TestSetupFee:
@@ -160,6 +176,56 @@ class TestSetupFee:
         resp2 = admin.post(f"/api/v1/platform/tenants/{op.id}/charge-setup/")
         assert resp2.json()["charged"] is False
         assert LedgerEntry.objects.filter(operator=op, entry_type="setup_fee").count() == 1
+
+
+class TestBaseFeeTrial:
+    def _charge(self):
+        from apps.billing.services import charge_monthly_base_fees
+
+        return charge_monthly_base_fees()
+
+    def test_base_fee_waived_during_trial(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        OperatorFactory(
+            slug="trialisp",
+            base_fee=Decimal("500.00"),
+            trial_ends_at=timezone.localdate() + timedelta(days=15),
+        )
+        assert self._charge() == 0  # still in free month
+        assert not LedgerEntry.objects.filter(entry_type="base_fee").exists()
+
+    def test_base_fee_charged_after_trial(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        op = OperatorFactory(
+            slug="pastisp",
+            base_fee=Decimal("500.00"),
+            trial_ends_at=timezone.localdate() - timedelta(days=1),
+        )
+        assert self._charge() == 1
+        entry = LedgerEntry.objects.get(operator=op, entry_type="base_fee")
+        assert entry.amount == Decimal("-500.00")
+
+    def test_approval_sets_one_month_trial(self):
+        from apps.core.models import Operator
+
+        op = OperatorFactory(slug="fresh", status=Operator.Status.PENDING)
+        admin = APIClient()
+        admin.force_authenticate(
+            user=UserFactory(
+                operator=None, is_staff=True, is_superuser=True, role=Role.PLATFORM_OWNER
+            )
+        )
+        resp = admin.post(f"/api/v1/platform/tenants/{op.id}/approve/")
+        assert resp.status_code == 200, resp.content
+        op.refresh_from_db()
+        assert op.trial_ends_at is not None
+        assert op.in_base_fee_trial() is True
 
 
 class TestNetMarginReconciliation:

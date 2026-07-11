@@ -8,6 +8,10 @@ const STATUS_COLOR: Record<ApiTenant['status'], 'green' | 'amber' | 'red' | 'gra
   suspended: 'red',
 };
 
+/** True while the ISP's first-month free trial still covers the base fee. */
+const inTrial = (trialEndsAt: string | null): boolean =>
+  !!trialEndsAt && new Date(trialEndsAt) >= new Date(new Date().toDateString());
+
 export default function PlatformTenantsView({ onViewAs }: { onViewAs: (slug: string) => void }) {
   const { rows, count, error, reload } = useList(() => api.platform.tenants.list());
 
@@ -60,9 +64,10 @@ export default function PlatformTenantsView({ onViewAs }: { onViewAs: (slug: str
             <td className={`${tdCls} font-mono text-center`}>{t.router_count}</td>
             <td className={`${tdCls} font-mono text-center`}>{t.staff_count}</td>
             <td className={`${tdCls} font-mono text-[11px] whitespace-nowrap`}>
-              {fmtKsh(t.base_fee)}/mo · {Number(t.hotspot_commission_pct)}% ·{' '}
-              {Number(t.pppoe_user_fee) > 0 ? `${fmtKsh(t.pppoe_user_fee)}/pppoe` : 'tiered/pppoe'} ·{' '}
-              {fmtKsh(t.setup_fee)} setup
+              {inTrial(t.trial_ends_at)
+                ? <span className="text-[#228B22]">free until {t.trial_ends_at}</span>
+                : `${fmtKsh(t.base_fee)}/mo`} · {Number(t.hotspot_commission_pct)}% ·{' '}
+              {Number(t.pppoe_user_fee) > 0 ? `${fmtKsh(t.pppoe_user_fee)}/pppoe` : 'std/pppoe'}
             </td>
             <td className={`${tdCls} font-mono whitespace-nowrap`}>{fmtDateTime(t.created_at)}</td>
             <td className={`${tdCls} whitespace-nowrap space-x-1.5`}>

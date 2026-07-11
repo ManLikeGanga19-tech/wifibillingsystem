@@ -57,14 +57,19 @@ class Operator(TimeStampedModel):
     payout_bank_account_name = models.CharField(max_length=120, blank=True)
 
     # Platform billing rates (editable per tenant from the platform portal).
-    # Model: KES 1,500 base + 3% hotspot + graduated per-PPPoE-user (see
-    # apps.billing.pricing) + a one-time setup fee. The higher base covers a
-    # tenant's baseline hosting so idle tenants aren't loss-making.
+    # Model: 1-month free trial, then KES 500 base + 3% hotspot + per-PPPoE-user
+    # (Centipid-matched flat rate via apps.billing.pricing) + an OPT-IN one-time
+    # setup fee for assisted onboarding.
     base_fee = models.DecimalField(
         max_digits=10,
         decimal_places=2,
-        default=Decimal("1500.00"),
-        help_text="Flat KSh/month for the subdomain",
+        default=Decimal("500.00"),
+        help_text="Flat KSh/month for the subdomain (waived during the free trial)",
+    )
+    # First month free: no base fee is charged on or before this date. Set when
+    # the ISP is approved. Null = no trial (legacy/seeded tenants).
+    trial_ends_at = models.DateField(
+        null=True, blank=True, help_text="Base fee is waived up to and including this date"
     )
     hotspot_commission_pct = models.DecimalField(
         max_digits=4,
@@ -117,6 +122,15 @@ class Operator(TimeStampedModel):
         if self.is_platform_owned:
             return Decimal("0.00")
         return Decimal(str(self.setup_fee))
+
+    def in_base_fee_trial(self, on_date=None) -> bool:
+        """True while the first-month free trial covers the base fee."""
+        if not self.trial_ends_at:
+            return False
+        from django.utils import timezone
+
+        on_date = on_date or timezone.localdate()
+        return on_date <= self.trial_ends_at
 
     @property
     def has_mpesa_credentials(self) -> bool:
