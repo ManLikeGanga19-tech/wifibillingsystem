@@ -24,6 +24,8 @@ class RouterSerializer(serializers.ModelSerializer):
             "enrolled_at",
             "routeros_version",
             "is_enrolled",
+            "is_reachable",
+            "needs_onboarding",
             "is_active",
         ]
         read_only_fields = [
@@ -33,6 +35,8 @@ class RouterSerializer(serializers.ModelSerializer):
             "enrolled_at",
             "routeros_version",
             "is_enrolled",
+            "is_reachable",
+            "needs_onboarding",
             "management_host",
         ]
 

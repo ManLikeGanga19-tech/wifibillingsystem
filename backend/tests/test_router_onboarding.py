@@ -102,8 +102,16 @@ class TestReSync:
         router.refresh_from_db()
         assert router.last_sync_at is not None
 
-    def test_resync_endpoint_requires_enrollment(self):
+    def test_resync_blocked_when_router_needs_onboarding(self):
+        """Re-sync now gates on REACHABILITY, not enrollment: a MikroTik router
+        with no credentials (never set up / wiped) can't be re-synced."""
         op = OperatorFactory()
-        router = RouterFactory(operator=op, management_host="")  # not enrolled
+        router = RouterFactory(
+            operator=op,
+            provisioning_backend=Router.Backend.MIKROTIK_REST,
+            management_host="",
+            password="",
+        )
         resp = staff_client(op).post(f"/api/v1/routers/{router.id}/resync/")
         assert resp.status_code == 409
+        assert resp.json()["needs_onboarding"] is True

@@ -1,4 +1,10 @@
-from .base import ActiveSession, ProvisioningAdapter, ProvisioningError, ProvisionResult
+from .base import (
+    ActiveSession,
+    ProvisioningAdapter,
+    ProvisioningAuthError,
+    ProvisioningError,
+    ProvisionResult,
+)
 from .dummy import DummyAdapter
 from .mikrotik import MikroTikRestAdapter
 
@@ -22,6 +28,7 @@ __all__ = [
     "DummyAdapter",
     "MikroTikRestAdapter",
     "ProvisioningAdapter",
+    "ProvisioningAuthError",
     "ProvisioningError",
     "ProvisionResult",
     "get_adapter",

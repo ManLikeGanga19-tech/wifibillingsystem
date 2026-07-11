@@ -218,6 +218,8 @@ export interface ApiRouter {
   enrolled_at: string | null;
   routeros_version: string;
   is_enrolled: boolean;
+  is_reachable: boolean;
+  needs_onboarding: boolean;
   is_active: boolean;
 }
 

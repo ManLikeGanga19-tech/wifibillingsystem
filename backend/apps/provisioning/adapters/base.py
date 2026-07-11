@@ -9,6 +9,12 @@ class ProvisioningError(Exception):
     pass
 
 
+class ProvisioningAuthError(ProvisioningError):
+    """The router answered but rejected our credentials — its API user is gone
+    (typically a factory reset). Distinct from being merely unreachable/offline:
+    this one means the ISP must re-run the setup script."""
+
+
 @dataclass
 class ProvisionResult:
     ok: bool

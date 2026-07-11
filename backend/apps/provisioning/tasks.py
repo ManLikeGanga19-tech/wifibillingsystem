@@ -86,21 +86,41 @@ def expire_sessions():
 
 @shared_task
 def check_router_health():
-    from .adapters import get_adapter
+    from .adapters import ProvisioningAuthError, get_adapter
     from .models import Router, RouterHealthCheck
 
     for router in Router.objects.filter(is_active=True).exclude(management_host=""):
         was_online = router.status == Router.Status.ONLINE
         ok = False
+        auth_failed = False
         try:
             ok = get_adapter(router).test_connection()
+        except ProvisioningAuthError:
+            auth_failed = True  # answered but rejected creds -> wiped/reset
         except Exception:
             logger.exception("Health check crashed for %s", router)
         RouterHealthCheck.objects.create(router=router, online=ok)
-        router.mark_seen(ok)
-        # Offline -> online transition: the router came back, re-sync its sessions
-        if ok and not was_online and router.is_enrolled:
+        _apply_reachability(router, ok, auth_failed)
+        # Offline -> online transition with valid creds: re-sync its sessions.
+        if ok and not was_online:
             sync_router.delay(router.id)
+
+
+def _apply_reachability(router, ok: bool, auth_failed: bool):
+    """Persist connection result: flag/clear onboarding_required, update status."""
+    from .models import Router
+
+    fields = ["status", "last_seen_at", "updated_at"]
+    router.status = Router.Status.ONLINE if ok else Router.Status.OFFLINE
+    if ok:
+        router.last_seen_at = timezone.now()
+        if router.onboarding_required:
+            router.onboarding_required = False
+            fields.append("onboarding_required")
+    elif auth_failed and not router.onboarding_required:
+        router.onboarding_required = True  # factory reset detected
+        fields.append("onboarding_required")
+    router.save(update_fields=fields)
 
 
 @shared_task
@@ -114,10 +134,9 @@ def sync_router(router_id: int):
 
 @shared_task
 def sync_all_routers():
-    """Nightly safety net: reconcile every enrolled, active router."""
+    """Nightly safety net: reconcile every reachable, online, active router."""
     from .models import Router
 
-    for rid in Router.objects.filter(
-        is_active=True, status=Router.Status.ONLINE
-    ).exclude(management_host="").values_list("id", flat=True):
-        sync_router.delay(rid)
+    for router in Router.objects.filter(is_active=True, status=Router.Status.ONLINE):
+        if router.is_reachable:
+            sync_router.delay(router.id)

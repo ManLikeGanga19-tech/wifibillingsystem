@@ -36,20 +36,37 @@ class RouterViewSet(TenantModelViewSet):
     @action(detail=True, methods=["post"])
     def resync(self, request, pk=None):
         router = self.get_object()
-        if not router.is_enrolled:
+        if not router.is_reachable:
+            # A wiped/factory-reset router has no API user to talk to — re-syncing
+            # is impossible until the ISP re-runs the setup script.
             return Response(
-                {"detail": "Router has not enrolled yet."}, status=status.HTTP_409_CONFLICT
+                {
+                    "detail": "This router can't be reached. Re-run its setup script "
+                    "to reconnect it, then sessions will re-sync.",
+                    "needs_onboarding": True,
+                },
+                status=status.HTTP_409_CONFLICT,
             )
         sync_router.delay(router.id)
         return Response({"detail": "Re-sync queued."}, status=status.HTTP_202_ACCEPTED)
 
     @action(detail=True, methods=["post"])
     def test_connection(self, request, pk=None):
+        from .adapters import ProvisioningAuthError
+        from .tasks import _apply_reachability
+
         router = self.get_object()
         try:
             ok = get_adapter(router).test_connection()
+        except ProvisioningAuthError as exc:
+            _apply_reachability(router, ok=False, auth_failed=True)
+            return Response(
+                {"ok": False, "needs_onboarding": True, "detail": str(exc)},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
         except ProvisioningError as exc:
             return Response({"ok": False, "detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+        _apply_reachability(router, ok=ok, auth_failed=False)
         return Response({"ok": ok})
 
     @action(detail=True, methods=["get"])
@@ -91,6 +108,7 @@ def router_enroll(request):
     router.enrolled_at = timezone.now()
     router.status = Router.Status.ONLINE
     router.last_seen_at = timezone.now()
+    router.onboarding_required = False  # fresh script run — creds are good again
     router.save()  # full save — persists all enrollment fields at once
     audit(
         "router_enrolled",

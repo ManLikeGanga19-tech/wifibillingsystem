@@ -117,17 +117,22 @@ export default function RoutersView() {
               {r.management_host && <span className="block text-[11px] font-mono text-[#141414]/50">{r.management_host}</span>}
             </td>
             <td className={tdCls}>
-              <Badge color={r.status === 'online' ? 'green' : r.status === 'offline' ? 'red' : r.status === 'pending' ? 'amber' : 'gray'}>
-                {r.status === 'pending' ? 'awaiting setup' : r.status}
-              </Badge>
+              {r.needs_onboarding ? (
+                <Badge color="amber">needs setup</Badge>
+              ) : (
+                <Badge color={r.status === 'online' ? 'green' : r.status === 'offline' ? 'red' : 'gray'}>
+                  {r.status}
+                </Badge>
+              )}
             </td>
             <td className={`${tdCls} font-mono`}>{r.routeros_version || '—'}</td>
             <td className={`${tdCls} font-mono whitespace-nowrap`}>{fmtDateTime(r.last_seen_at)}</td>
             <td className={`${tdCls} font-mono whitespace-nowrap`}>{fmtDateTime(r.last_sync_at)}</td>
             <td className={`${tdCls} whitespace-nowrap space-x-1.5`}>
-              {!r.is_enrolled ? (
+              {r.needs_onboarding ? (
+                // Never set up, OR factory-reset (API user wiped) — same remedy.
                 <Btn variant="dark" onClick={() => openScript(r)}>
-                  <Copy className="h-3.5 w-3.5" /> Setup script
+                  <Copy className="h-3.5 w-3.5" /> {r.enrolled_at ? 'Re-run setup' : 'Setup script'}
                 </Btn>
               ) : (
                 <>
@@ -135,9 +140,16 @@ export default function RoutersView() {
                     <Plug className="h-3.5 w-3.5" />
                     {testing === r.id ? 'Testing…' : 'Test'}
                   </Btn>
-                  <Btn variant="outline" onClick={() => resync(r)}>
+                  <Btn variant="outline" onClick={() => resync(r)} title="Push any missing active sessions back onto the router">
                     <RefreshCw className="h-3.5 w-3.5" /> Re-sync
                   </Btn>
+                  <button
+                    onClick={() => openScript(r)}
+                    className="text-[11px] font-mono underline text-[#141414]/50 hover:text-[#141414]"
+                    title="Show the setup script again"
+                  >
+                    script
+                  </button>
                 </>
               )}
             </td>

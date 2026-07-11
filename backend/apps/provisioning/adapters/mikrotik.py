@@ -9,7 +9,13 @@ import logging
 
 import httpx
 
-from .base import ActiveSession, ProvisioningAdapter, ProvisioningError, ProvisionResult
+from .base import (
+    ActiveSession,
+    ProvisioningAdapter,
+    ProvisioningAuthError,
+    ProvisioningError,
+    ProvisionResult,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -94,8 +100,16 @@ class MikroTikRestAdapter(ProvisioningAdapter):
             raise ProvisioningError(f"get_active_sessions failed on {self.router}: {exc}") from exc
 
     def test_connection(self) -> bool:
+        """True if reachable and authenticated. Raises ProvisioningAuthError when
+        the router answers but rejects our credentials (wiped API user), so callers
+        can distinguish 'offline' from 'needs re-onboarding'."""
         try:
             with self._client() as client:
-                return client.get("/system/resource").status_code == 200
+                resp = client.get("/system/resource")
         except httpx.HTTPError:
-            return False
+            return False  # unreachable / offline — config is presumably intact
+        if resp.status_code in (401, 403):
+            raise ProvisioningAuthError(
+                f"{self.router} rejected our API credentials (status {resp.status_code})"
+            )
+        return resp.status_code == 200

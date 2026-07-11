@@ -1,7 +1,6 @@
 import secrets
 
 from django.db import models
-from django.utils import timezone
 
 from apps.core.fields import EncryptedTextField
 from apps.core.models import OperatorOwnedModel
@@ -50,6 +49,9 @@ class Router(OperatorOwnedModel):
     enrolled_at = models.DateTimeField(null=True, blank=True)
     routeros_version = models.CharField(max_length=20, blank=True)
     last_sync_at = models.DateTimeField(null=True, blank=True)
+    # Set when a connection attempt is rejected for bad credentials (factory reset
+    # wiped the API user). Cleared on the next successful connection.
+    onboarding_required = models.BooleanField(default=False)
 
     def __str__(self):
         return f"{self.name} ({self.management_host or 'not enrolled'})"
@@ -61,13 +63,28 @@ class Router(OperatorOwnedModel):
 
     @property
     def is_enrolled(self) -> bool:
+        """Went through the self-onboarding script (phoned home)."""
         return bool(self.enrolled_at and self.management_host)
 
-    def mark_seen(self, online: bool):
-        self.status = self.Status.ONLINE if online else self.Status.OFFLINE
-        if online:
-            self.last_seen_at = timezone.now()
-        self.save(update_fields=["status", "last_seen_at", "updated_at"])
+    @property
+    def is_reachable(self) -> bool:
+        """We have the credentials to talk to it via the API and they haven't been
+        rejected. Gates provisioning and re-sync (not is_enrolled) so a
+        hand-configured router works too. DUMMY backend is always reachable."""
+        if self.provisioning_backend == self.Backend.DUMMY:
+            return True
+        return bool(self.management_host and self.password) and not self.onboarding_required
+
+    @property
+    def needs_onboarding(self) -> bool:
+        """The ISP must (re)run the setup script: either it was never configured,
+        or a factory reset wiped its API user (a connection auth-failure). A router
+        that is merely powered off is NOT here — its config is intact and it
+        re-syncs automatically when it returns."""
+        no_credentials = not (self.management_host and self.password)
+        return self.provisioning_backend != self.Backend.DUMMY and (
+            no_credentials or self.onboarding_required
+        )
 
 
 class RouterHealthCheck(models.Model):
