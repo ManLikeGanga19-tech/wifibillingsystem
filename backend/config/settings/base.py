@@ -80,9 +80,16 @@ CACHES = {
     }
 }
 
+# Auth cookies are shared across the apps + API. In production they all live under
+# wifios.co.ke, so scope the cookie to the parent domain; blank in dev (localhost).
+SESSION_COOKIE_DOMAIN = os.environ.get("COOKIE_DOMAIN", "")
+
 REST_FRAMEWORK = {
+    # Cookie-first: the browser sends an httpOnly JWT cookie, so the frontends
+    # store NOTHING (no localStorage anywhere — see apps/accounts/cookie_auth.py).
+    # The header fallback keeps scripts, tests and the CLI working.
     "DEFAULT_AUTHENTICATION_CLASSES": [
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
+        "apps.accounts.cookie_auth.CookieJWTAuthentication",
         "rest_framework.authentication.SessionAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],

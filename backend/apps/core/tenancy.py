@@ -23,6 +23,24 @@ from django.utils.deprecation import MiddlewareMixin
 from .models import ImpersonationGrant, Operator
 
 
+def _requested_tenant(request) -> str | None:
+    """Which ISP is this platform user asking to act for?
+
+    Source of truth is the SERVER-SET act-as cookie (written when an
+    ImpersonationGrant is opened, cleared when it is closed) — never a value the
+    frontend kept in localStorage, which is how it used to drift out of sync with
+    the grant. The header and query param remain for scripts and tests.
+    """
+    from apps.accounts.cookie_auth import ACT_AS_COOKIE
+
+    header = request.headers.get("X-Act-As-Tenant")
+    if header:
+        return header
+    if hasattr(request, "query_params") and request.query_params.get("tenant"):
+        return request.query_params["tenant"]
+    return request.COOKIES.get(ACT_AS_COOKIE) or None
+
+
 def has_live_grant(user, operator) -> bool:
     """Is there an unexpired, un-exited impersonation grant letting `user` act as
     `operator`? This is the ONLY way platform staff reach a foreign tenant."""
@@ -69,21 +87,25 @@ def acting_tenant(request) -> Operator | None:
         # Platform staff may act as another tenant, but ONLY through a live,
         # audited ImpersonationGrant — never by simply setting a header.
         if user.is_platform_staff:
-            requested = (
-                request.headers.get("X-Act-As-Tenant")
-                or request.query_params.get("tenant")
-                if hasattr(request, "query_params")
-                else request.headers.get("X-Act-As-Tenant")
-            )
+            requested = _requested_tenant(request)
             if not requested:
                 return user.operator  # their own ISP, if they run one
+
             target = Operator.objects.filter(slug=requested, is_active=True).first()
-            if target is None:
-                return None
             # Your own ISP is not impersonation — no grant needed.
-            if user.operator_id and target.pk == user.operator_id:
+            if target and user.operator_id and target.pk == user.operator_id:
                 return target
-            return target if has_live_grant(user, target) else None
+            if target and has_live_grant(user, target):
+                return target
+
+            # SELF-HEALING (this is the "once and for all" bit): an unknown slug,
+            # or a grant that has EXPIRED, must NOT resolve to None. Returning None
+            # made RequireTenant 403 every single ISP endpoint, which looked exactly
+            # like "the API is down" and could only be cleared by wiping browser
+            # storage. Fall back to the user's own ISP instead — still exactly one
+            # tenant, still never an implicit "all", but the console keeps working.
+            return user.operator
+
         # Tenant staff are locked to their own operator, whatever the Host says.
         if user.operator_id:
             return user.operator

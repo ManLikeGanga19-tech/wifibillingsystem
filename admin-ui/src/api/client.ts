@@ -1,65 +1,49 @@
 /**
- * Admin API client: JWT auth (access + refresh with silent renewal) and typed
- * endpoints for the wired screens. All calls go through the Vite dev proxy
- * (/api -> Django) in dev; VITE_API_BASE_URL overrides in production builds.
+ * ISP console API client.
+ *
+ * NO BROWSER STORAGE — a hard rule for this system. We hold no token and no
+ * acting-tenant: signing in makes the SERVER set httpOnly cookies, and the
+ * browser attaches them from then on. JavaScript cannot read them (XSS cannot
+ * steal them), and nothing cached in the client can go stale after a deploy, so
+ * no ISP is ever told to "clear your cache".
+ *
+ * "Am I signed in?" and "which ISP am I acting for?" are questions only the
+ * server can answer now — we ask it (GET /me/) instead of reading storage. That
+ * is what makes a stale/expired session impossible to get wedged on.
+ *
+ * Calls go through the Vite dev proxy (/api -> Django) in dev, so the cookies are
+ * same-origin; VITE_API_BASE_URL overrides in production builds.
  */
 
 const BASE = (import.meta as { env?: Record<string, string> }).env?.VITE_API_BASE_URL ?? '';
-const TOKEN_KEY = 'wifios_admin_jwt';
 
 // ---- auth -------------------------------------------------------------
 
-interface TokenPair {
-  access: string;
-  refresh: string;
-}
-
-function getTokens(): TokenPair | null {
-  const raw = localStorage.getItem(TOKEN_KEY);
-  return raw ? (JSON.parse(raw) as TokenPair) : null;
-}
-
-function setTokens(tokens: TokenPair | null) {
-  if (tokens) localStorage.setItem(TOKEN_KEY, JSON.stringify(tokens));
-  else localStorage.removeItem(TOKEN_KEY);
-}
-
-export function isAuthenticated(): boolean {
-  return getTokens() !== null;
-}
-
-export function logout() {
-  setTokens(null);
-  localStorage.removeItem(ACT_AS_KEY);
-}
+/** Send cookies on every call — this replaces the Authorization header. */
+const withCookies: RequestInit = { credentials: 'include' };
 
 export async function login(phone: string, password: string): Promise<void> {
-  const resp = await fetch(`${BASE}/api/v1/auth/token/`, {
+  const resp = await fetch(`${BASE}/api/v1/auth/login/`, {
+    ...withCookies,
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ phone, password }),
   });
   if (!resp.ok) {
-    throw new Error(resp.status === 401 ? 'Wrong phone number or password.' : `Login failed (HTTP ${resp.status})`);
+    throw new Error(
+      resp.status === 401 ? 'Wrong phone number or password.' : `Login failed (HTTP ${resp.status})`
+    );
   }
-  setTokens((await resp.json()) as TokenPair);
+  // Nothing to store — the cookies are already set.
+}
+
+export async function logout(): Promise<void> {
+  await fetch(`${BASE}/api/v1/auth/logout/`, { ...withCookies, method: 'POST' }).catch(() => {});
 }
 
 async function tryRefresh(): Promise<boolean> {
-  const tokens = getTokens();
-  if (!tokens) return false;
-  const resp = await fetch(`${BASE}/api/v1/auth/token/refresh/`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ refresh: tokens.refresh }),
-  });
-  if (!resp.ok) {
-    setTokens(null);
-    return false;
-  }
-  const data = (await resp.json()) as { access: string };
-  setTokens({ ...tokens, access: data.access });
-  return true;
+  const resp = await fetch(`${BASE}/api/v1/auth/refresh/`, { ...withCookies, method: 'POST' });
+  return resp.ok;
 }
 
 export class ApiError extends Error {
@@ -75,38 +59,15 @@ export class ApiError extends Error {
   }
 }
 
-// ---- "act as tenant" (platform staff viewing one ISP) ---------------------
-// The backend fails closed: ISP endpoints need exactly one tenant. Platform
-// staff pick it explicitly; this header carries that choice on every request.
-const ACT_AS_KEY = 'wifios_act_as_tenant';
-
-export function getActingTenant(): string | null {
-  return localStorage.getItem(ACT_AS_KEY);
-}
-
-export function setActingTenant(slug: string | null) {
-  if (slug) localStorage.setItem(ACT_AS_KEY, slug);
-  else localStorage.removeItem(ACT_AS_KEY);
-}
-
 async function request<T>(path: string, init?: RequestInit, retried = false): Promise<T> {
-  const tokens = getTokens();
-  const actAs = getActingTenant();
   const resp = await fetch(`${BASE}/api/v1${path}`, {
+    ...withCookies,
     ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(tokens ? { Authorization: `Bearer ${tokens.access}` } : {}),
-      ...(actAs ? { 'X-Act-As-Tenant': actAs } : {}),
-      ...init?.headers,
-    },
+    headers: { 'Content-Type': 'application/json', ...init?.headers },
   });
+  // Access cookie expired -> renew silently and replay once.
   if (resp.status === 401 && !retried && (await tryRefresh())) {
     return request<T>(path, init, true);
-  }
-  if (resp.status === 401) {
-    setTokens(null);
-    window.location.reload(); // back to the login gate
   }
   const body = resp.status === 204 ? null : await resp.json().catch(() => null);
   if (!resp.ok) throw new ApiError(resp.status, body);
@@ -593,7 +554,17 @@ export function signup(data: {
 export const api = {
   stats: () => request<DashboardStats>('/stats/'),
   navCounts: () => request<NavCounts>('/nav/'),
+  /** Also the "am I signed in / which ISP am I in?" probe — only the server knows. */
   me: () => request<Me>('/me/'),
+
+  /** Leave an ISP we were granted access to. The server clears the acting-tenant
+   * cookie, so the next request is back in our own console — nothing to clean up
+   * on this side. */
+  endImpersonation: () =>
+    request<{ ended: number }>('/platform/impersonation/end/', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
 
   operatorSettings: {
     get: () => request<OperatorSettings>('/operator/settings/'),

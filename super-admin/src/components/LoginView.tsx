@@ -20,7 +20,9 @@ export default function LoginView({ onLoggedIn }: { onLoggedIn: () => void }) {
       await login(phone.trim(), password);
       const me = await api.me();
       if (!me.is_platform_staff) {
-        logout();
+        // An ISP's credentials authenticate fine against the shared backend —
+        // sign them straight back out rather than opening the platform console.
+        await logout();
         setError('This console is for platform staff. Use your ISP console instead.');
         return;
       }

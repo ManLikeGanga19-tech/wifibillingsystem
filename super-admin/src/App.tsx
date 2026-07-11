@@ -8,7 +8,7 @@ import {
   ShieldCheck,
   TrendingUp,
 } from 'lucide-react';
-import { api, isAuthenticated, logout, type Me } from './api/client';
+import { api, logout, type Me } from './api/client';
 import { Spinner, ToastHost } from './components/ui';
 import LoginView from './components/LoginView';
 import CommandCenter from './views/CommandCenter';
@@ -30,42 +30,49 @@ const NAV: { id: Tab; label: string; icon: typeof Gauge }[] = [
 ];
 
 export default function App() {
-  const [authed, setAuthed] = useState(isAuthenticated());
+  // "Am I signed in?" is a question only the SERVER can answer now — the session
+  // lives in an httpOnly cookie we cannot read. So we ask it, rather than probing
+  // localStorage (which is exactly the stale state we no longer keep).
   const [me, setMe] = useState<Me | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [checking, setChecking] = useState(true);
   const [tab, setTab] = useState<Tab>('command');
   const [openTenant, setOpenTenant] = useState<number | null>(null);
 
   const loadMe = useCallback(async () => {
-    setLoading(true);
+    setChecking(true);
     try {
       setMe(await api.me());
     } catch {
-      logout();
-      setAuthed(false);
+      setMe(null); // not signed in (or the session expired) -> the login gate
     } finally {
-      setLoading(false);
+      setChecking(false);
     }
   }, []);
 
   useEffect(() => {
-    if (authed) loadMe();
-  }, [authed, loadMe]);
+    loadMe();
+  }, [loadMe]);
+
+  const signOut = async () => {
+    await logout(); // the server clears the cookies; nothing to clear here
+    setMe(null);
+  };
 
   const go = (t: string) => {
     setOpenTenant(null);
     setTab(t as Tab);
   };
 
-  if (!authed) {
+  if (checking) return <Spinner />;
+
+  if (!me) {
     return (
       <>
-        <LoginView onLoggedIn={() => setAuthed(true)} />
+        <LoginView onLoggedIn={loadMe} />
         <ToastHost />
       </>
     );
   }
-  if (loading || !me) return <Spinner />;
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -123,11 +130,7 @@ export default function App() {
               </p>
             </div>
             <button
-              onClick={() => {
-                logout();
-                setAuthed(false);
-                setMe(null);
-              }}
+              onClick={signOut}
               title="Sign out"
               className="p-1.5 rounded-md cursor-pointer transition hover:text-white"
               style={{ color: 'var(--text-muted)' }}

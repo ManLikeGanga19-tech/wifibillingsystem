@@ -28,11 +28,12 @@ export default function ImpersonateDialog({
   const start = async () => {
     setBusy(true);
     try {
+      // Starting the grant makes the SERVER set the acting-tenant cookie. The ISP
+      // console then simply picks it up — we pass nothing, and it stores nothing.
+      // The cookie and the grant that authorises it can never drift apart.
       await api.impersonation.start(tenant.slug, reason.trim(), minutes);
       toast('good', `Access to ${tenant.name} opened for ${minutes} minutes — and recorded.`);
-      // Hand off to the ISP console; it carries the act-as header, which the
-      // backend will now honour because a live grant exists.
-      window.open(`${ISP_CONSOLE}/?act_as=${encodeURIComponent(tenant.slug)}`, '_blank');
+      window.open(ISP_CONSOLE, '_blank');
       onStarted();
     } catch {
       toast('critical', 'Could not open access.');

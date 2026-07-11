@@ -4,98 +4,14 @@
  * Talks to the same Django backend as the ISP console, but only ever calls
  * /platform/* endpoints — this app has no business reading a single ISP's data
  * directly. The one exception is impersonation, which is an explicit, audited,
- * time-boxed grant (see startImpersonation) rather than a silent header flip.
+ * time-boxed grant rather than a silent header flip.
+ *
+ * NO BROWSER STORAGE. Auth lives in server-set httpOnly cookies (see auth.ts).
  */
 
-const BASE = (import.meta as { env?: Record<string, string> }).env?.VITE_API_BASE_URL ?? '';
-const TOKEN_KEY = 'wifios_platform_jwt';
+import { request } from './auth';
 
-interface TokenPair {
-  access: string;
-  refresh: string;
-}
-
-function getTokens(): TokenPair | null {
-  const raw = localStorage.getItem(TOKEN_KEY);
-  return raw ? (JSON.parse(raw) as TokenPair) : null;
-}
-function setTokens(t: TokenPair | null) {
-  if (t) localStorage.setItem(TOKEN_KEY, JSON.stringify(t));
-  else localStorage.removeItem(TOKEN_KEY);
-}
-
-export function isAuthenticated(): boolean {
-  return getTokens() !== null;
-}
-export function logout() {
-  setTokens(null);
-}
-
-export async function login(phone: string, password: string): Promise<void> {
-  const resp = await fetch(`${BASE}/api/v1/auth/token/`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ phone, password }),
-  });
-  if (!resp.ok) {
-    throw new Error(
-      resp.status === 401 ? 'Wrong phone number or password.' : `Login failed (HTTP ${resp.status})`
-    );
-  }
-  setTokens((await resp.json()) as TokenPair);
-}
-
-async function tryRefresh(): Promise<boolean> {
-  const tokens = getTokens();
-  if (!tokens) return false;
-  const resp = await fetch(`${BASE}/api/v1/auth/token/refresh/`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ refresh: tokens.refresh }),
-  });
-  if (!resp.ok) {
-    setTokens(null);
-    return false;
-  }
-  const data = (await resp.json()) as { access: string };
-  setTokens({ ...tokens, access: data.access });
-  return true;
-}
-
-export class ApiError extends Error {
-  constructor(
-    public status: number,
-    public body: unknown
-  ) {
-    super(
-      typeof body === 'object' && body && 'detail' in body
-        ? String((body as { detail: unknown }).detail)
-        : `HTTP ${status}`
-    );
-  }
-}
-
-async function request<T>(path: string, init?: RequestInit, retried = false): Promise<T> {
-  const tokens = getTokens();
-  const resp = await fetch(`${BASE}/api/v1${path}`, {
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(tokens ? { Authorization: `Bearer ${tokens.access}` } : {}),
-      ...init?.headers,
-    },
-  });
-  if (resp.status === 401 && !retried && (await tryRefresh())) {
-    return request<T>(path, init, true);
-  }
-  if (resp.status === 401) {
-    setTokens(null);
-    window.location.reload();
-  }
-  if (!resp.ok) throw new ApiError(resp.status, await resp.json().catch(() => null));
-  if (resp.status === 204) return undefined as T;
-  return (await resp.json()) as T;
-}
+export { ApiError, login, logout } from './auth';
 
 const get = <T,>(p: string) => request<T>(p);
 const post = <T,>(p: string, body?: unknown) =>
@@ -330,7 +246,8 @@ export interface Payout {
 // ---- endpoints ---------------------------------------------------------------
 
 export const api = {
-  me: () => get<Me>('/auth/me/'),
+  /** Also the "am I signed in?" probe — only the server can answer that now. */
+  me: () => get<Me>('/me/'),
 
   kpis: () => get<Kpis>('/platform/kpis/'),
   health: () => get<Health>('/platform/health/'),

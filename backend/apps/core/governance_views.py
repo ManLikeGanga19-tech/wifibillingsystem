@@ -18,6 +18,8 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.accounts.cookie_auth import clear_act_as_cookie, set_act_as_cookie
+
 from .models import AuditLog, ImpersonationGrant, Operator
 from .permissions import IsPlatformStaff
 from .services import audit
@@ -152,9 +154,13 @@ class StartImpersonationView(APIView):
             reason=grant.reason,
             expires_at=grant.expires_at.isoformat(),
         )
-        return Response(
+        resp = Response(
             ImpersonationGrantSerializer(grant).data, status=status.HTTP_201_CREATED
         )
+        # The acting tenant is SERVER state, set alongside the grant that
+        # authorises it — so the two can never drift apart the way a value kept
+        # in the browser did.
+        return set_act_as_cookie(resp, operator.slug)
 
 
 class EndImpersonationView(APIView):
@@ -181,4 +187,6 @@ class EndImpersonationView(APIView):
                 ip=_client_ip(request),
             )
             ended += 1
-        return Response({"ended": ended})
+        # Closing the door also drops the acting-tenant cookie, so the very next
+        # request is back in the user's own console. No client cleanup needed.
+        return clear_act_as_cookie(Response({"ended": ended}))

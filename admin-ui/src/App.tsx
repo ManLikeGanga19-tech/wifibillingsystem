@@ -25,17 +25,7 @@ import {
 } from 'lucide-react';
 
 import { BandwidthProfile, Subscriber, OutboundCampaign } from './types';
-import {
-  api,
-  ApiPlan,
-  ApiTenant,
-  getActingTenant,
-  isAuthenticated,
-  logout,
-  Me,
-  NavCounts,
-  setActingTenant,
-} from './api/client';
+import { api, ApiPlan, ApiTenant, logout, Me, NavCounts } from './api/client';
 import { planToProfile, profileToPlan, campaignToUi, subscriberToUi } from './api/mappers';
 import { toast, ToastHost } from './components/ui';
 
@@ -149,15 +139,16 @@ const NAV_GROUPS: { title: string | null; items: NavItem[] }[] = [
 const PLATFORM_CONSOLE_URL = 'http://localhost:4800';
 
 export default function App() {
-  const [authed, setAuthed] = useState<boolean>(isAuthenticated());
+  // Session lives in an httpOnly cookie we cannot read, so "am I signed in?" is a
+  // question only the server can answer. We ask it. Nothing is kept in the
+  // browser, so nothing can go stale after a deploy.
   const [me, setMe] = useState<Me | null>(null);
-  const [meLoading, setMeLoading] = useState(false);
+  const [checking, setChecking] = useState(true);
   const [tenants, setTenants] = useState<ApiTenant[]>([]);
   const [activeTab, setActiveTab] = useState<TabId>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(
-    () => localStorage.getItem('wifi_sidebar_collapsed') === 'true'
-  );
+  // Ephemeral UI preference — deliberately NOT persisted (no browser storage).
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [navCounts, setNavCounts] = useState<NavCounts | null>(null);
 
   // Live server state shared across tabs
@@ -166,12 +157,7 @@ export default function App() {
   const [campaigns, setCampaigns] = useState<OutboundCampaign[]>([]);
   const [liveSubscribers, setLiveSubscribers] = useState<Subscriber[]>([]);
 
-  useEffect(() => {
-    localStorage.setItem('wifi_sidebar_collapsed', String(isSidebarCollapsed));
-  }, [isSidebarCollapsed]);
-
   const loadNavCounts = useCallback(() => {
-    if (!isAuthenticated()) return;
     api.navCounts().then(setNavCounts).catch(() => {});
   }, []);
 
@@ -185,19 +171,11 @@ export default function App() {
       .catch(() => {});
   }, []);
 
+  /** Ask the server who we are and which ISP we're acting for. Both live in
+   * cookies the server owns, so this is always the truth — there is no local copy
+   * that can disagree with it. */
   const loadMe = useCallback(async () => {
-    let data = await api.me();
-
-    // Self-heal: an act-as slug whose ImpersonationGrant has EXPIRED (or was
-    // never granted at all) resolves to NO tenant — which would 403 every ISP
-    // endpoint and look exactly like "the API is down". Drop it and fall back to
-    // our own ISP rather than leaving the console wedged.
-    if (getActingTenant() && !data.acting_operator) {
-      setActingTenant(null);
-      data = await api.me();
-      toast('warning', 'Your access to that ISP has ended — back in your own console.');
-    }
-
+    const data = await api.me();
     setMe(data);
     if (data.is_platform_staff) {
       api.platform.tenants
@@ -208,53 +186,41 @@ export default function App() {
     return data;
   }, []);
 
-  // Hand-off from Platform Control (?act_as=<slug>): the super-admin console has
-  // ALREADY created an audited, time-boxed ImpersonationGrant. Without that grant
-  // the backend refuses this tenant, so setting the header here is not a bypass —
-  // it just carries the choice the grant already authorised.
   useEffect(() => {
-    const slug = new URLSearchParams(window.location.search).get('act_as');
-    if (!slug) return;
-    setActingTenant(slug);
-    window.history.replaceState({}, '', window.location.pathname);
-  }, []);
-
-  useEffect(() => {
-    if (!authed) return;
-    setMeLoading(true);
+    setChecking(true);
     loadMe()
-      .catch(() => {})
-      .finally(() => setMeLoading(false));
-  }, [authed, loadMe]);
+      .catch(() => setMe(null)) // not signed in -> the login gate
+      .finally(() => setChecking(false));
+  }, [loadMe]);
 
-  /** Leave an impersonated ISP and return to your own (or none). */
-  const switchTenant = useCallback(
-    async (slug: string | null) => {
-      setActingTenant(slug);
-      const data = await loadMe();
-      if (slug) {
-        setActiveTab('dashboard');
-        toast('info', `Now viewing ${data.acting_operator?.name ?? slug}.`);
-      }
-      loadPlans();
-      loadNavCounts();
-    },
-    [loadMe, loadPlans, loadNavCounts]
-  );
+  /** Leave an ISP we were granted access to. The server ends the grant AND clears
+   * the acting-tenant cookie, so we simply re-ask who we are. */
+  const exitImpersonation = useCallback(async () => {
+    try {
+      await api.endImpersonation();
+    } catch {
+      /* already expired — the cookie is moot either way */
+    }
+    await loadMe();
+    setActiveTab('dashboard');
+    loadPlans();
+    loadNavCounts();
+    toast('info', 'Back in your own console.');
+  }, [loadMe, loadPlans, loadNavCounts]);
 
   // ISP data only loads when we are actually acting for a tenant. Without one the
   // API refuses (by design) — so don't ask.
   const hasTenant = !!me?.acting_operator;
 
   useEffect(() => {
-    if (!authed || !hasTenant) return;
+    if (!hasTenant) return;
     loadPlans();
     loadNavCounts();
     api.campaigns.list().then((r) => setCampaigns(r.results.map(campaignToUi).reverse())).catch(() => {});
     api.subscribers.list().then((r) => setLiveSubscribers(r.results.map(subscriberToUi))).catch(() => {});
     const t = window.setInterval(loadNavCounts, 30_000);
     return () => window.clearInterval(t);
-  }, [authed, hasTenant, loadPlans, loadNavCounts]);
+  }, [hasTenant, loadPlans, loadNavCounts]);
 
   // Refresh badges when switching tabs — cheap, and keeps counts honest after actions
   useEffect(() => {
@@ -311,20 +277,20 @@ export default function App() {
     }
   };
 
-  if (!authed) {
-    return (
-      <>
-        <LoginView onLoggedIn={() => setAuthed(true)} />
-        <ToastHost />
-      </>
-    );
-  }
-
-  if (meLoading || (authed && me === null)) {
+  if (checking) {
     return (
       <div className="min-h-screen bg-[#E4E3E0] flex items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-[#141414]/40" />
       </div>
+    );
+  }
+
+  if (!me) {
+    return (
+      <>
+        <LoginView onLoggedIn={() => loadMe().catch(() => {})} />
+        <ToastHost />
+      </>
     );
   }
 
@@ -343,7 +309,7 @@ export default function App() {
               : `${me.operator.name} has been suspended. Contact the platform administrator.`}
           </p>
           <button
-            onClick={() => { logout(); setAuthed(false); setMe(null); }}
+            onClick={async () => { await logout(); setMe(null); }}
             className="text-xs font-mono underline cursor-pointer"
           >
             Sign out
@@ -508,9 +474,8 @@ export default function App() {
                 {me?.is_read_only && ' · read-only'}
               </div>
               <button
-                onClick={() => {
-                  logout();
-                  setAuthed(false);
+                onClick={async () => {
+                  await logout(); // the server clears the cookies
                   setMe(null);
                 }}
                 title="Sign out of the console"
@@ -522,6 +487,16 @@ export default function App() {
           </div>
         </header>
 
+        {/* Read-only roles (support) can look but not touch. Say so up front —
+            otherwise every write silently 403s and looks like a broken API. */}
+        {me?.is_read_only && (
+          <div className="bg-[#B26B00] text-white px-4 py-1.5 text-[11px] font-mono flex items-center gap-2 shrink-0">
+            <Eye className="h-3.5 w-3.5 shrink-0" />
+            Read-only access — you can view everything, but changes (re-sync, edits,
+            withdrawals) are disabled for your role.
+          </div>
+        )}
+
         {/* Loud banner while a platform user is inside someone else's ISP. This
             access is time-boxed and recorded — the banner says so. */}
         {viewingAsOther && (
@@ -531,7 +506,7 @@ export default function App() {
               Inside <b>{acting?.name}</b>'s console as platform staff — this session is recorded.
             </span>
             <button
-              onClick={() => switchTenant(me?.operator?.slug ?? null)}
+              onClick={exitImpersonation}
               className="underline font-bold shrink-0 cursor-pointer"
             >
               Exit
