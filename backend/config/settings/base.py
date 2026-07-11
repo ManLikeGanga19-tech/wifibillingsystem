@@ -30,6 +30,7 @@ INSTALLED_APPS = [
     "apps.notifications",
     "apps.ops",
     "apps.billing",
+    "apps.pppoe",
 ]
 
 MIDDLEWARE = [
@@ -119,6 +120,18 @@ CELERY_BEAT_SCHEDULE = {
     "charge-monthly-base-fees": {
         "task": "apps.billing.tasks.charge_monthly_base_fees",
         "schedule": crontab(minute=30, hour=0, day_of_month=1),
+    },
+    "charge-pppoe-user-fees": {
+        "task": "apps.billing.tasks.charge_pppoe_user_fees",
+        "schedule": crontab(minute=45, hour=0, day_of_month=1),
+    },
+    "issue-pppoe-invoices": {
+        "task": "apps.pppoe.tasks.issue_due_invoices",
+        "schedule": crontab(minute=0, hour=6),
+    },
+    "suspend-overdue-pppoe": {
+        "task": "apps.pppoe.tasks.suspend_overdue_clients",
+        "schedule": crontab(minute=30, hour=6),
     },
     "expire-sessions": {
         "task": "apps.provisioning.tasks.expire_sessions",

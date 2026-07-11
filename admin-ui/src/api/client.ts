@@ -392,6 +392,94 @@ export interface OperatorSettings {
   commission_rate: string;
 }
 
+// ---- PPPoE / Broadband ----------------------------------------------------
+
+export interface PppoePlan {
+  id: number;
+  name: string;
+  price: string;
+  download_kbps: number;
+  upload_kbps: number;
+  data_cap_gb: number | null;
+  mikrotik_profile: string;
+  is_active: boolean;
+  sort_order: number;
+}
+
+export interface PppoeClient {
+  id: number;
+  account_number: string;
+  full_name: string;
+  phone: string;
+  email: string;
+  physical_address: string;
+  plan: number;
+  plan_name: string;
+  router: number;
+  pppoe_username: string;
+  pppoe_password: string;
+  static_ip: string | null;
+  delivery_method: 'fibre' | 'ethernet' | 'wireless_ptp' | 'wireless_ptmp';
+  access_point: number | null;
+  cpe_equipment: number | null;
+  status: 'pending_install' | 'active' | 'suspended' | 'disabled';
+  billing_day: number;
+  balance: string;
+  next_due_date: string | null;
+  installed_at: string | null;
+  notes: string;
+  created_at: string;
+}
+
+export interface PppoeInvoice {
+  id: number;
+  number: string;
+  account_number: string;
+  client_name: string;
+  period_start: string;
+  period_end: string;
+  amount: string;
+  due_date: string;
+  status: 'unpaid' | 'paid' | 'overdue' | 'cancelled';
+  issued_at: string;
+  paid_at: string | null;
+}
+
+export interface Tower {
+  id: number;
+  name: string;
+  gps_lat: string | null;
+  gps_lng: string | null;
+  notes: string;
+  is_active: boolean;
+  access_point_count: number;
+}
+
+export interface AccessPoint {
+  id: number;
+  tower: number;
+  tower_name: string;
+  name: string;
+  mode: 'ap' | 'ptp' | 'ptmp';
+  band: string;
+  capacity: number;
+  router: number | null;
+  ssid: string;
+  is_active: boolean;
+  client_count: number;
+  utilization: number | null;
+}
+
+export interface Reconciliation {
+  scope: 'all_isps';
+  total_collected: string | number;
+  platform_earnings: string | number;
+  owed_to_isps: string | number;
+  total_disbursed: string | number;
+  pending_payouts: string | number;
+  current_float: string | number;
+}
+
 export interface NavCounts {
   active_users: number;
   users: number;
@@ -505,6 +593,7 @@ export const api = {
 
   platform: {
     overview: () => request<PlatformOverview>('/platform/overview/'),
+    reconciliation: () => request<Reconciliation>('/platform/reconciliation/'),
     tenants: {
       list: () => request<Paginated<ApiTenant>>('/platform/tenants/'),
       update: (id: number, data: Partial<ApiTenant>) =>
@@ -583,4 +672,24 @@ export const api = {
   leads: crud<ApiLead>('/ops/leads'),
   expenses: crud<ApiExpense>('/ops/expenses'),
   equipment: crud<ApiEquipment>('/ops/equipment'),
+
+  pppoe: {
+    plans: crud<PppoePlan>('/pppoe/plans'),
+    clients: {
+      ...crud<PppoeClient>('/pppoe/clients'),
+      provision: (id: number) =>
+        request<PppoeClient>(`/pppoe/clients/${id}/provision/`, { method: 'POST' }),
+      suspend: (id: number) =>
+        request<{ detail: string }>(`/pppoe/clients/${id}/suspend/`, { method: 'POST' }),
+      restore: (id: number) =>
+        request<{ detail: string }>(`/pppoe/clients/${id}/restore/`, { method: 'POST' }),
+      liveStatus: (id: number) =>
+        request<{ online: boolean }>(`/pppoe/clients/${id}/live_status/`),
+    },
+    invoices: {
+      list: (query = '') => request<Paginated<PppoeInvoice>>(`/pppoe/invoices/${query}`),
+    },
+    towers: crud<Tower>('/pppoe/towers'),
+    accessPoints: crud<AccessPoint>('/pppoe/access-points'),
+  },
 };

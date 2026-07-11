@@ -194,6 +194,52 @@ class OperatorSettingsView(APIView):
         return Response(OperatorSettingsSerializer(operator).data)
 
 
+class PlatformReconciliationView(APIView):
+    """Custody position across ALL ISPs — the money Danamo holds and owes. The
+    aggregator's balance sheet: total collected vs owed to ISPs vs platform
+    earnings vs disbursed vs float."""
+
+    permission_classes = [IsPlatformStaff]
+
+    def get(self, request):
+        from django.db.models import Sum
+
+        from apps.billing.models import LedgerEntry, Payout
+
+        def total(qs):
+            return qs.aggregate(v=Sum("amount"))["v"] or 0
+
+        sales = total(LedgerEntry.objects.filter(entry_type=LedgerEntry.Type.SALE))
+        commission = total(LedgerEntry.objects.filter(entry_type=LedgerEntry.Type.COMMISSION))
+        fees = total(
+            LedgerEntry.objects.filter(
+                entry_type__in=[LedgerEntry.Type.BASE_FEE, LedgerEntry.Type.PPPOE_FEE]
+            )
+        )
+        payouts_debit = total(LedgerEntry.objects.filter(entry_type=LedgerEntry.Type.PAYOUT))
+        owed_to_isps = total(LedgerEntry.objects.all())  # sum of all wallet balances
+        paid_out = total(Payout.objects.filter(status=Payout.Status.PAID))
+        pending_payouts = total(Payout.objects.filter(status=Payout.Status.REQUESTED))
+
+        return Response(
+            {
+                "scope": "all_isps",
+                # Money the platform collected on behalf of ISPs (gross sales)
+                "total_collected": sales,
+                # Platform's own earnings (commission + fees are stored negative)
+                "platform_earnings": -(commission + fees),
+                # Sum of every ISP wallet balance = what Danamo still owes them
+                "owed_to_isps": owed_to_isps,
+                # Withdrawals actually disbursed (ledger debits are negative)
+                "total_disbursed": -payouts_debit,
+                "paid_out_recorded": paid_out,
+                "pending_payouts": pending_payouts,
+                # Float Danamo should be holding for ISPs right now
+                "current_float": owed_to_isps,
+            }
+        )
+
+
 class PlatformOverviewView(APIView):
     """Cross-tenant aggregates — the ONLY legitimate place for platform-wide
     numbers. Explicitly labelled so they can never be mistaken for one ISP's."""

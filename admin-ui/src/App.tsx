@@ -21,6 +21,9 @@ import {
   Clock,
   Globe,
   Eye,
+  Wifi as WifiIcon,
+  RadioTower,
+  Scale,
 } from 'lucide-react';
 
 import { BandwidthProfile, Subscriber, OutboundCampaign } from './types';
@@ -56,6 +59,11 @@ import EquipmentView from './components/EquipmentView';
 import PlatformTenantsView from './components/PlatformTenantsView';
 import PlatformPayoutsView from './components/PlatformPayoutsView';
 import PlatformOverview from './components/PlatformOverview';
+import PppoePlansView from './components/PppoePlansView';
+import PppoeClientsView from './components/PppoeClientsView';
+import PppoeInvoicesView from './components/PppoeInvoicesView';
+import NetworkView from './components/NetworkView';
+import ReconciliationView from './components/ReconciliationView';
 import SettingsView from './components/SettingsView';
 import WalletView from './components/WalletView';
 
@@ -78,9 +86,14 @@ type TabId =
   | 'equipment'
   | 'settings'
   | 'wallet'
+  | 'pppoe_clients'
+  | 'pppoe_plans'
+  | 'pppoe_invoices'
+  | 'network'
   | 'platform_overview'
   | 'platform_tenants'
-  | 'platform_payouts';
+  | 'platform_payouts'
+  | 'platform_reconciliation';
 
 /** Which hat the console is wearing. Platform = cross-ISP screens only;
  * ISP = one tenant's console. They never mix. */
@@ -105,9 +118,18 @@ const NAV_GROUPS: { title: string | null; items: NavItem[] }[] = [
     ],
   },
   {
+    title: 'Broadband (PPPoE)',
+    items: [
+      { id: 'pppoe_clients', label: 'Clients', icon: WifiIcon },
+      { id: 'pppoe_plans', label: 'Broadband Plans', icon: Gauge },
+      { id: 'pppoe_invoices', label: 'Invoices', icon: Receipt },
+      { id: 'network', label: 'Network', icon: RadioTower },
+    ],
+  },
+  {
     title: 'Finance',
     items: [
-      { id: 'packages', label: 'Packages', icon: Gauge, badge: 'packages' },
+      { id: 'packages', label: 'Hotspot Plans', icon: Gauge, badge: 'packages' },
       { id: 'payments', label: 'Payments', icon: Receipt },
       { id: 'vouchers', label: 'Vouchers', icon: TicketIcon, badge: 'vouchers' },
       { id: 'wallet', label: 'Wallet', icon: Wallet },
@@ -145,6 +167,7 @@ const PLATFORM_NAV: { title: string | null; items: NavItem[] }[] = [
     items: [
       { id: 'platform_tenants', label: 'ISP Tenants', icon: Building2 },
       { id: 'platform_payouts', label: 'Payouts', icon: Wallet },
+      { id: 'platform_reconciliation', label: 'Reconciliation', icon: Scale },
     ],
   },
 ];
@@ -574,6 +597,11 @@ export default function App() {
             {activeTab === 'equipment' && <EquipmentView />}
             {activeTab === 'settings' && <SettingsView onOpenWallet={() => setActiveTab('wallet')} />}
             {activeTab === 'wallet' && <WalletView />}
+            {activeTab === 'pppoe_clients' && <PppoeClientsView />}
+            {activeTab === 'pppoe_plans' && <PppoePlansView />}
+            {activeTab === 'pppoe_invoices' && <PppoeInvoicesView />}
+            {activeTab === 'network' && <NetworkView />}
+            {activeTab === 'platform_reconciliation' && <ReconciliationView />}
             {activeTab === 'platform_overview' && (
               <PlatformOverview onNavigate={(t) => setActiveTab(t as TabId)} />
             )}

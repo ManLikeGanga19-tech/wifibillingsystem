@@ -100,6 +100,33 @@ class SessionFactory(factory.django.DjangoModelFactory):
     status = Session.Status.ACTIVE
 
 
+class ServicePlanFactory(factory.django.DjangoModelFactory):
+    class Meta:
+        model = "pppoe.ServicePlan"
+
+    operator = factory.SubFactory(OperatorFactory)
+    name = factory.Sequence(lambda n: f"Home {n}Mbps")
+    price = 2000
+    download_kbps = 10240
+    upload_kbps = 5120
+    mikrotik_profile = factory.Sequence(lambda n: f"plan-{n}")
+
+
+class PppoeClientFactory(factory.django.DjangoModelFactory):
+    class Meta:
+        model = "pppoe.Client"
+
+    operator = factory.SubFactory(OperatorFactory)
+    account_number = factory.Sequence(lambda n: f"TEST{n:05d}")
+    full_name = factory.Faker("name")
+    plan = factory.SubFactory(ServicePlanFactory, operator=factory.SelfAttribute("..operator"))
+    router = factory.SubFactory(RouterFactory, operator=factory.SelfAttribute("..operator"))
+    pppoe_username = factory.Sequence(lambda n: f"user{n}")
+    pppoe_password = "secret123"
+    status = "active"
+    billing_day = 1
+
+
 class VoucherFactory(factory.django.DjangoModelFactory):
     class Meta:
         model = Voucher

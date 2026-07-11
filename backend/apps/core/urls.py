@@ -4,6 +4,7 @@ from rest_framework.routers import SimpleRouter
 from .tenant_views import (
     OperatorSettingsView,
     PlatformOverviewView,
+    PlatformReconciliationView,
     PlatformTenantViewSet,
     TenantSignupView,
 )
@@ -21,5 +22,10 @@ urlpatterns = [
     path("tenants/signup/", TenantSignupView.as_view(), name="tenant-signup"),
     # Platform-wide (cross-tenant aggregates live ONLY here)
     path("platform/overview/", PlatformOverviewView.as_view(), name="platform-overview"),
+    path(
+        "platform/reconciliation/",
+        PlatformReconciliationView.as_view(),
+        name="platform-reconciliation",
+    ),
     *router.urls,
 ]

@@ -57,3 +57,35 @@ class Transaction(OperatorOwnedModel):
     @property
     def is_terminal(self) -> bool:
         return self.status in self.TERMINAL_STATUSES
+
+
+class C2BPayment(models.Model):
+    """A paybill (C2B) payment received on Danamo's shortcode — how PPPoE clients
+    pay. The BillRefNumber is the client's globally-unique account number, which
+    routes the money to the right ISP + client. Idempotent on M-Pesa TransID."""
+
+    class Status(models.TextChoices):
+        MATCHED = "matched", "Matched to a client"
+        UNMATCHED = "unmatched", "No matching account"
+
+    trans_id = models.CharField(max_length=30, unique=True, db_index=True)
+    bill_ref = models.CharField(max_length=30, db_index=True, help_text="Account number typed")
+    msisdn = models.CharField(max_length=15, blank=True)
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    first_name = models.CharField(max_length=60, blank=True)
+    # Set when matched; operator derived from the client
+    operator = models.ForeignKey(
+        "core.Operator", null=True, blank=True, on_delete=models.SET_NULL
+    )
+    client = models.ForeignKey(
+        "pppoe.Client", null=True, blank=True, on_delete=models.SET_NULL, related_name="payments"
+    )
+    status = models.CharField(max_length=10, choices=Status.choices, db_index=True)
+    raw_payload = models.JSONField(default=dict, blank=True)
+    received_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-received_at"]
+
+    def __str__(self):
+        return f"C2B {self.trans_id} {self.bill_ref} KSh {self.amount} [{self.status}]"

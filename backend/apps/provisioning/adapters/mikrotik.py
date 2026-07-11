@@ -18,6 +18,10 @@ from .base import (
     ProvisionResult,
 )
 
+# PPPoE profile a suspended (overdue) client is moved onto. The router should have
+# this profile firewalled to a walled garden that redirects http to a pay page.
+SUSPENDED_PROFILE = "wifios-suspended"
+
 
 def _to_int(value):
     try:
@@ -121,6 +125,97 @@ class MikroTikRestAdapter(ProvisioningAdapter):
                 f"{self.router} rejected our API credentials (status {resp.status_code})"
             )
         return resp.status_code == 200
+
+    # -- PPPoE ------------------------------------------------------------
+    def _find_id(self, client_http, path: str, **params) -> str | None:
+        resp = client_http.get(path, params=params)
+        resp.raise_for_status()
+        rows = resp.json()
+        return rows[0][".id"] if rows else None
+
+    def ensure_pppoe_profile(self, plan) -> ProvisionResult:
+        payload = {
+            "name": plan.mikrotik_profile,
+            "rate-limit": plan.rate_limit,
+            "only-one": "yes",
+        }
+        try:
+            with self._client() as c:
+                existing = self._find_id(c, "/ppp/profile", name=plan.mikrotik_profile)
+                if existing:
+                    c.patch(f"/ppp/profile/{existing}", json=payload).raise_for_status()
+                else:
+                    c.put("/ppp/profile", json=payload).raise_for_status()
+            return ProvisionResult(ok=True, message="profile ensured")
+        except httpx.HTTPError as exc:
+            raise ProvisioningError(f"ensure_pppoe_profile failed on {self.router}: {exc}") from exc
+
+    def create_pppoe_user(self, client) -> ProvisionResult:
+        payload = {
+            "name": client.pppoe_username,
+            "password": client.pppoe_password,
+            "service": "pppoe",
+            "profile": client.plan.mikrotik_profile,
+            "comment": f"wifi.os {client.account_number}",
+        }
+        if client.static_ip:
+            payload["remote-address"] = client.static_ip
+        try:
+            with self._client() as c:
+                existing = self._find_id(c, "/ppp/secret", name=client.pppoe_username)
+                if existing:
+                    c.patch(f"/ppp/secret/{existing}", json=payload).raise_for_status()
+                else:
+                    c.put("/ppp/secret", json=payload).raise_for_status()
+            return ProvisionResult(ok=True, message="secret created")
+        except httpx.HTTPError as exc:
+            raise ProvisioningError(f"create_pppoe_user failed on {self.router}: {exc}") from exc
+
+    def set_pppoe_enabled(self, client, enabled: bool) -> ProvisionResult:
+        """Suspend = move to the suspended profile + kick the live session.
+        Restore = move back to the plan profile."""
+        profile = client.plan.mikrotik_profile if enabled else SUSPENDED_PROFILE
+        try:
+            with self._client() as c:
+                sid = self._find_id(c, "/ppp/secret", name=client.pppoe_username)
+                if sid:
+                    c.patch(f"/ppp/secret/{sid}", json={"profile": profile}).raise_for_status()
+                if not enabled:
+                    aid = self._find_id(c, "/ppp/active", name=client.pppoe_username)
+                    if aid:
+                        c.delete(f"/ppp/active/{aid}").raise_for_status()
+            return ProvisionResult(ok=True, message="enabled" if enabled else "suspended")
+        except httpx.HTTPError as exc:
+            raise ProvisioningError(f"set_pppoe_enabled failed on {self.router}: {exc}") from exc
+
+    def remove_pppoe_user(self, client) -> ProvisionResult:
+        try:
+            with self._client() as c:
+                aid = self._find_id(c, "/ppp/active", name=client.pppoe_username)
+                if aid:
+                    c.delete(f"/ppp/active/{aid}").raise_for_status()
+                sid = self._find_id(c, "/ppp/secret", name=client.pppoe_username)
+                if sid:
+                    c.delete(f"/ppp/secret/{sid}").raise_for_status()
+            return ProvisionResult(ok=True, message="removed")
+        except httpx.HTTPError as exc:
+            raise ProvisioningError(f"remove_pppoe_user failed on {self.router}: {exc}") from exc
+
+    def get_active_pppoe(self) -> list[ActiveSession]:
+        try:
+            with self._client() as c:
+                resp = c.get("/ppp/active")
+                resp.raise_for_status()
+                return [
+                    ActiveSession(
+                        username=a.get("name", ""),
+                        ip_address=a.get("address", ""),
+                        uptime=a.get("uptime", ""),
+                    )
+                    for a in resp.json()
+                ]
+        except httpx.HTTPError as exc:
+            raise ProvisioningError(f"get_active_pppoe failed on {self.router}: {exc}") from exc
 
     def get_device_info(self) -> DeviceInfo:
         """Query the router's identity + live health. Stable fields are persisted

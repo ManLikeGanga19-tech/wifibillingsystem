@@ -66,3 +66,24 @@ class ProvisioningAdapter(ABC):
 
     @abstractmethod
     def get_device_info(self) -> DeviceInfo: ...
+
+    # -- PPPoE (broadband) -------------------------------------------------
+    # Default no-op implementations so non-PPPoE adapters need not implement them.
+    def ensure_pppoe_profile(self, plan) -> ProvisionResult:
+        """Create/update the /ppp/profile for a ServicePlan (rate limits)."""
+        return ProvisionResult(ok=True, message="noop")
+
+    def create_pppoe_user(self, client) -> ProvisionResult:
+        """Create/update the /ppp/secret for a broadband client."""
+        return ProvisionResult(ok=True, message="noop")
+
+    def set_pppoe_enabled(self, client, enabled: bool) -> ProvisionResult:
+        """Enable (restore) or disable (suspend) a client's PPPoE access, kicking
+        the live session on disable."""
+        return ProvisionResult(ok=True, message="noop")
+
+    def remove_pppoe_user(self, client) -> ProvisionResult:
+        return ProvisionResult(ok=True, message="noop")
+
+    def get_active_pppoe(self) -> list[ActiveSession]:
+        return []

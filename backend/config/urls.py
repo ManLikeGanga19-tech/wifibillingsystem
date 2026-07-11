@@ -12,6 +12,7 @@ api_v1 = [
     path("notifications/", include("apps.notifications.urls")),
     path("ops/", include("apps.ops.urls")),
     path("billing/", include("apps.billing.urls")),
+    path("pppoe/", include("apps.pppoe.urls")),
 ]
 
 urlpatterns = [

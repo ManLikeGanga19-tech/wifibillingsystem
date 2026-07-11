@@ -1,6 +1,17 @@
 from django.contrib import admin
 
-from .models import Transaction
+from .models import C2BPayment, Transaction
+
+
+@admin.register(C2BPayment)
+class C2BPaymentAdmin(admin.ModelAdmin):
+    list_display = ("received_at", "trans_id", "bill_ref", "amount", "status", "client")
+    list_filter = ("status",)
+    search_fields = ("trans_id", "bill_ref", "msisdn")
+    readonly_fields = [f.name for f in C2BPayment._meta.fields]
+
+    def has_add_permission(self, request):
+        return False
 
 
 @admin.register(Transaction)

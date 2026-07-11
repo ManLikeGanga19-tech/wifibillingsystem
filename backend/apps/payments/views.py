@@ -65,7 +65,7 @@ class TransactionStatusView(RetrieveAPIView):
 
 @method_decorator(csrf_exempt, name="dispatch")
 class DarajaCallbackView(View):
-    """Safaricom's confirmation webhook. Idempotent; always answers 200 so
+    """Safaricom's STK confirmation webhook. Idempotent; always answers 200 so
     Daraja does not retry storms. The URL embeds a secret token."""
 
     def post(self, request, token):
@@ -82,6 +82,44 @@ class DarajaCallbackView(View):
             # Never bubble a 500 to Safaricom; reconciliation will settle it.
             logger.exception("Callback processing crashed; payload stored for reconciliation")
         return JsonResponse({"ResultCode": 0, "ResultDesc": "Accepted"})
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class C2BConfirmationView(View):
+    """Safaricom C2B confirmation for broadband (paybill) payments. Idempotent on
+    TransID; matches the account number (BillRefNumber) to a client. Always 200."""
+
+    def post(self, request, token):
+        if token != settings.DARAJA_CALLBACK_TOKEN:
+            raise Http404
+        from .c2b import process_c2b_confirmation
+
+        try:
+            payload = json.loads(request.body.decode("utf-8"))
+            process_c2b_confirmation(payload)
+        except Exception:
+            logger.exception("C2B confirmation crashed; not blocking Safaricom")
+        return JsonResponse({"ResultCode": 0, "ResultDesc": "Accepted"})
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class C2BValidationView(View):
+    """Optional C2B validation: accept only known account numbers. Safaricom
+    calls this before confirmation when validation is enabled on the shortcode."""
+
+    def post(self, request, token):
+        if token != settings.DARAJA_CALLBACK_TOKEN:
+            raise Http404
+        from .c2b import find_client
+
+        try:
+            payload = json.loads(request.body.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            return JsonResponse({"ResultCode": "C2B00016", "ResultDesc": "Rejected"})
+        if find_client(payload.get("BillRefNumber", "")):
+            return JsonResponse({"ResultCode": "0", "ResultDesc": "Accepted"})
+        # C2B00012 = invalid account number
+        return JsonResponse({"ResultCode": "C2B00012", "ResultDesc": "Invalid account number"})
 
 
 class TransactionViewSet(TenantReadOnlyViewSet):
