@@ -21,6 +21,9 @@ CLI keep functioning; the cookie is simply checked first for browsers.
 """
 
 from django.conf import settings
+from django.middleware.csrf import CsrfViewMiddleware as CSRFCheck
+from rest_framework.exceptions import PermissionDenied
+from rest_framework.permissions import SAFE_METHODS
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
 ACCESS_COOKIE = "wifios_access"
@@ -77,15 +80,48 @@ def clear_act_as_cookie(response):
 
 class CookieJWTAuthentication(JWTAuthentication):
     """Read the JWT from the httpOnly cookie, falling back to the Authorization
-    header so non-browser clients (tests, scripts, the CLI) are unaffected."""
+    header so non-browser clients (tests, scripts, the CLI) are unaffected.
+
+    CSRF: moving the token from a header into a cookie REINTRODUCES CSRF. A Bearer
+    token is immune by construction (an attacker's site cannot set our header), but
+    a cookie is attached by the browser automatically — so a malicious page could
+    fire a state-changing request as the logged-in user.
+
+    Defence in depth:
+      1. `SameSite=Lax` on the cookie (set above) — the browser will not send it on
+         a cross-site POST at all. This alone stops classic CSRF.
+      2. This double-submit check — an unsafe request authenticated BY COOKIE must
+         also echo the CSRF token in `X-CSRFToken`. An attacker cannot read our
+         cookie (same-origin policy), so they cannot forge the header.
+
+    Bearer-authenticated requests skip check 2: they were never vulnerable, and
+    scripts/tests must keep working.
+    """
 
     def authenticate(self, request):
         header = self.get_header(request)
         if header is not None:
-            return super().authenticate(request)
+            return super().authenticate(request)  # Bearer: CSRF-immune by design
 
         raw = request.COOKIES.get(ACCESS_COOKIE)
         if not raw:
             return None
         validated = self.get_validated_token(raw)
-        return self.get_user(validated), validated
+        user = self.get_user(validated)
+        self.enforce_csrf(request)  # cookie-authenticated => must prove same-origin
+        return user, validated
+
+    def enforce_csrf(self, request):
+        """Django's own CSRF machinery, run by hand — DRF views are csrf_exempt at
+        the middleware level, so nothing else would check this."""
+        if request.method in SAFE_METHODS:
+            return
+
+        def reject(reason):
+            raise PermissionDenied(f"CSRF Failed: {reason}")
+
+        check = CSRFCheck(lambda req: None)
+        check.process_request(request)
+        reason = check.process_view(request, None, (), {})
+        if reason:
+            reject(reason)

@@ -3,7 +3,12 @@ import json
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework import status
-from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework.decorators import (
+    action,
+    api_view,
+    authentication_classes,
+    permission_classes,
+)
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
@@ -111,6 +116,7 @@ class RouterViewSet(TenantModelViewSet):
 
 @csrf_exempt
 @api_view(["POST"])
+@authentication_classes([])  # the ROUTER calls this, never a browser/staff user
 @permission_classes([AllowAny])
 def router_enroll(request):
     """Phone-home from the setup script. Authenticated by the router's unique

@@ -34,15 +34,32 @@ class PlanViewSet(viewsets.ModelViewSet):
         return None
 
     def get_queryset(self):
-        user = self.request.user
-        is_staff = user.is_authenticated and user.is_staff
+        # PORTAL TRAFFIC WINS. `?router=` means a WiFi customer is standing in front
+        # of that router — the plans they may buy are that ROUTER'S owner's plans,
+        # full stop. Never acting_tenant().
+        #
+        # This ordering is load-bearing. Cookies ignore the port, so a staff member
+        # logged into the console had their cookie sent to the portal too; the old
+        # `if is_staff:` branch then resolved the tenant from THEIR acting tenant and
+        # the portal would show — and sell — the wrong ISP's plans to that customer.
+        if self.request.query_params.get("router", "").isdigit():
+            operator = self._portal_operator()
+            return (
+                Plan.objects.filter(
+                    operator=operator, is_active=True, plan_type=Plan.PlanType.HOTSPOT
+                )
+                if operator
+                else Plan.objects.none()  # fail closed
+            )
 
-        if is_staff:
+        user = self.request.user
+        if user.is_authenticated and user.is_staff:
             operator = acting_tenant(self.request)
             if operator is None:
                 return Plan.objects.none()  # fail closed
             return Plan.objects.filter(operator=operator)
 
+        # Anonymous, no router: the subdomain is the only tenant signal.
         operator = self._portal_operator()
         if operator is None:
             return Plan.objects.none()  # fail closed: never expose every ISP's plans

@@ -29,6 +29,26 @@ export class ApiError extends Error {
 /** Send cookies on every call — this is what replaces the Authorization header. */
 const withCookies: RequestInit = { credentials: 'include' };
 
+/**
+ * CSRF. Putting the token in a cookie reintroduces CSRF (a Bearer header never
+ * could be forged; a cookie is sent automatically). The server hands us a CSRF
+ * token in a READABLE cookie and requires it echoed back in a header on writes —
+ * the double-submit pattern. An attacker's site cannot read our cookie, so it
+ * cannot forge the header.
+ *
+ * Note this is NOT app state in the browser: the server owns it, we only echo it.
+ */
+const readCsrfToken = (): string =>
+  document.cookie
+    .split('; ')
+    .find((c) => c.startsWith('csrftoken='))
+    ?.split('=')[1] ?? '';
+
+const UNSAFE = /^(POST|PUT|PATCH|DELETE)$/i;
+
+const csrfHeader = (method?: string): Record<string, string> =>
+  UNSAFE.test(method ?? 'GET') ? { 'X-CSRFToken': readCsrfToken() } : {};
+
 export async function login(phone: string, password: string): Promise<void> {
   const resp = await fetch(`${BASE}/api/v1/auth/login/`, {
     ...withCookies,
@@ -66,7 +86,11 @@ export async function request<T>(
   const resp = await fetch(`${BASE}/api/v1${path}`, {
     ...withCookies,
     ...init,
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
+    headers: {
+      'Content-Type': 'application/json',
+      ...csrfHeader(init?.method),
+      ...init?.headers,
+    },
   });
 
   // Access cookie expired -> renew silently and replay once.

@@ -84,13 +84,32 @@ CACHES = {
 # wifios.co.ke, so scope the cookie to the parent domain; blank in dev (localhost).
 SESSION_COOKIE_DOMAIN = os.environ.get("COOKIE_DOMAIN", "")
 
+# Origins allowed to send state-changing requests with our cookies. Cookie auth
+# means CSRF is a live threat (a Bearer token never was), so this list is a
+# security control, not configuration noise.
+CSRF_TRUSTED_ORIGINS = [
+    o
+    for o in os.environ.get(
+        "CSRF_TRUSTED_ORIGINS",
+        # dev: the three SPAs + the API itself
+        "http://localhost:4600,http://localhost:4700,http://localhost:4800,"
+        "http://localhost:8000,http://127.0.0.1:8000",
+    ).split(",")
+    if o.strip()
+]
+
 REST_FRAMEWORK = {
     # Cookie-first: the browser sends an httpOnly JWT cookie, so the frontends
     # store NOTHING (no localStorage anywhere — see apps/accounts/cookie_auth.py).
     # The header fallback keeps scripts, tests and the CLI working.
+    #
+    # SessionAuthentication is deliberately ABSENT. We do not use Django sessions
+    # for the API, and leaving it in meant any stray sessionid cookie authenticated
+    # the request and enforced CSRF — which is exactly what broke the captive
+    # portal. CSRF is now enforced by CookieJWTAuthentication itself, only for
+    # cookie-authenticated writes, where it actually applies.
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "apps.accounts.cookie_auth.CookieJWTAuthentication",
-        "rest_framework.authentication.SessionAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",

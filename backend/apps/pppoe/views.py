@@ -1,10 +1,15 @@
 from django.db.models import Count, Q
 from rest_framework import status
-from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework.decorators import (
+    action,
+    api_view,
+    authentication_classes,
+    permission_classes,
+)
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
-from rest_framework.views import APIView
 
+from apps.core.public import PublicAPIView
 from apps.core.viewsets import TenantModelViewSet, TenantReadOnlyViewSet
 from apps.provisioning.adapters import ProvisioningError, get_adapter
 
@@ -127,15 +132,15 @@ class InvoiceViewSet(TenantReadOnlyViewSet):
         return qs
 
 
-class SuspendedNoticeView(APIView):
+class SuspendedNoticeView(PublicAPIView):
     """PUBLIC page a suspended PPPoE client is redirected to. Returns the ISP's
     pay instructions, and (if the client's account is known) their balance/status.
 
     Tenant context: ?router=<id> (the router that redirected them) or the
     subdomain. The client's account may be supplied as ?account=<no> OR resolved
-    from their source IP via the router's live PPPoE sessions."""
+    from their source IP via the router's live PPPoE sessions.
 
-    permission_classes = [AllowAny]
+    Anonymous by design — a cut-off subscriber is never a logged-in staff user."""
 
     def get(self, request):
         from apps.provisioning.models import Router
@@ -194,6 +199,7 @@ class SuspendedNoticeView(APIView):
 
 
 @api_view(["GET"])
+@authentication_classes([])  # anonymous: a suspended subscriber, never staff
 @permission_classes([AllowAny])
 def account_lookup(request):
     """Public: a suspended client types their account number to see their balance

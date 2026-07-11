@@ -1,10 +1,9 @@
 from rest_framework import status
 from rest_framework.decorators import action
-from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
-from rest_framework.views import APIView
 
+from apps.core.public import PublicAPIView
 from apps.core.viewsets import TenantReadOnlyViewSet
 from apps.plans.models import Plan
 from apps.provisioning.models import Router
@@ -52,11 +51,10 @@ class VoucherViewSet(TenantReadOnlyViewSet):
         )
 
 
-class RedeemVoucherView(APIView):
+class RedeemVoucherView(PublicAPIView):
     """Portal: redeem a printed voucher code. Tenant safety comes from the voucher
-    itself — the session lands on the voucher's operator."""
+    itself — the session lands on the voucher's operator. Anonymous by design."""
 
-    permission_classes = [AllowAny]
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "voucher-redeem"
 

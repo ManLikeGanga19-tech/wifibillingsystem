@@ -6,6 +6,7 @@ automatically. Logging out clears the cookies. There is nothing in localStorage
 to go stale, and nothing for a user to "clear their cache" to fix.
 """
 
+from django.middleware.csrf import get_token
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -38,7 +39,11 @@ class CookieLoginView(APIView):
                 status=status.HTTP_401_UNAUTHORIZED,
             )
         data = serializer.validated_data
-        resp = Response({"detail": "Signed in."})
+        # Hand the client a CSRF token to echo back on future writes. It is a
+        # readable cookie ON PURPOSE (double-submit): an attacker's site cannot read
+        # it cross-origin, so they cannot forge the X-CSRFToken header.
+        csrf_token = get_token(request)
+        resp = Response({"detail": "Signed in.", "csrf_token": csrf_token})
         return set_auth_cookies(resp, access=str(data["access"]), refresh=str(data["refresh"]))
 
 

@@ -7,7 +7,7 @@ from django.utils import timezone
 from django.utils.text import slugify
 from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
-from rest_framework.permissions import AllowAny, IsAdminUser
+from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
@@ -22,6 +22,7 @@ from .permissions import (
     ReadOnlyForSupport,
     RequireTenant,
 )
+from .public import PublicAPIView
 from .services import audit
 from .tenancy import acting_tenant
 
@@ -53,10 +54,10 @@ class SignupSerializer(serializers.Serializer):
         return attrs
 
 
-class TenantSignupView(APIView):
-    """Public: an ISP applies for a tenant. Activates only after platform approval."""
+class TenantSignupView(PublicAPIView):
+    """Public: an ISP applies for a tenant. Anonymous by design — the applicant has
+    no account yet, so authenticating them makes no sense and only invites CSRF."""
 
-    permission_classes = [AllowAny]
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "signup"
 

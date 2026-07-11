@@ -8,11 +8,10 @@ from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework import status
 from rest_framework.generics import RetrieveAPIView
-from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
-from rest_framework.views import APIView
 
+from apps.core.public import PublicAPIView, PublicEndpointMixin
 from apps.core.viewsets import TenantReadOnlyViewSet
 
 from .daraja import DarajaError
@@ -27,10 +26,14 @@ from .services import initiate_stk_push, process_stk_callback
 logger = logging.getLogger(__name__)
 
 
-class STKPushView(APIView):
-    """Portal: start an M-Pesa payment. Returns a public_id to poll."""
+class STKPushView(PublicAPIView):
+    """Portal: start an M-Pesa payment. Returns a public_id to poll.
 
-    permission_classes = [AllowAny]
+    PublicAPIView => no authentication is attempted. A WiFi customer is anonymous;
+    if we let a staff cookie authenticate here, DRF enforces CSRF and the customer
+    gets "CSRF Failed" instead of an M-Pesa prompt (cookies ignore the port, so the
+    console's cookie reaches the portal in dev)."""
+
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "stk-push"
 
@@ -54,10 +57,9 @@ class STKPushView(APIView):
         )
 
 
-class TransactionStatusView(RetrieveAPIView):
+class TransactionStatusView(PublicEndpointMixin, RetrieveAPIView):
     """Portal polls this after STK push until status leaves 'pending'."""
 
-    permission_classes = [AllowAny]
     serializer_class = TransactionStatusSerializer
     queryset = Transaction.objects.select_related("plan")
     lookup_field = "public_id"
