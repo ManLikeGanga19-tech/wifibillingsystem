@@ -72,16 +72,37 @@ class TestCostRecordedOnSettle:
 
 
 class TestDefaultPppoeRate:
-    """Default is a flat KES 30/user — matches Centipid's ~$0.25 (provisional
-    until the real C2B tariff is confirmed)."""
+    """Default is GRADUATED 40 / 35 / 30 — small ISPs 40, large blend down to 30.
+    Danamo absorbs collection costs, so gross != net and this rate has outsized
+    leverage on true margin."""
 
-    def test_flat_default_rate(self):
-        assert pppoe_user_fee_total(300) == Decimal("9000.00")  # 300 * 30
-        assert pppoe_user_fee_total(5000) == Decimal("150000.00")  # 5000 * 30
+    def test_small_isp_pays_top_rate(self):
+        assert pppoe_user_fee_total(300) == Decimal("12000.00")  # 300 * 40
+        assert pppoe_blended_rate(300) == Decimal("40.00")
 
-    def test_blended_rate_is_flat(self):
-        assert pppoe_blended_rate(300) == Decimal("30.00")
-        assert pppoe_blended_rate(5000) == Decimal("30.00")
+    def test_spans_two_tiers(self):
+        # 800 = 500*40 + 300*35 = 20000 + 10500
+        assert pppoe_user_fee_total(800) == Decimal("30500.00")
+
+    def test_large_isp_blends_to_centipid_rate(self):
+        # 5000 = 500*40 + 1500*35 + 3000*30 = 20000 + 52500 + 90000
+        assert pppoe_user_fee_total(5000) == Decimal("162500.00")
+        # blended 32.50/user == Centipid's ~$0.25 — the big accounts get the
+        # market rate while small/mid protect our margin
+        assert pppoe_blended_rate(5000) == Decimal("32.50")
+
+    def test_monotonic_no_cliff(self):
+        # graduated brackets: the bill never falls as an ISP adds users
+        prev = Decimal("-1")
+        for n in (0, 1, 499, 500, 501, 1999, 2000, 2001, 10000):
+            cur = pppoe_user_fee_total(n)
+            assert cur >= prev
+            prev = cur
+
+    def test_blended_rate_falls_with_scale(self):
+        # the growth incentive: your rate improves as you grow
+        assert pppoe_blended_rate(300) > pppoe_blended_rate(1000)
+        assert pppoe_blended_rate(1000) > pppoe_blended_rate(5000)
 
     def test_custom_flat_rate_overrides_default(self):
         op = OperatorFactory(pppoe_user_fee=Decimal("25.00"))
@@ -95,38 +116,23 @@ class TestDefaultPppoeRate:
         PppoeClientFactory.create_batch(3, operator=op, status=Client.Status.ACTIVE)
         assert charge_pppoe_user_fees() == 1
         fee = LedgerEntry.objects.get(operator=op, entry_type="pppoe_fee")
-        assert fee.amount == Decimal("-90.00")  # 3 users * 30
+        assert fee.amount == Decimal("-120.00")  # 3 users * 40
 
 
-# The graduated engine stays available for custom large-ISP deals (set via
-# settings.PPPOE_USER_FEE_TIERS). Test it explicitly, independent of the default.
-GRADUATED = [[500, "50"], [2000, "40"], [None, "30"]]
+class TestCustomTierTableOverride:
+    """A negotiated tier table can be swapped in via settings without a code
+    change (e.g. a bespoke enterprise deal)."""
 
+    NEGOTIATED = [[500, "50"], [2000, "40"], [None, "30"]]
 
-class TestGraduatedPppoeEngine:
     @pytest.fixture(autouse=True)
-    def _graduated(self, settings):
-        settings.PPPOE_USER_FEE_TIERS = GRADUATED
+    def _custom(self, settings):
+        settings.PPPOE_USER_FEE_TIERS = self.NEGOTIATED
 
-    def test_within_first_tier(self):
+    def test_settings_table_replaces_default(self):
         assert pppoe_user_fee_total(300) == Decimal("15000.00")  # 300 * 50
-
-    def test_spans_two_tiers(self):
-        assert pppoe_user_fee_total(800) == Decimal("37000.00")  # 500*50 + 300*40
-
-    def test_spans_all_three_tiers(self):
         # 500*50 + 1500*40 + 3000*30 = 175000
         assert pppoe_user_fee_total(5000) == Decimal("175000.00")
-
-    def test_monotonic_no_cliff(self):
-        prev = Decimal("-1")
-        for n in (0, 1, 499, 500, 501, 1999, 2000, 2001, 10000):
-            cur = pppoe_user_fee_total(n)
-            assert cur >= prev
-            prev = cur
-
-    def test_blended_rate_drops_with_scale(self):
-        assert pppoe_blended_rate(300) == Decimal("50.00")
         assert pppoe_blended_rate(5000) == Decimal("35.00")
 
 

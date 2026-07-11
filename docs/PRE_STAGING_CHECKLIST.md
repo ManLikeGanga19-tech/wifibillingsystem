@@ -10,9 +10,11 @@ Two gates must close before we move from development to staging:
 ## 1. Transaction-tariff confirmation
 
 Danamo is a full-custody aggregator: it **absorbs** every M-Pesa/bank cost. Our
-pricing (3% hotspot, flat ~KES 30/PPPoE-user) is provisional until the *real*
-cost of moving money is known. `apps/billing/tariffs.py` currently uses
-**estimates**; they must be replaced with confirmed figures.
+pricing (3% hotspot, graduated PPPoE 40/35/30) is provisional until the *real*
+cost of moving money is known — because we absorb collection costs, **gross is not
+net**, and this rate has outsized leverage on true margin.
+`apps/billing/tariffs.py` currently uses **estimates**; they must be replaced with
+confirmed figures.
 
 ### Numbers to obtain
 
@@ -42,22 +44,30 @@ All are `settings`-overridable (no code change — set in `config/settings` or e
 ### Verify margin after confirming
 
 Once the real numbers are in, run the platform reconciliation (or the finance
-tests) and confirm on a **high-value PPPoE package** (e.g. KES 5,000/mo) that:
+tests) and confirm on a **high-value PPPoE package** (e.g. KES 5,000/mo) that, at
+the **worst-case tier** (large ISPs blend down to KES 30/user):
 
 ```
-per_user_fee (30)  −  collection_cost(package_price)  >  0   (with headroom)
+per_user_fee (30 at the bottom tier)  −  collection_cost(package_price)  >  0
 ```
 
-If a KES 5,000 payment costs more than ~KES 20 to collect, flat KES 30 leaves
-thin margin — nudge the PPPoE rate up (or switch that segment to the graduated
-tier table via `PPPOE_USER_FEE_TIERS`). The monthly true-up (reconciliation's
-`transaction_costs` vs `net_margin`) is what keeps estimates honest in production.
+If a KES 5,000 payment costs more than ~KES 20 to collect, the bottom tier leaves
+thin margin — raise the tier floor via `PPPOE_USER_FEE_TIERS`. The monthly true-up
+(reconciliation's `transaction_costs` vs `net_margin`) keeps estimates honest in
+production.
 
+**The pivotal answer is *who bears the C2B charge* (RFI §A1):**
+- **Customer-paid** → collection costs us ~0. Current rates are very profitable;
+  we have room to *cut* them as a deliberate competitive move.
+- **Merchant-paid** → we absorb it. Verify the bottom tier still clears on
+  high-value packages; the 40/35/30 ladder was chosen with this case in mind.
+
+- [ ] C2B charging model confirmed (customer- vs merchant-paid) ← **decides everything**
 - [ ] C2B collection tariff confirmed and set
 - [ ] B2C payout bands confirmed and set
 - [ ] I&M bank transfer cost confirmed and set
-- [ ] Margin verified positive on low- and high-value packages
-- [ ] PPPoE rate finalised (lock the provisional KES 30 or adjust)
+- [ ] Margin verified positive on low- and high-value packages, at every tier
+- [ ] PPPoE tiers finalised (lock 40/35/30 or adjust)
 
 ---
 

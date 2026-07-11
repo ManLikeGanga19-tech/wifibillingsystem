@@ -143,6 +143,12 @@ How each confirmed answer maps to the platform config in
 | A0 settlement timing | (ops note) | Drives how long float sits before payout; affects working capital |
 
 **After the numbers are in:** set the keys, run `pytest` + platform reconciliation, and
-verify `per_user_fee (30) − collection_cost(high-value package) > 0` with headroom. If
-thin, nudge the PPPoE rate or move that segment to `PPPOE_USER_FEE_TIERS`. See
+verify — at the **bottom tier** (KES 30, where large ISPs blend to) — that
+`per_user_fee − collection_cost(high-value package) > 0` with headroom. If thin, raise
+the tier floor in `PPPOE_USER_FEE_TIERS`. See
 [PRE_STAGING_CHECKLIST.md](PRE_STAGING_CHECKLIST.md) §1.
+
+> §A1 is the pivotal question. **Customer-paid C2B** → collection costs us ~nothing and
+> the current 40/35/30 ladder is very profitable (room to cut as a competitive move).
+> **Merchant-paid C2B** → we absorb it, and the ladder must clear the collection cost on
+> high-value packages.

@@ -15,19 +15,23 @@ from django.conf import settings
 
 # (upper_bound_inclusive | None for unbounded, KSh per user in that bracket)
 #
-# DEFAULT: a single flat rate that MATCHES Centipid's ~$0.25 (~KES 32.5) per
-# user. PROVISIONAL — confirm this still profits once the real Paybill C2B
-# collection tariff (which the platform absorbs) is known; nudge up if margin on
-# high-value packages is thin. The graduated multi-tier form below is retained
-# for custom large-ISP deals (set PPPOE_USER_FEE_TIERS in settings).
+# DEFAULT: graduated 40 / 35 / 30.
+#
+# Rationale: Danamo ABSORBS the M-Pesa collection cost, so gross != net — a small
+# move in this rate has outsized leverage on true margin. Small/mid ISPs (where
+# most tenants sit, and who are least price-sensitive) pay 40/35; large ISPs blend
+# down toward 30. A 5,000-user ISP blends to ~KES 32.50/user — exactly Centipid's
+# $0.25 — so the big accounts we court get the market rate, and the falling rate
+# doubles as a growth incentive.
+#
+# All-in we can still undercut Centipid: their ISP pays them ~32.5 AND pays
+# Safaricom's collection fees itself; ours pays one number with fees absorbed.
+#
+# PROVISIONAL on the high end: if the real Paybill C2B tariff turns out to be
+# CUSTOMER-paid (collection costs us ~0), we have room to cut these deliberately.
 DEFAULT_PPPOE_TIERS = [
-    (None, "30"),
-]
-
-# A ready-made graduated table for large-ISP negotiations (not the default):
-GRADUATED_PPPOE_TIERS = [
-    (500, "50"),
-    (2000, "40"),
+    (500, "40"),
+    (2000, "35"),
     (None, "30"),
 ]
 
