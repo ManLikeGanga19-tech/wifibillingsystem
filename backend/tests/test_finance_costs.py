@@ -128,22 +128,38 @@ class TestSetupFee:
         assert charge_setup_fee(op) is False
         assert not LedgerEntry.objects.filter(operator=op, entry_type="setup_fee").exists()
 
-    def test_approval_endpoint_charges_setup_fee(self):
-        from apps.core.models import Operator
-
-        op = OperatorFactory(
-            slug="newisp", status=Operator.Status.PENDING, setup_fee=Decimal("8000.00")
-        )
-        admin = APIClient()
-        admin.force_authenticate(
+    def _platform_owner(self):
+        c = APIClient()
+        c.force_authenticate(
             user=UserFactory(
                 operator=None, is_staff=True, is_superuser=True, role=Role.PLATFORM_OWNER
             )
         )
-        resp = admin.post(f"/api/v1/platform/tenants/{op.id}/approve/")
+        return c
+
+    def test_approval_does_not_charge_setup_fee(self):
+        # Self-service ISPs must not be auto-charged on approval
+        from apps.core.models import Operator
+
+        op = OperatorFactory(
+            slug="selfserve", status=Operator.Status.PENDING, setup_fee=Decimal("8000.00")
+        )
+        resp = self._platform_owner().post(f"/api/v1/platform/tenants/{op.id}/approve/")
         assert resp.status_code == 200, resp.content
+        assert not LedgerEntry.objects.filter(operator=op, entry_type="setup_fee").exists()
+
+    def test_charge_setup_action_bills_assisted_isp(self):
+        op = OperatorFactory(slug="assisted", setup_fee=Decimal("8000.00"))
+        admin = self._platform_owner()
+        resp = admin.post(f"/api/v1/platform/tenants/{op.id}/charge-setup/")
+        assert resp.status_code == 200, resp.content
+        assert resp.json()["charged"] is True
         entry = LedgerEntry.objects.get(operator=op, entry_type="setup_fee")
         assert entry.amount == Decimal("-8000.00")
+        # second call is a no-op (idempotent)
+        resp2 = admin.post(f"/api/v1/platform/tenants/{op.id}/charge-setup/")
+        assert resp2.json()["charged"] is False
+        assert LedgerEntry.objects.filter(operator=op, entry_type="setup_fee").count() == 1
 
 
 class TestNetMarginReconciliation:

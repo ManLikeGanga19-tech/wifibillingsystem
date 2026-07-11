@@ -142,16 +142,29 @@ class PlatformTenantViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def approve(self, request, pk=None):
-        from apps.billing.services import charge_setup_fee
-
         operator = self.get_object()
         operator.status = Operator.Status.ACTIVE
         operator.approved_at = timezone.now()
         operator.save(update_fields=["status", "approved_at", "updated_at"])
-        # One-time onboarding fee, billed once (idempotent) on first approval
-        charge_setup_fee(operator)
         audit("tenant_approved", operator=operator, actor=request.user, target=operator)
         return Response({"status": operator.status})
+
+    @action(detail=True, methods=["post"], url_path="charge-setup")
+    def charge_setup(self, request, pk=None):
+        """Bill the one-time setup fee — ONLY for ISPs who opt into assisted
+        onboarding (Danamo configures their routers + portal). Self-service ISPs
+        are never charged. Idempotent: at most one setup fee per ISP, ever."""
+        from apps.billing.services import charge_setup_fee
+
+        operator = self.get_object()
+        charged = charge_setup_fee(operator)
+        return Response(
+            {
+                "charged": charged,
+                "setup_fee": str(operator.effective_setup_fee),
+                "detail": "Setup fee billed." if charged else "Already billed or exempt.",
+            }
+        )
 
     @action(detail=True, methods=["post"])
     def suspend(self, request, pk=None):
