@@ -13,6 +13,7 @@ from .governance_views import (
     ImpersonationViewSet,
     StartImpersonationView,
 )
+from .health_views import PlatformHealthView
 from .tenant_views import (
     OperatorSettingsView,
     PlatformOverviewView,
@@ -52,6 +53,7 @@ urlpatterns = [
     ),
     path("platform/tenant-pnl/", TenantPnlView.as_view(), name="platform-tenant-pnl"),
     path("platform/search/", PlatformSearchView.as_view(), name="platform-search"),
+    path("platform/health/", PlatformHealthView.as_view(), name="platform-health"),
     # Impersonation is a recorded act, not a header flip — these are the only doors
     path(
         "platform/impersonation/start/",

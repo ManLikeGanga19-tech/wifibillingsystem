@@ -186,7 +186,18 @@ export default function App() {
   }, []);
 
   const loadMe = useCallback(async () => {
-    const data = await api.me();
+    let data = await api.me();
+
+    // Self-heal: an act-as slug whose ImpersonationGrant has EXPIRED (or was
+    // never granted at all) resolves to NO tenant — which would 403 every ISP
+    // endpoint and look exactly like "the API is down". Drop it and fall back to
+    // our own ISP rather than leaving the console wedged.
+    if (getActingTenant() && !data.acting_operator) {
+      setActingTenant(null);
+      data = await api.me();
+      toast('warning', 'Your access to that ISP has ended — back in your own console.');
+    }
+
     setMe(data);
     if (data.is_platform_staff) {
       api.platform.tenants

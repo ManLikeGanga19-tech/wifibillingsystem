@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
+  Activity,
   Building2,
   Gauge,
   LogOut,
@@ -13,15 +14,17 @@ import LoginView from './components/LoginView';
 import CommandCenter from './views/CommandCenter';
 import FinanceView from './views/FinanceView';
 import GovernanceView from './views/GovernanceView';
+import OpsView from './views/OpsView';
 import SearchView from './views/SearchView';
 import TenantsView from './views/TenantsView';
 
-type Tab = 'command' | 'finance' | 'tenants' | 'governance' | 'search';
+type Tab = 'command' | 'finance' | 'tenants' | 'ops' | 'governance' | 'search';
 
 const NAV: { id: Tab; label: string; icon: typeof Gauge }[] = [
   { id: 'command', label: 'Command', icon: Gauge },
   { id: 'finance', label: 'Finance', icon: TrendingUp },
   { id: 'tenants', label: 'ISPs', icon: Building2 },
+  { id: 'ops', label: 'Ops', icon: Activity },
   { id: 'governance', label: 'Governance', icon: ShieldCheck },
   { id: 'search', label: 'Search', icon: SearchIcon },
 ];
@@ -147,6 +150,7 @@ export default function App() {
           />
         )}
         {tab === 'tenants' && <TenantsView openId={openTenant} onOpen={setOpenTenant} />}
+        {tab === 'ops' && <OpsView />}
         {tab === 'governance' && <GovernanceView />}
         {tab === 'search' && <SearchView />}
       </main>

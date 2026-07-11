@@ -284,6 +284,38 @@ export interface SearchResults {
   };
 }
 
+export type HealthState = 'ok' | 'warn' | 'crit';
+
+export interface HealthCheck {
+  key: string;
+  label: string;
+  state: HealthState;
+  value: number;
+  detail: string;
+}
+
+export interface Health {
+  status: HealthState;
+  checked_at: string;
+  checks: HealthCheck[];
+  fleet: {
+    total: number;
+    online: number;
+    offline: number;
+    pending: number;
+    unknown: number;
+    needs_reonboarding: number;
+    stale: number;
+  };
+  workers: { reachable: boolean; count: number; names: string[] };
+  money: {
+    stuck_payments: number;
+    unmatched_payments: number;
+    unmatched_value: Money;
+    undelivered_service: number;
+  };
+}
+
 export interface Payout {
   id: number;
   operator_name: string;
@@ -301,6 +333,7 @@ export const api = {
   me: () => get<Me>('/auth/me/'),
 
   kpis: () => get<Kpis>('/platform/kpis/'),
+  health: () => get<Health>('/platform/health/'),
   timeseries: (days: number) =>
     get<{ days: number; series: SeriesPoint[] }>(`/platform/timeseries/?days=${days}`),
   pnl: () => get<Pnl>('/platform/tenant-pnl/'),

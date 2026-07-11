@@ -24,9 +24,9 @@ const ALERTS: {
 }[] = [
   { key: 'pending_approvals', label: 'ISPs awaiting approval', tab: 'tenants', tone: 'warning' },
   { key: 'payouts_stale_2d', label: 'Payouts pending >2 days', tab: 'finance', tone: 'critical' },
-  { key: 'unmatched_payments', label: 'Payments matching no account', tab: 'search', tone: 'critical' },
+  { key: 'unmatched_payments', label: 'Payments matching no account', tab: 'ops', tone: 'critical' },
   { key: 'trials_expiring_7d', label: 'Trials ending this week', tab: 'tenants', tone: 'warning' },
-  { key: 'routers_offline', label: 'Routers offline', tab: 'tenants', tone: 'warning' },
+  { key: 'routers_offline', label: 'Routers offline', tab: 'ops', tone: 'warning' },
 ];
 
 export default function CommandCenter({ onNavigate }: { onNavigate: (tab: string) => void }) {
@@ -178,8 +178,8 @@ export default function CommandCenter({ onNavigate }: { onNavigate: (tab: string
         <Btn onClick={() => onNavigate('tenants')}>
           <Building2 className="h-3.5 w-3.5" /> ISPs
         </Btn>
-        <Btn onClick={() => onNavigate('governance')}>
-          <Activity className="h-3.5 w-3.5" /> Audit trail
+        <Btn onClick={() => onNavigate('ops')}>
+          <Activity className="h-3.5 w-3.5" /> System health
         </Btn>
         <Btn onClick={() => onNavigate('search')}>
           <Radio className="h-3.5 w-3.5" /> Search
