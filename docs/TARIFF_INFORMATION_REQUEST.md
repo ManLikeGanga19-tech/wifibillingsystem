@@ -78,6 +78,27 @@ Used when an ISP withdraws their wallet balance to M-Pesa.
 | 50,001 – 150,000 | |
 | 150,001 – 250,000 | |
 
+### A2b. Disbursement — B2B (our Paybill → a sub-merchant's Paybill)
+
+We settle each ISP to **their own** paybill. Two things we need to know:
+
+| Amount band (KES) | Fee charged to us (KES) |
+|---|---|
+| 1 – 1,000 | |
+| 1,001 – 5,000 | |
+| 5,001 – 20,000 | |
+| 20,001 – 50,000 | |
+| 50,001 – 150,000 | |
+| 150,001 – 250,000 | |
+
+**Critical for our onboarding flow:** when we send a B2B payment, is there a field
+(`AccountReference`, `Remarks`, or similar) whose value the **recipient can see on
+their own statement / confirmation SMS**? __________
+
+> We verify that an ISP genuinely controls the paybill they registered by sending a
+> small B2B payment carrying a random reference and asking them to read it back. If
+> the recipient cannot see a reference we set, please tell us what they *can* see.
+
 ### A3. Tax, failures, and volume
 
 1. Are the fees above **inclusive or exclusive of Excise Duty** on transaction charges? If

@@ -14,6 +14,8 @@ Daniel 2026-07-11. **No code yet — this is what we build against.**
 | Step-4 "billing" field | **Billing currency, not company** — implicit KSh (Kenya-only), so it is *not a field at all* |
 | ISP roles | **Owner only.** Manager + Support are retired from the ISP side for now |
 | Login identity | **Phone OR email** — either works |
+| Approval bar | **A verified settlement account** — their own M-Pesa paybill **or** bank account |
+| Proving they own it | **Micro-transfer** — we send a few shillings with a random reference; they read it back |
 
 ---
 
@@ -114,9 +116,94 @@ Three consequences to build, not just assert:
    when they can actually earn"* rather than *"when they filled in a form"*.
    That semantic is already right in the code.
 
-> **Open question for Daniel:** what do you actually need to approve an ISP?
-> (Business registration? ID? Their own paybill? A call?) That answer *is* the
-> checklist in point 2, and it is the last unknown in this design.
+**What opens the gate: a verified settlement account.** See §3b.
+
+---
+
+## 3b. Settlement account — the thing that opens the money gate
+
+### The insight
+
+The ISP's paybill is **not a collection account**. Customers never pay it. It is a
+**settlement destination + KYC proof**, and that makes it an unusually good
+approval bar:
+
+> To be issued a paybill (or a business bank account), Safaricom/the bank already
+> ran full KYC — business registration, directors, the lot.
+> **We inherit their KYC for free.** A shell company cannot produce one.
+
+```
+Customer  ->  [DANAMO paybill]  ->  wallet ledger (attributed)  ->  [ISP's paybill/bank]
+                 COLLECTION            CUSTODY + our fees              SETTLEMENT
+```
+
+### Proving they own it: micro-transfer
+
+Anyone can type `123456`. So we prove control the way banks do:
+
+1. ISP enters their paybill (or bank account).
+2. We send a **small B2B/Pesalink payment with a random reference** (e.g. `WOS-4K2P`).
+3. They read their own statement and type the reference back.
+4. Correct → **settlement verified** → the money gate opens.
+
+Automated, self-serve, cannot be faked, and costs a few shillings + one B2B fee
+per ISP — a rounding error against the AML risk it retires. Max 3 attempts, then
+a fresh transfer is required (also the abuse/cost control).
+
+> ⚠️ **Depends on an unknown:** does M-Pesa B2B expose an `AccountReference` /
+> `Remarks` that the *recipient* can actually see on their statement? If not, we
+> fall back to a **random amount** (weaker — far fewer possibilities — so it would
+> need tighter attempt limits). **This has been added to the tariff RFI.**
+
+### Model changes
+
+- `Operator`: `settlement_method` (paybill | bank), `settlement_paybill`,
+  `settlement_name`, existing `payout_bank_*`, plus `settlement_verified_at`,
+  `verification_ref`, `verification_attempts`, `verification_sent_at`.
+- `Payout.Method`: add **`paybill`** (B2B) alongside `mpesa` (B2C) and `bank`.
+- **Delete the vestigial per-ISP Daraja credentials** (`daraja_consumer_key`,
+  `daraja_consumer_secret`, `mpesa_passkey`, `has_mpesa_credentials`). They imply
+  per-ISP *collection*, which is not the model and is actively misleading —
+  `DarajaClient` already ignores them and always uses Danamo's paybill.
+
+### 🔴 Live bug this exposes — fix it with this work
+
+`pppoe/views.py` tells a suspended broadband customer to pay
+**`operator.mpesa_shortcode`** — the *ISP's own* paybill. But C2B confirmations
+only ever arrive at **Danamo's** shortcode. So today:
+
+- **ISP shortcode set** → the customer pays the ISP directly; Danamo never sees
+  it; the client **stays suspended forever** and the money bypasses the ledger.
+- **Shortcode blank** → the customer is shown **no paybill at all**.
+
+The page must show **Danamo's C2B paybill + the client's globally-unique
+`account_number`** — exactly what the C2B matcher is built to receive.
+
+### The onboarding pop-up is a trust conversation, not a form
+
+The hardest sentence you will ever say to an ISP is *"your customers' money lands
+in my account, not yours."* This modal is where that is won or lost. It must state:
+
+- **Why** — one paybill = one M-Pesa integration, one reconciliation, and **we
+  absorb every transaction cost** (they would otherwise pay Safaricom themselves)
+- **Where their money is** — held in custody, attributed to them in a **live
+  ledger they can see**
+- **When they get it** — settled to their own paybill on request
+- **What is still locked** — payments stay off until their paybill is verified
+
+Behaviour: shown on first console login; **dismissible** (they can still explore
+and configure), but a **pinned setup card** remains and the **money gate stays
+shut** until settlement is verified.
+
+### Recommended: verification auto-opens the gate
+
+Once settlement is verified, the KYC question is already answered (Safaricom/the
+bank answered it). So **verified settlement should auto-activate** the ISP —
+money on, trial starts. That gives true self-serve activation in minutes and beats
+Centipid's "live in 24 hours" outright.
+
+Danamo keeps: instant suspend at any time, the full audit trail, and a platform
+setting to force manual review (default **off**; flip it on for flagged signups).
 
 ---
 
@@ -190,6 +277,14 @@ on a poor connection.
 3. Portal refuses a pending ISP's plans
 4. Console banner + "what we still need" checklist
 
+**B2 — Settlement & KYC** *(this is what opens the gate)*
+1. Settlement fields on `Operator`; `Payout.Method.PAYBILL` (B2B)
+2. Micro-transfer verification: send, confirm, attempt-limit
+3. Auto-activate on verification (with a force-manual-review setting)
+4. Onboarding modal + pinned setup card
+5. **Fix the suspended-notice bug** — show Danamo's paybill + the client's account number
+6. **Delete the vestigial per-ISP Daraja credentials**
+
 **C — Roles & login**
 1. ISP = Owner only (UI + `seed_dev`)
 2. Login accepts phone or email
@@ -208,7 +303,11 @@ resistance · slug race · **the money gate (a pending ISP cannot take a shillin
 
 ## 7. Open items
 
-- [ ] **What does approval actually require?** (defines the console checklist)
+- [x] ~~What does approval require?~~ → **a verified settlement account** (§3b)
+- [ ] **Does M-Pesa B2B show the recipient a reference we set?** Decides whether
+      micro-transfer verification uses a random *reference* (strong) or a random
+      *amount* (weak). **Added to [TARIFF_INFORMATION_REQUEST.md](TARIFF_INFORMATION_REQUEST.md).**
+- [ ] **B2B tariff** — new payout rail, new cost we absorb. Also in the RFI.
 - [ ] ToS + Privacy text — Daniel to supply/approve
 - [ ] Production email transport (SES/SendGrid/SMTP) — dev is console-only today
 - [ ] Rate-limit thresholds (starting proposal: 3 codes/email/hour, 10/IP/hour)
