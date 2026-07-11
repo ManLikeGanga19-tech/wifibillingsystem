@@ -60,7 +60,9 @@ export default function PlatformTenantsView({ onViewAs }: { onViewAs: (slug: str
             <td className={`${tdCls} font-mono text-center`}>{t.router_count}</td>
             <td className={`${tdCls} font-mono text-center`}>{t.staff_count}</td>
             <td className={`${tdCls} font-mono text-[11px] whitespace-nowrap`}>
-              {fmtKsh(t.base_fee)}/mo · {Number(t.hotspot_commission_pct)}% · {fmtKsh(t.pppoe_user_fee)}/pppoe
+              {fmtKsh(t.base_fee)}/mo · {Number(t.hotspot_commission_pct)}% ·{' '}
+              {Number(t.pppoe_user_fee) > 0 ? `${fmtKsh(t.pppoe_user_fee)}/pppoe` : 'tiered/pppoe'} ·{' '}
+              {fmtKsh(t.setup_fee)} setup
             </td>
             <td className={`${tdCls} font-mono whitespace-nowrap`}>{fmtDateTime(t.created_at)}</td>
             <td className={`${tdCls} whitespace-nowrap space-x-1.5`}>

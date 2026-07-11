@@ -345,7 +345,7 @@ export interface WalletSummary {
 
 export interface ApiLedgerEntry {
   id: number;
-  entry_type: 'sale' | 'commission' | 'base_fee' | 'pppoe_fee' | 'payout' | 'adjustment';
+  entry_type: 'sale' | 'commission' | 'base_fee' | 'pppoe_fee' | 'setup_fee' | 'payout' | 'adjustment';
   amount: string;
   memo: string;
   period: string;
@@ -390,6 +390,7 @@ export interface ApiTenant {
   base_fee: string;
   hotspot_commission_pct: string;
   pppoe_user_fee: string;
+  setup_fee: string;
   approved_at: string | null;
   created_at: string;
   router_count: number;

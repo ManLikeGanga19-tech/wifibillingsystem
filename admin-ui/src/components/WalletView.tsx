@@ -8,6 +8,7 @@ const ENTRY_LABEL: Record<ApiLedgerEntry['entry_type'], { label: string; color: 
   commission: { label: 'Commission', color: 'gray' },
   base_fee: { label: 'Platform fee', color: 'amber' },
   pppoe_fee: { label: 'PPPoE fee', color: 'amber' },
+  setup_fee: { label: 'Setup fee', color: 'amber' },
   payout: { label: 'Withdrawal', color: 'blue' },
   adjustment: { label: 'Adjustment', color: 'gray' },
 };

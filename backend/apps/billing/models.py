@@ -14,6 +14,7 @@ class LedgerEntry(OperatorOwnedModel):
         COMMISSION = "commission", "Platform commission"
         BASE_FEE = "base_fee", "Monthly platform fee"
         PPPOE_FEE = "pppoe_fee", "PPPoE per-user fee"
+        SETUP_FEE = "setup_fee", "One-time setup fee"
         PAYOUT = "payout", "Payout withdrawal"
         ADJUSTMENT = "adjustment", "Manual adjustment"
 

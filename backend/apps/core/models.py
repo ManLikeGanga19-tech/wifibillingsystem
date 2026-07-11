@@ -57,11 +57,13 @@ class Operator(TimeStampedModel):
     payout_bank_account_name = models.CharField(max_length=120, blank=True)
 
     # Platform billing rates (editable per tenant from the platform portal).
-    # Defaults are the agreed model: KES 500 base + 3% hotspot + KES 50/PPPoE-user.
+    # Model: KES 1,500 base + 3% hotspot + graduated per-PPPoE-user (see
+    # apps.billing.pricing) + a one-time setup fee. The higher base covers a
+    # tenant's baseline hosting so idle tenants aren't loss-making.
     base_fee = models.DecimalField(
         max_digits=10,
         decimal_places=2,
-        default=Decimal("500.00"),
+        default=Decimal("1500.00"),
         help_text="Flat KSh/month for the subdomain",
     )
     hotspot_commission_pct = models.DecimalField(
@@ -70,11 +72,19 @@ class Operator(TimeStampedModel):
         default=Decimal("3.00"),
         help_text="% of hotspot revenue",
     )
+    # 0 = use the platform's graduated tier table (billing.pricing); a positive
+    # value is a custom flat rate negotiated with this ISP (overrides the tiers).
     pppoe_user_fee = models.DecimalField(
         max_digits=10,
         decimal_places=2,
-        default=Decimal("50.00"),
-        help_text="KSh per active PPPoE user/month",
+        default=Decimal("0.00"),
+        help_text="KSh per active PPPoE user/month; 0 = use platform volume tiers",
+    )
+    setup_fee = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("10000.00"),
+        help_text="One-time onboarding fee, billed once when the ISP is approved",
     )
 
     RESERVED_SLUGS = {
@@ -101,6 +111,12 @@ class Operator(TimeStampedModel):
         if self.is_platform_owned:
             return Decimal("0.00")
         return Decimal(str(self.base_fee))
+
+    @property
+    def effective_setup_fee(self) -> Decimal:
+        if self.is_platform_owned:
+            return Decimal("0.00")
+        return Decimal(str(self.setup_fee))
 
     @property
     def has_mpesa_credentials(self) -> bool:

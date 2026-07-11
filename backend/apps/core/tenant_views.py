@@ -113,6 +113,7 @@ class PlatformTenantSerializer(serializers.ModelSerializer):
             "base_fee",
             "hotspot_commission_pct",
             "pppoe_user_fee",
+            "setup_fee",
             "approved_at",
             "created_at",
             "router_count",
@@ -141,10 +142,14 @@ class PlatformTenantViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def approve(self, request, pk=None):
+        from apps.billing.services import charge_setup_fee
+
         operator = self.get_object()
         operator.status = Operator.Status.ACTIVE
         operator.approved_at = timezone.now()
         operator.save(update_fields=["status", "approved_at", "updated_at"])
+        # One-time onboarding fee, billed once (idempotent) on first approval
+        charge_setup_fee(operator)
         audit("tenant_approved", operator=operator, actor=request.user, target=operator)
         return Response({"status": operator.status})
 
@@ -219,7 +224,11 @@ class PlatformReconciliationView(APIView):
         commission = total(LedgerEntry.objects.filter(entry_type=LedgerEntry.Type.COMMISSION))
         fees = total(
             LedgerEntry.objects.filter(
-                entry_type__in=[LedgerEntry.Type.BASE_FEE, LedgerEntry.Type.PPPOE_FEE]
+                entry_type__in=[
+                    LedgerEntry.Type.BASE_FEE,
+                    LedgerEntry.Type.PPPOE_FEE,
+                    LedgerEntry.Type.SETUP_FEE,
+                ]
             )
         )
         payouts_debit = total(LedgerEntry.objects.filter(entry_type=LedgerEntry.Type.PAYOUT))
@@ -287,7 +296,11 @@ class PlatformOverviewView(APIView):
         )
         fees_month = (
             LedgerEntry.objects.filter(
-                entry_type__in=[LedgerEntry.Type.BASE_FEE, LedgerEntry.Type.PPPOE_FEE],
+                entry_type__in=[
+                    LedgerEntry.Type.BASE_FEE,
+                    LedgerEntry.Type.PPPOE_FEE,
+                    LedgerEntry.Type.SETUP_FEE,
+                ],
                 created_at__gte=month_start,
             ).aggregate(v=Sum("amount"))["v"]
             or 0

@@ -40,14 +40,18 @@ def credit_pppoe_payment(operator, amount: Decimal, *, memo: str = "") -> None:
 
 def charge_pppoe_user_fees() -> int:
     """Beat (monthly): deduct the platform's per-active-PPPoE-user fee from each
-    tenant's wallet. Idempotent per (operator, month) via the ledger constraint."""
+    tenant's wallet. The fee is graduated by user count (apps.billing.pricing)
+    unless the tenant has a custom flat rate. Idempotent per (operator, month)
+    via the ledger constraint."""
     from apps.core.models import Operator
     from apps.pppoe.models import Client
+
+    from .pricing import pppoe_user_fee_total
 
     period = timezone.localdate().strftime("%Y-%m")
     charged = 0
     operators = Operator.objects.filter(
-        status=Operator.Status.ACTIVE, is_platform_owned=False, pppoe_user_fee__gt=0
+        status=Operator.Status.ACTIVE, is_platform_owned=False
     )
     for operator in operators:
         active = Client.objects.filter(
@@ -55,7 +59,9 @@ def charge_pppoe_user_fees() -> int:
         ).count()
         if active == 0:
             continue
-        fee = (Decimal(str(operator.pppoe_user_fee)) * active).quantize(Decimal("0.01"))
+        fee = pppoe_user_fee_total(active, operator)
+        if fee <= 0:
+            continue
         try:
             with db_transaction.atomic():
                 LedgerEntry.objects.create(
@@ -69,6 +75,32 @@ def charge_pppoe_user_fees() -> int:
         except IntegrityError:
             continue  # this month already charged
     return charged
+
+
+def charge_setup_fee(operator) -> bool:
+    """One-time onboarding fee, billed to the ISP wallet when it is approved.
+    Idempotent: at most one SETUP_FEE entry per operator, ever. Returns True if
+    a charge was made. Recouped from the tenant's first sales like every other
+    platform fee."""
+    fee = operator.effective_setup_fee
+    if fee <= 0:
+        return False
+    if LedgerEntry.objects.filter(
+        operator=operator, entry_type=LedgerEntry.Type.SETUP_FEE
+    ).exists():
+        return False
+    try:
+        with db_transaction.atomic():
+            LedgerEntry.objects.create(
+                operator=operator,
+                entry_type=LedgerEntry.Type.SETUP_FEE,
+                amount=-fee,
+                memo="One-time onboarding / setup fee",
+            )
+    except IntegrityError:
+        return False
+    audit("wallet_setup_fee_charged", operator=operator, amount=str(fee))
+    return True
 
 
 def credit_sale(tx) -> None:
