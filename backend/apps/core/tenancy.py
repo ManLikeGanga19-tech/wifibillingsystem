@@ -8,16 +8,30 @@ Platform-wide aggregates live only on explicit /platform/ endpoints.
 Resolution order for the acting tenant:
   1. Tenant staff  -> always their own operator. A stolen token replayed on
      another tenant's subdomain can never cross over.
-  2. Platform staff -> the tenant they explicitly selected ("view as"), passed
-     as the X-Act-As-Tenant header (slug) or ?tenant=<slug>; otherwise their own
-     home operator (Daniel runs a WISP too). Never an implicit "all".
+  2. Platform staff -> their own home operator (Daniel runs a WISP too), OR a
+     foreign tenant they hold a LIVE, AUDITED ImpersonationGrant for, selected
+     via the X-Act-As-Tenant header (slug) or ?tenant=<slug>. Setting the header
+     alone is NOT enough: without a grant the tenant does not resolve and
+     RequireTenant returns 403. Never an implicit "all".
   3. Public/portal  -> the subdomain tenant, or the router's tenant (?router=).
 """
 
 from django.conf import settings
+from django.utils import timezone
 from django.utils.deprecation import MiddlewareMixin
 
-from .models import Operator
+from .models import ImpersonationGrant, Operator
+
+
+def has_live_grant(user, operator) -> bool:
+    """Is there an unexpired, un-exited impersonation grant letting `user` act as
+    `operator`? This is the ONLY way platform staff reach a foreign tenant."""
+    return ImpersonationGrant.objects.filter(
+        actor=user,
+        operator=operator,
+        ended_at__isnull=True,
+        expires_at__gt=timezone.now(),
+    ).exists()
 
 
 def _slug_from_host(host: str) -> str | None:
@@ -52,7 +66,8 @@ def acting_tenant(request) -> Operator | None:
     user = getattr(request, "user", None)
 
     if user is not None and user.is_authenticated:
-        # Platform staff may act as any tenant, but only by asking explicitly.
+        # Platform staff may act as another tenant, but ONLY through a live,
+        # audited ImpersonationGrant — never by simply setting a header.
         if user.is_platform_staff:
             requested = (
                 request.headers.get("X-Act-As-Tenant")
@@ -60,9 +75,15 @@ def acting_tenant(request) -> Operator | None:
                 if hasattr(request, "query_params")
                 else request.headers.get("X-Act-As-Tenant")
             )
-            if requested:
-                return Operator.objects.filter(slug=requested, is_active=True).first()
-            return user.operator  # their own ISP, if they run one
+            if not requested:
+                return user.operator  # their own ISP, if they run one
+            target = Operator.objects.filter(slug=requested, is_active=True).first()
+            if target is None:
+                return None
+            # Your own ISP is not impersonation — no grant needed.
+            if user.operator_id and target.pk == user.operator_id:
+                return target
+            return target if has_live_grant(user, target) else None
         # Tenant staff are locked to their own operator, whatever the Host says.
         if user.operator_id:
             return user.operator

@@ -82,10 +82,19 @@ class TestNoCrossTenantLeak:
         assert plan_names(client) == []
 
     def test_platform_user_acting_as_tenant_sees_only_that_tenant(self, two_isps):
+        """View-as now requires a live ImpersonationGrant (see test_governance) —
+        the header alone is refused. With a grant, the platform user is scoped to
+        exactly that one tenant."""
+        isp_a, _ = two_isps
         platform = UserFactory(
             operator=None, is_staff=True, is_superuser=True, role=Role.PLATFORM_OWNER
         )
         client = client_for(platform)
+        client.post(
+            "/api/v1/platform/impersonation/start/",
+            {"tenant": "isp-a", "reason": "support: verifying a payment"},
+            format="json",
+        )
         client.credentials(HTTP_X_ACT_AS_TENANT="isp-a")
 
         names = plan_names(client)

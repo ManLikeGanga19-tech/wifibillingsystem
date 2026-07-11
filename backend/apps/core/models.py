@@ -151,7 +151,7 @@ class AuditLog(models.Model):
     actor = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL
     )
-    action = models.CharField(max_length=100)
+    action = models.CharField(max_length=100, db_index=True)
     target_type = models.CharField(max_length=60, blank=True)
     target_id = models.CharField(max_length=60, blank=True)
     metadata = models.JSONField(default=dict, blank=True)
@@ -160,6 +160,45 @@ class AuditLog(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        indexes = [models.Index(fields=["operator", "-created_at"])]
 
     def __str__(self):
         return f"{self.action} {self.target_type}#{self.target_id}"
+
+
+class ImpersonationGrant(models.Model):
+    """Platform staff entering an ISP's console ("view as") is a PRIVILEGED,
+    RECORDED act — never a silent header flip.
+
+    Danamo holds other people's money, so walking into a tenant's console must be
+    deliberate, justified, time-boxed, and permanently recorded. `acting_tenant()`
+    refuses to resolve a foreign tenant without a live grant, so this model is the
+    only door in. A platform user's OWN operator needs no grant.
+    """
+
+    DEFAULT_MINUTES = 60
+
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="impersonations"
+    )
+    operator = models.ForeignKey(
+        Operator, on_delete=models.CASCADE, related_name="impersonations"
+    )
+    reason = models.CharField(max_length=200, help_text="Why this access was needed")
+    started_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    expires_at = models.DateTimeField(db_index=True)
+    ended_at = models.DateTimeField(null=True, blank=True, help_text="Explicitly exited")
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-started_at"]
+        indexes = [models.Index(fields=["actor", "operator", "expires_at"])]
+
+    def __str__(self):
+        return f"{self.actor} -> {self.operator.slug} ({self.reason})"
+
+    @property
+    def is_live(self) -> bool:
+        from django.utils import timezone
+
+        return self.ended_at is None and self.expires_at > timezone.now()
