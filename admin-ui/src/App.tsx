@@ -19,10 +19,22 @@ import {
   Building2,
   Loader2,
   Clock,
+  Globe,
+  Eye,
 } from 'lucide-react';
 
 import { BandwidthProfile, Subscriber, OutboundCampaign } from './types';
-import { api, ApiPlan, isAuthenticated, logout, Me, NavCounts } from './api/client';
+import {
+  api,
+  ApiPlan,
+  ApiTenant,
+  getActingTenant,
+  isAuthenticated,
+  logout,
+  Me,
+  NavCounts,
+  setActingTenant,
+} from './api/client';
 import { planToProfile, profileToPlan, campaignToUi, subscriberToUi } from './api/mappers';
 import { toast, ToastHost } from './components/ui';
 
@@ -43,6 +55,7 @@ import RoutersView from './components/RoutersView';
 import EquipmentView from './components/EquipmentView';
 import PlatformTenantsView from './components/PlatformTenantsView';
 import PlatformPayoutsView from './components/PlatformPayoutsView';
+import PlatformOverview from './components/PlatformOverview';
 import SettingsView from './components/SettingsView';
 import WalletView from './components/WalletView';
 
@@ -65,8 +78,13 @@ type TabId =
   | 'equipment'
   | 'settings'
   | 'wallet'
+  | 'platform_overview'
   | 'platform_tenants'
   | 'platform_payouts';
+
+/** Which hat the console is wearing. Platform = cross-ISP screens only;
+ * ISP = one tenant's console. They never mix. */
+type Hat = 'platform' | 'isp';
 
 interface NavItem {
   id: TabId;
@@ -117,18 +135,26 @@ const NAV_GROUPS: { title: string | null; items: NavItem[] }[] = [
   },
 ];
 
-const PLATFORM_GROUP: { title: string | null; items: NavItem[] } = {
-  title: 'Platform',
-  items: [
-    { id: 'platform_tenants', label: 'ISP Tenants', icon: Building2 },
-    { id: 'platform_payouts', label: 'Payouts', icon: Wallet },
-  ],
-};
+const PLATFORM_NAV: { title: string | null; items: NavItem[] }[] = [
+  {
+    title: null,
+    items: [{ id: 'platform_overview', label: 'Overview', icon: Globe }],
+  },
+  {
+    title: 'Danamo Tech',
+    items: [
+      { id: 'platform_tenants', label: 'ISP Tenants', icon: Building2 },
+      { id: 'platform_payouts', label: 'Payouts', icon: Wallet },
+    ],
+  },
+];
 
 export default function App() {
   const [authed, setAuthed] = useState<boolean>(isAuthenticated());
   const [me, setMe] = useState<Me | null>(null);
   const [meLoading, setMeLoading] = useState(false);
+  const [hat, setHat] = useState<Hat>('isp');
+  const [tenants, setTenants] = useState<ApiTenant[]>([]);
   const [activeTab, setActiveTab] = useState<TabId>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(
@@ -161,27 +187,66 @@ export default function App() {
       .catch(() => {});
   }, []);
 
-  useEffect(() => {
-    if (!authed) return;
-    setMeLoading(true);
-    api.me()
-      .then(setMe)
-      .catch(() => {})
-      .finally(() => setMeLoading(false));
-  }, [authed]);
+  const loadMe = useCallback(async () => {
+    const data = await api.me();
+    setMe(data);
+    // Platform staff with no ISP of their own start on the platform hat —
+    // the backend will (correctly) refuse ISP data until they pick a tenant.
+    if (data.is_platform_staff && !data.acting_operator) {
+      setHat('platform');
+      setActiveTab('platform_overview');
+    }
+    if (data.is_platform_staff) {
+      api.platform.tenants
+        .list()
+        .then((r) => setTenants(r.results))
+        .catch(() => {});
+    }
+    return data;
+  }, []);
 
   useEffect(() => {
     if (!authed) return;
+    setMeLoading(true);
+    loadMe()
+      .catch(() => {})
+      .finally(() => setMeLoading(false));
+  }, [authed, loadMe]);
+
+  /** Platform staff switching which ISP they are acting for. */
+  const switchTenant = useCallback(
+    async (slug: string | null) => {
+      setActingTenant(slug);
+      const data = await loadMe();
+      if (slug) {
+        setHat('isp');
+        setActiveTab('dashboard');
+        toast('info', `Now viewing ${data.acting_operator?.name ?? slug}.`);
+      }
+      loadPlans();
+      loadNavCounts();
+    },
+    [loadMe, loadPlans, loadNavCounts]
+  );
+
+  // ISP data only loads when we are actually acting for a tenant. Without one the
+  // API refuses (by design) — so don't ask.
+  const hasTenant = !!me?.acting_operator;
+
+  useEffect(() => {
+    if (!authed || !hasTenant) return;
     loadPlans();
     loadNavCounts();
     api.campaigns.list().then((r) => setCampaigns(r.results.map(campaignToUi).reverse())).catch(() => {});
     api.subscribers.list().then((r) => setLiveSubscribers(r.results.map(subscriberToUi))).catch(() => {});
     const t = window.setInterval(loadNavCounts, 30_000);
     return () => window.clearInterval(t);
-  }, [authed, loadPlans, loadNavCounts]);
+  }, [authed, hasTenant, loadPlans, loadNavCounts]);
 
   // Refresh badges when switching tabs — cheap, and keeps counts honest after actions
-  useEffect(loadNavCounts, [activeTab, loadNavCounts]);
+  useEffect(() => {
+    if (hasTenant) loadNavCounts();
+  }, [activeTab, hasTenant, loadNavCounts]);
 
   // Adapter for legacy components that expect an activity-log callback
   const addLog = (_cat: string, type: 'info' | 'success' | 'warning' | 'error', message: string) =>
@@ -276,7 +341,14 @@ export default function App() {
     );
   }
 
-  const navGroups = me?.is_platform_admin ? [...NAV_GROUPS, PLATFORM_GROUP] : NAV_GROUPS;
+  const isPlatformStaff = !!me?.is_platform_staff;
+  const onPlatformHat = hat === 'platform' && isPlatformStaff;
+  // The two hats never share screens: platform = cross-ISP, ISP = one tenant.
+  const navGroups = onPlatformHat ? PLATFORM_NAV : NAV_GROUPS;
+  const acting = me?.acting_operator ?? null;
+  // Platform staff acting for an ISP that is not their own = support "view as"
+  const viewingAsOther =
+    isPlatformStaff && acting !== null && acting.slug !== me?.operator?.slug;
 
   const badgeValue = (item: NavItem): number | null =>
     item.badge && navCounts ? navCounts[item.badge] : null;
@@ -396,16 +468,47 @@ export default function App() {
                 OPERATIONAL
               </span>
             </div>
-            <div className="hidden sm:flex flex-col border-l border-[#141414] pl-5 md:pl-8">
-              <span className="text-[10px] opacity-60 font-bold uppercase tracking-wider font-serif italic">Online Now</span>
-              <span className="font-mono text-[10px] sm:text-xs font-bold">{navCounts?.active_users ?? '—'} CLIENTS</span>
-            </div>
+            {!onPlatformHat && (
+              <div className="hidden sm:flex flex-col border-l border-[#141414] pl-5 md:pl-8">
+                <span className="text-[10px] opacity-60 font-bold uppercase tracking-wider font-serif italic">Online Now</span>
+                <span className="font-mono text-[10px] sm:text-xs font-bold">{navCounts?.active_users ?? '—'} CLIENTS</span>
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-3 sm:gap-4 text-right font-mono text-[10px] sm:text-xs">
+            {/* Hat / tenant switcher — platform staff only */}
+            {isPlatformStaff && (
+              <select
+                value={onPlatformHat ? '__platform__' : (acting?.slug ?? '')}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === '__platform__') {
+                    setHat('platform');
+                    setActiveTab('platform_overview');
+                  } else {
+                    switchTenant(v);
+                  }
+                }}
+                title="Switch between the platform view and an ISP console"
+                className="border border-[#141414] bg-[#E4E3E0] p-1.5 text-[11px] font-mono font-bold uppercase outline-none cursor-pointer max-w-[11rem]"
+              >
+                <option value="__platform__">🌐 Platform (all ISPs)</option>
+                {me?.operator && <option value={me.operator.slug}>🏠 {me.operator.name}</option>}
+                {tenants
+                  .filter((t) => t.slug !== me?.operator?.slug)
+                  .map((t) => (
+                    <option key={t.id} value={t.slug}>
+                      👁 {t.name}
+                    </option>
+                  ))}
+              </select>
+            )}
+
             <div className="border-l border-[#141414] pl-3 sm:pl-4 text-right">
-              <div className="text-[11px] opacity-50 uppercase">
-                {me?.is_platform_admin ? 'Platform Admin' : me?.operator?.name ?? 'Operator'}
+              <div className="text-[11px] opacity-50 uppercase truncate max-w-[10rem]">
+                {onPlatformHat ? 'Danamo Tech' : acting?.name ?? me?.operator?.name ?? 'No ISP'}
+                {me?.is_read_only && ' · read-only'}
               </div>
               <button
                 onClick={() => {
@@ -421,6 +524,22 @@ export default function App() {
             </div>
           </div>
         </header>
+
+        {/* Loud banner while a platform user is looking at someone else's ISP */}
+        {viewingAsOther && !onPlatformHat && (
+          <div className="bg-[#2563EB] text-white px-4 py-1.5 text-[11px] font-mono flex items-center justify-between gap-3 shrink-0">
+            <span className="flex items-center gap-2 truncate">
+              <Eye className="h-3.5 w-3.5 shrink-0" />
+              Viewing <b>{acting?.name}</b> as platform staff — you are inside their ISP console.
+            </span>
+            <button
+              onClick={() => switchTenant(me?.operator?.slug ?? null)}
+              className="underline font-bold shrink-0 cursor-pointer"
+            >
+              Exit
+            </button>
+          </div>
+        )}
 
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 min-h-0">
           <div className="max-w-7xl mx-auto space-y-6">
@@ -455,7 +574,12 @@ export default function App() {
             {activeTab === 'equipment' && <EquipmentView />}
             {activeTab === 'settings' && <SettingsView onOpenWallet={() => setActiveTab('wallet')} />}
             {activeTab === 'wallet' && <WalletView />}
-            {activeTab === 'platform_tenants' && <PlatformTenantsView />}
+            {activeTab === 'platform_overview' && (
+              <PlatformOverview onNavigate={(t) => setActiveTab(t as TabId)} />
+            )}
+            {activeTab === 'platform_tenants' && (
+              <PlatformTenantsView onViewAs={(slug) => switchTenant(slug)} />
+            )}
             {activeTab === 'platform_payouts' && <PlatformPayoutsView />}
           </div>
         </div>

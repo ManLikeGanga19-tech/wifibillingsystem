@@ -1,4 +1,4 @@
-import { Building2, Check, Ban } from 'lucide-react';
+import { Building2, Check, Ban, Eye } from 'lucide-react';
 import { api, ApiTenant } from '../api/client';
 import { Badge, Btn, RefreshBtn, TableShell, tdCls, toast, useList, ViewHeader, fmtDateTime, fmtKsh } from './ui';
 
@@ -8,7 +8,7 @@ const STATUS_COLOR: Record<ApiTenant['status'], 'green' | 'amber' | 'red' | 'gra
   suspended: 'red',
 };
 
-export default function PlatformTenantsView() {
+export default function PlatformTenantsView({ onViewAs }: { onViewAs: (slug: string) => void }) {
   const { rows, count, error, reload } = useList(() => api.platform.tenants.list());
 
   const approve = async (t: ApiTenant) => {
@@ -64,6 +64,11 @@ export default function PlatformTenantsView() {
             </td>
             <td className={`${tdCls} font-mono whitespace-nowrap`}>{fmtDateTime(t.created_at)}</td>
             <td className={`${tdCls} whitespace-nowrap space-x-1.5`}>
+              {t.status === 'active' && (
+                <Btn variant="outline" onClick={() => onViewAs(t.slug)} title="Open this ISP's console (support view)">
+                  <Eye className="h-3.5 w-3.5" /> View as
+                </Btn>
+              )}
               {t.status === 'pending' && (
                 <Btn variant="green" onClick={() => approve(t)}>
                   <Check className="h-3.5 w-3.5" /> Approve

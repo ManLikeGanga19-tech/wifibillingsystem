@@ -30,6 +30,7 @@ export function isAuthenticated(): boolean {
 
 export function logout() {
   setTokens(null);
+  localStorage.removeItem(ACT_AS_KEY);
 }
 
 export async function login(phone: string, password: string): Promise<void> {
@@ -74,13 +75,29 @@ export class ApiError extends Error {
   }
 }
 
+// ---- "act as tenant" (platform staff viewing one ISP) ---------------------
+// The backend fails closed: ISP endpoints need exactly one tenant. Platform
+// staff pick it explicitly; this header carries that choice on every request.
+const ACT_AS_KEY = 'wifios_act_as_tenant';
+
+export function getActingTenant(): string | null {
+  return localStorage.getItem(ACT_AS_KEY);
+}
+
+export function setActingTenant(slug: string | null) {
+  if (slug) localStorage.setItem(ACT_AS_KEY, slug);
+  else localStorage.removeItem(ACT_AS_KEY);
+}
+
 async function request<T>(path: string, init?: RequestInit, retried = false): Promise<T> {
   const tokens = getTokens();
+  const actAs = getActingTenant();
   const resp = await fetch(`${BASE}/api/v1${path}`, {
     ...init,
     headers: {
       'Content-Type': 'application/json',
       ...(tokens ? { Authorization: `Bearer ${tokens.access}` } : {}),
+      ...(actAs ? { 'X-Act-As-Tenant': actAs } : {}),
       ...init?.headers,
     },
   });
@@ -252,17 +269,48 @@ export interface ApiEquipment {
   created_at: string;
 }
 
+export type Role =
+  | 'platform_owner'
+  | 'platform_support'
+  | 'tenant_owner'
+  | 'tenant_manager'
+  | 'tenant_support';
+
+export interface MeOperator {
+  id: number;
+  name: string;
+  slug: string;
+  status: 'pending' | 'active' | 'suspended';
+  is_platform_owned: boolean;
+}
+
 export interface Me {
   phone: string;
   name: string;
   is_staff: boolean;
-  is_platform_admin: boolean;
-  operator: {
-    id: number;
-    name: string;
-    slug: string;
-    status: 'pending' | 'active' | 'suspended';
-  } | null;
+  role: Role;
+  is_platform_staff: boolean;
+  is_read_only: boolean;
+  can_manage_money: boolean;
+  /** The user's home ISP (null for platform-only staff). */
+  operator: MeOperator | null;
+  /** The ISP this session is currently acting for (platform staff can switch). */
+  acting_operator: MeOperator | null;
+}
+
+export interface PlatformOverview {
+  scope: 'all_isps';
+  tenants_total: number;
+  tenants_pending: number;
+  tenants_active: number;
+  tenants_suspended: number;
+  platform_revenue_month: string | number;
+  gross_volume_month: string | number;
+  transactions_month: number;
+  routers_online: number;
+  routers_total: number;
+  active_sessions: number;
+  new_tenants_30d: number;
 }
 
 export interface WalletSummary {
@@ -437,6 +485,7 @@ export const api = {
   },
 
   platform: {
+    overview: () => request<PlatformOverview>('/platform/overview/'),
     tenants: {
       list: () => request<Paginated<ApiTenant>>('/platform/tenants/'),
       update: (id: number, data: Partial<ApiTenant>) =>

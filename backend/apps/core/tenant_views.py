@@ -12,13 +12,18 @@ from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
-from apps.accounts.models import User
+from apps.accounts.models import Role, User
 from apps.core.phone import InvalidPhoneError, normalize_msisdn
 
 from .models import Operator
-from .permissions import IsPlatformAdmin
+from .permissions import (
+    IsPlatformOwner,
+    IsPlatformStaff,
+    ReadOnlyForSupport,
+    RequireTenant,
+)
 from .services import audit
-from .tenancy import request_operator
+from .tenancy import acting_tenant
 
 
 class SignupSerializer(serializers.Serializer):
@@ -75,6 +80,7 @@ class TenantSignupView(APIView):
                 email=data["email"],
                 operator=operator,
                 is_staff=True,
+                role=Role.TENANT_OWNER,
             )
             audit("tenant_signup", operator=operator, target=operator, slug=operator.slug)
         return Response(
@@ -116,11 +122,16 @@ class PlatformTenantSerializer(serializers.ModelSerializer):
 
 
 class PlatformTenantViewSet(viewsets.ModelViewSet):
-    """Daniel's tenant management: approval queue, suspension, billing rates."""
+    """Danamo Tech's tenant management: approval queue, suspension, billing rates.
+    Reading is open to platform staff; changing money/status needs the owner."""
 
-    permission_classes = [IsPlatformAdmin]
     serializer_class = PlatformTenantSerializer
     http_method_names = ["get", "patch", "post", "head", "options"]
+
+    def get_permissions(self):
+        if self.request.method in ("GET", "HEAD", "OPTIONS"):
+            return [IsPlatformStaff()]
+        return [IsPlatformOwner()]
 
     def get_queryset(self):
         return Operator.objects.annotate(
@@ -166,30 +177,85 @@ class OperatorSettingsSerializer(serializers.ModelSerializer):
 
 
 class OperatorSettingsView(APIView):
-    """The ISP's own business + M-Pesa settings (secrets write-only, encrypted at rest)."""
+    """The ISP's own business details. Tenant-only: RequireTenant returns 403 for
+    a platform user who has not selected an ISP (this used to 404 confusingly)."""
 
-    permission_classes = [IsAdminUser]
-
-    def _operator(self, request):
-        operator = request_operator(request)
-        if operator is None:
-            return None
-        return operator
+    permission_classes = [IsAdminUser, RequireTenant, ReadOnlyForSupport]
 
     def get(self, request):
-        operator = self._operator(request)
-        if operator is None:
-            return Response({"detail": "No tenant context."}, status=status.HTTP_404_NOT_FOUND)
-        return Response(OperatorSettingsSerializer(operator).data)
+        return Response(OperatorSettingsSerializer(acting_tenant(request)).data)
 
     def patch(self, request):
-        operator = self._operator(request)
-        if operator is None:
-            return Response({"detail": "No tenant context."}, status=status.HTTP_404_NOT_FOUND)
+        operator = acting_tenant(request)
         serializer = OperatorSettingsSerializer(operator, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
         audit("operator_settings_updated", operator=operator, actor=request.user, target=operator)
         return Response(OperatorSettingsSerializer(operator).data)
+
+
+class PlatformOverviewView(APIView):
+    """Cross-tenant aggregates — the ONLY legitimate place for platform-wide
+    numbers. Explicitly labelled so they can never be mistaken for one ISP's."""
+
+    permission_classes = [IsPlatformStaff]
+
+    def get(self, request):
+        from datetime import timedelta
+
+        from django.db.models import Sum
+        from django.utils import timezone
+
+        from apps.billing.models import LedgerEntry
+        from apps.payments.models import Transaction
+        from apps.provisioning.models import Router, Session
+
+        now = timezone.now()
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        paid_month = Transaction.objects.filter(
+            status__in=Transaction.SUCCESS_STATUSES, callback_received_at__gte=month_start
+        )
+        commission_month = (
+            LedgerEntry.objects.filter(
+                entry_type=LedgerEntry.Type.COMMISSION, created_at__gte=month_start
+            ).aggregate(v=Sum("amount"))["v"]
+            or 0
+        )
+        fees_month = (
+            LedgerEntry.objects.filter(
+                entry_type__in=[LedgerEntry.Type.BASE_FEE, LedgerEntry.Type.PPPOE_FEE],
+                created_at__gte=month_start,
+            ).aggregate(v=Sum("amount"))["v"]
+            or 0
+        )
+        return Response(
+            {
+                "scope": "all_isps",  # never confuse with a single tenant's data
+                "tenants_total": Operator.objects.count(),
+                "tenants_pending": Operator.objects.filter(
+                    status=Operator.Status.PENDING
+                ).count(),
+                "tenants_active": Operator.objects.filter(
+                    status=Operator.Status.ACTIVE
+                ).count(),
+                "tenants_suspended": Operator.objects.filter(
+                    status=Operator.Status.SUSPENDED
+                ).count(),
+                # Platform earnings = commissions + fees withheld (stored negative)
+                "platform_revenue_month": -(commission_month + fees_month),
+                "gross_volume_month": paid_month.aggregate(v=Sum("amount"))["v"] or 0,
+                "transactions_month": paid_month.count(),
+                "routers_online": Router.objects.filter(
+                    is_active=True, status=Router.Status.ONLINE
+                ).count(),
+                "routers_total": Router.objects.filter(is_active=True).count(),
+                "active_sessions": Session.objects.filter(
+                    status=Session.Status.ACTIVE
+                ).count(),
+                "new_tenants_30d": Operator.objects.filter(
+                    created_at__gte=now - timedelta(days=30)
+                ).count(),
+            }
+        )
 
 

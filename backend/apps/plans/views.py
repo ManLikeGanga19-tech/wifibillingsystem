@@ -1,46 +1,54 @@
 from rest_framework import viewsets
-from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import AllowAny, IsAdminUser
 
-from apps.core.permissions import TenantIsOperational
-from apps.core.tenancy import request_operator
+from apps.core.permissions import ReadOnlyForSupport, RequireTenant, TenantIsOperational
+from apps.core.tenancy import acting_tenant
 
 from .models import Plan
 from .serializers import PlanSerializer
 
 
 class PlanViewSet(viewsets.ModelViewSet):
-    """Public can list/retrieve active hotspot plans (captive portal); ISP staff
-    manage their own plans. Tenant context: staff -> own operator; public -> the
-    subdomain tenant or an explicit ?router=<id> (captive portal flow)."""
+    """Public list/retrieve for the captive portal (tenant from the subdomain or
+    ?router=); staff manage their own tenant's plans."""
 
     serializer_class = PlanSerializer
 
     def get_permissions(self):
         if self.action in ("list", "retrieve"):
             return [AllowAny()]
-        return [IsAdminUser(), TenantIsOperational()]
+        return [IsAdminUser(), RequireTenant(), TenantIsOperational(), ReadOnlyForSupport()]
 
-    def get_queryset(self):
+    def _portal_operator(self):
+        """Unauthenticated portal traffic: tenant from subdomain, else ?router=."""
         from apps.provisioning.models import Router
 
-        operator = request_operator(self.request)
-        is_staff = self.request.user.is_authenticated and self.request.user.is_staff
-        qs = Plan.objects.all()
-        if operator is not None:
-            qs = qs.filter(operator=operator)
-        else:
-            router_id = self.request.query_params.get("router", "")
-            if router_id.isdigit():
-                router = Router.objects.filter(pk=int(router_id), is_active=True).first()
-                if router:
-                    qs = qs.filter(operator=router.operator)
-        if not is_staff:
-            qs = qs.filter(is_active=True, plan_type=Plan.PlanType.HOTSPOT)
-        return qs
+        tenant = getattr(self.request, "tenant", None)
+        if tenant is not None:
+            return tenant
+        router_id = self.request.query_params.get("router", "")
+        if router_id.isdigit():
+            router = Router.objects.filter(pk=int(router_id), is_active=True).first()
+            if router:
+                return router.operator
+        return None
+
+    def get_queryset(self):
+        user = self.request.user
+        is_staff = user.is_authenticated and user.is_staff
+
+        if is_staff:
+            operator = acting_tenant(self.request)
+            if operator is None:
+                return Plan.objects.none()  # fail closed
+            return Plan.objects.filter(operator=operator)
+
+        operator = self._portal_operator()
+        if operator is None:
+            return Plan.objects.none()  # fail closed: never expose every ISP's plans
+        return Plan.objects.filter(
+            operator=operator, is_active=True, plan_type=Plan.PlanType.HOTSPOT
+        )
 
     def perform_create(self, serializer):
-        operator = request_operator(self.request)
-        if operator is None:
-            raise ValidationError("No tenant context.")
-        serializer.save(operator=operator)
+        serializer.save(operator=acting_tenant(self.request))

@@ -1,11 +1,17 @@
-"""Tenant resolution.
+"""Tenant resolution — FAIL CLOSED.
 
-Production: the tenant is the subdomain — `<slug>.wifios.co.ke`.
-Dev (DEBUG): an `X-Tenant-Slug` header may substitute, and `<slug>.localhost` works too.
+Rule: an ISP-shaped request must resolve to exactly ONE tenant. There is no
+"no tenant means show everything" path; that produced a cross-tenant data leak
+(a platform admin saw every ISP's transactions merged as if they were one ISP's).
+Platform-wide aggregates live only on explicit /platform/ endpoints.
 
-Security rule: an authenticated staff user's OWN operator always wins over the Host
-header — a stolen token replayed on another tenant's subdomain must never cross data.
-Platform admins (is_superuser, operator=None) float across tenants.
+Resolution order for the acting tenant:
+  1. Tenant staff  -> always their own operator. A stolen token replayed on
+     another tenant's subdomain can never cross over.
+  2. Platform staff -> the tenant they explicitly selected ("view as"), passed
+     as the X-Act-As-Tenant header (slug) or ?tenant=<slug>; otherwise their own
+     home operator (Daniel runs a WISP too). Never an implicit "all".
+  3. Public/portal  -> the subdomain tenant, or the router's tenant (?router=).
 """
 
 from django.conf import settings
@@ -37,12 +43,34 @@ class TenantMiddleware(MiddlewareMixin):
         )
 
 
-def request_operator(request) -> Operator | None:
-    """The operator this request acts for.
+def acting_tenant(request) -> Operator | None:
+    """The single tenant this request acts for, or None if it cannot be resolved.
 
-    Priority: authenticated staff user's own operator > subdomain tenant > None.
+    Callers that serve ISP data MUST treat None as a hard error (see
+    TenantScopedMixin / RequireTenant), never as 'unfiltered'.
     """
     user = getattr(request, "user", None)
-    if user is not None and user.is_authenticated and user.operator_id:
-        return user.operator
+
+    if user is not None and user.is_authenticated:
+        # Platform staff may act as any tenant, but only by asking explicitly.
+        if user.is_platform_staff:
+            requested = (
+                request.headers.get("X-Act-As-Tenant")
+                or request.query_params.get("tenant")
+                if hasattr(request, "query_params")
+                else request.headers.get("X-Act-As-Tenant")
+            )
+            if requested:
+                return Operator.objects.filter(slug=requested, is_active=True).first()
+            return user.operator  # their own ISP, if they run one
+        # Tenant staff are locked to their own operator, whatever the Host says.
+        if user.operator_id:
+            return user.operator
+        return None
+
+    # Unauthenticated (captive portal): tenant comes from the subdomain.
     return getattr(request, "tenant", None)
+
+
+# Backwards-compatible alias (older call sites).
+request_operator = acting_tenant

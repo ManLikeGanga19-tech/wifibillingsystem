@@ -41,6 +41,13 @@ class Operator(TimeStampedModel):
     daraja_consumer_key = EncryptedTextField(blank=True)
     daraja_consumer_secret = EncryptedTextField(blank=True)
 
+    # Danamo Tech's own WISP: charges itself nothing. Guarded so rates can't be
+    # fat-fingered back on.
+    is_platform_owned = models.BooleanField(
+        default=False,
+        help_text="Platform's own ISP: exempt from all commission and platform fees.",
+    )
+
     # Platform billing rates (editable per tenant from the platform portal)
     base_fee = models.DecimalField(
         max_digits=10, decimal_places=2, default=0, help_text="Flat KSh/month for the subdomain"
@@ -66,6 +73,19 @@ class Operator(TimeStampedModel):
     @property
     def is_operational(self) -> bool:
         return self.is_active and self.status == self.Status.ACTIVE
+
+    @property
+    def effective_commission_pct(self) -> Decimal:
+        """0% for the platform's own ISP — Danamo does not bill itself."""
+        if self.is_platform_owned:
+            return Decimal("0.00")
+        return Decimal(str(self.hotspot_commission_pct))
+
+    @property
+    def effective_base_fee(self) -> Decimal:
+        if self.is_platform_owned:
+            return Decimal("0.00")
+        return Decimal(str(self.base_fee))
 
     @property
     def has_mpesa_credentials(self) -> bool:

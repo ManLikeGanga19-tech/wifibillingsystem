@@ -43,10 +43,10 @@ export default function App() {
 
   const loadPlans = useCallback(() => {
     setLoadError('');
-    listPlans()
+    listPlans(captive.routerId)
       .then((r) => setPlans(r.results))
       .catch(() => setLoadError('Could not load plans. Check your connection and retry.'));
-  }, []);
+  }, [captive.routerId]);
 
   useEffect(loadPlans, [loadPlans]);
 
@@ -287,7 +287,14 @@ function PlanList({
           <span className="font-black text-lg text-[#228B22] whitespace-nowrap">{formatKsh(plan.price)}</span>
         </button>
       ))}
-      {plans.length === 0 && <Card><p className="text-sm text-center text-[#141414]/60">No plans available right now.</p></Card>}
+      {plans.length === 0 && (
+        <Card>
+          <p className="text-sm text-center text-[#141414]/60">
+            No plans available. Please connect to the WiFi network first, then open this
+            page from the login screen.
+          </p>
+        </Card>
+      )}
     </div>
   );
 }

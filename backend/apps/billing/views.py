@@ -6,9 +6,15 @@ from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.core.permissions import IsPlatformAdmin, TenantIsOperational
+from apps.core.permissions import (
+    CanManageMoney,
+    IsPlatformOwner,
+    IsPlatformStaff,
+    RequireTenant,
+    TenantIsOperational,
+)
 from apps.core.phone import InvalidPhoneError, normalize_msisdn
-from apps.core.tenancy import request_operator
+from apps.core.tenancy import acting_tenant
 from apps.core.viewsets import TenantReadOnlyViewSet
 
 from .models import LedgerEntry, Payout
@@ -24,14 +30,12 @@ from .services import (
 
 
 class WalletSummaryView(APIView):
-    """ISP wallet: balance + this month's earnings picture."""
+    """ISP wallet: balance + this month's earnings picture. Tenant-only."""
 
-    permission_classes = [IsAdminUser, TenantIsOperational]
+    permission_classes = [IsAdminUser, RequireTenant, TenantIsOperational]
 
     def get(self, request):
-        operator = request_operator(request)
-        if operator is None:
-            return Response({"detail": "No tenant context."}, status=status.HTTP_404_NOT_FOUND)
+        operator = acting_tenant(request)
         month_start = timezone.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         month = LedgerEntry.objects.filter(operator=operator, created_at__gte=month_start)
 
@@ -61,14 +65,19 @@ class LedgerViewSet(TenantReadOnlyViewSet):
 
 
 class MyPayoutsViewSet(TenantReadOnlyViewSet):
+    """Withdrawals are money movement: ISP OWNER only (a manager runs ops but
+    cannot move cash out; support is read-only)."""
+
     serializer_class = PayoutSerializer
     queryset = Payout.objects.order_by("-created_at")
+    permission_classes = [
+        *TenantReadOnlyViewSet.permission_classes,
+        CanManageMoney,
+    ]
 
     @action(detail=False, methods=["post"])
     def withdraw(self, request):
         operator = self.get_operator()
-        if operator is None:
-            return Response({"detail": "No tenant context."}, status=status.HTTP_404_NOT_FOUND)
         serializer = WithdrawSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         try:
@@ -88,10 +97,15 @@ class MyPayoutsViewSet(TenantReadOnlyViewSet):
 
 
 class PlatformPayoutViewSet(viewsets.ReadOnlyModelViewSet):
-    """Daniel's payout queue: pay via M-Pesa manually, then record it here."""
+    """The platform payout queue: pay via M-Pesa manually, then record it here.
+    Platform staff may view; only the platform owner may pay or reject."""
 
-    permission_classes = [IsPlatformAdmin]
     serializer_class = PayoutSerializer
+
+    def get_permissions(self):
+        if self.request.method in ("GET", "HEAD", "OPTIONS"):
+            return [IsPlatformStaff()]
+        return [IsPlatformOwner()]
 
     def get_queryset(self):
         qs = Payout.objects.select_related("operator").order_by("-created_at")

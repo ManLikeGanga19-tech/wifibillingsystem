@@ -4,7 +4,7 @@ from datetime import timedelta
 
 from django.core.management.base import BaseCommand
 
-from apps.accounts.models import User
+from apps.accounts.models import Role, User
 from apps.core.models import Operator
 from apps.plans.models import Plan
 from apps.provisioning.models import Router
@@ -57,22 +57,50 @@ class Command(BaseCommand):
         if created:
             self.stdout.write("Dummy router created")
 
-        if not User.objects.filter(phone="254700000000").exists():
+        # The platform owner ALSO runs his own WISP: one login, two hats.
+        # That tenant is platform-owned, so it pays no commission or fees.
+        if not operator.is_platform_owned:
+            operator.is_platform_owned = True
+            operator.save(update_fields=["is_platform_owned", "updated_at"])
+            self.stdout.write("Default operator marked platform-owned (fee exempt)")
+
+        owner = User.objects.filter(phone="254700000000").first()
+        if owner is None:
             User.objects.create_superuser(
-                phone="254700000000", password="admin12345", name="Dev Admin", operator=operator
+                phone="254700000000",
+                password="admin12345",
+                name="Daniel (Platform Owner)",
+                operator=operator,
+                role=Role.PLATFORM_OWNER,
             )
-            self.stdout.write(
-                self.style.WARNING(
-                    "ISP admin created -> phone: 254700000000  password: admin12345 (DEV ONLY)"
-                )
+        else:
+            # Keep the dev owner in the intended shape (both hats, own WISP)
+            owner.role = Role.PLATFORM_OWNER
+            owner.operator = operator
+            owner.save(update_fields=["role", "operator"])
+        self.stdout.write(
+            self.style.WARNING(
+                "PLATFORM OWNER + ISP owner -> 254700000000 / admin12345 (DEV ONLY)"
             )
-        if not User.objects.filter(phone="254700000001").exists():
-            User.objects.create_superuser(
-                phone="254700000001", password="admin12345", name="Platform Admin", operator=None
+        )
+        if not User.objects.filter(phone="254700000002").exists():
+            User.objects.create_user(
+                phone="254700000002",
+                password="admin12345",
+                name="ISP Manager",
+                operator=operator,
+                role=Role.TENANT_MANAGER,
+                is_staff=True,
             )
-            self.stdout.write(
-                self.style.WARNING(
-                    "PLATFORM admin created -> phone: 254700000001  password: admin12345 (DEV ONLY)"
-                )
+            self.stdout.write("ISP manager -> 254700000002 / admin12345 (no withdrawals)")
+        if not User.objects.filter(phone="254700000003").exists():
+            User.objects.create_user(
+                phone="254700000003",
+                password="admin12345",
+                name="ISP Support",
+                operator=operator,
+                role=Role.TENANT_SUPPORT,
+                is_staff=True,
             )
+            self.stdout.write("ISP support -> 254700000003 / admin12345 (read-only)")
         self.stdout.write(self.style.SUCCESS("Seed complete."))

@@ -57,8 +57,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
-export function listPlans(): Promise<{ results: Plan[] }> {
-  return request('/plans/');
+/**
+ * Plans are tenant-scoped and the API fails closed: without tenant context it
+ * returns nothing rather than every ISP's plans. Context comes from the router
+ * the customer is connected to (the hotspot login page passes ?router=<id>),
+ * or from the ISP's subdomain in production.
+ */
+export function listPlans(routerId?: number | null): Promise<{ results: Plan[] }> {
+  return request(`/plans/${routerId ? `?router=${routerId}` : ''}`);
 }
 
 export function initiateStkPush(params: {

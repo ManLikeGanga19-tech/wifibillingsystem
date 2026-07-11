@@ -4,8 +4,8 @@ from rest_framework.permissions import IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.core.permissions import TenantIsOperational
-from apps.core.tenancy import request_operator
+from apps.core.permissions import RequireTenant, TenantIsOperational
+from apps.core.tenancy import acting_tenant
 from apps.provisioning.models import Session
 
 from .models import Subscriber
@@ -21,39 +21,45 @@ class MeView(APIView):
     def get(self, request):
         user = request.user
         operator = user.operator
+        acting = acting_tenant(request)
+
+        def as_dict(op):
+            if op is None:
+                return None
+            return {
+                "id": op.id,
+                "name": op.name,
+                "slug": op.slug,
+                "status": op.status,
+                "is_platform_owned": op.is_platform_owned,
+            }
+
         return Response(
             {
                 "phone": user.phone,
                 "name": user.name,
                 "is_staff": user.is_staff,
-                "is_platform_admin": user.is_superuser and user.operator_id is None,
-                "operator": (
-                    {
-                        "id": operator.id,
-                        "name": operator.name,
-                        "slug": operator.slug,
-                        "status": operator.status,
-                    }
-                    if operator
-                    else None
-                ),
+                "role": user.role,
+                "is_platform_staff": user.is_platform_staff,
+                "is_read_only": user.is_read_only,
+                "can_manage_money": user.can_manage_money,
+                # Home tenant (the ISP this user belongs to, if any)
+                "operator": as_dict(operator),
+                # Tenant this request is acting for (platform staff can switch)
+                "acting_operator": as_dict(acting),
             }
         )
 
 
 class SubscriberViewSet(viewsets.ReadOnlyModelViewSet):
-    """ISP customers, scoped to the tenant. Subscribers are per-operator by
-    construction, so scoping is a plain operator filter — no cross-tenant joins."""
+    """ISP customers, always scoped to exactly one tenant."""
 
     serializer_class = SubscriberSerializer
-    permission_classes = [IsAdminUser, TenantIsOperational]
+    permission_classes = [IsAdminUser, RequireTenant, TenantIsOperational]
 
     def get_queryset(self):
-        operator = request_operator(self.request)
-        qs = Subscriber.objects.all()
-        if operator is not None:
-            qs = qs.filter(operator=operator)
-        return qs.annotate(
+        operator = acting_tenant(self.request)
+        return Subscriber.objects.filter(operator=operator).annotate(
             last_session_expires=Max("sessions__expires_at"),
             active_sessions=Count(
                 "sessions", filter=Q(sessions__status=Session.Status.ACTIVE)

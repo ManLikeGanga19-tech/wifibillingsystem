@@ -3,7 +3,7 @@ from datetime import timedelta
 import factory
 from django.utils import timezone
 
-from apps.accounts.models import Subscriber, User
+from apps.accounts.models import Role, Subscriber, User
 from apps.core.models import Operator
 from apps.payments.models import Transaction
 from apps.plans.models import Plan
@@ -22,7 +22,7 @@ class OperatorFactory(factory.django.DjangoModelFactory):
 
 
 class UserFactory(factory.django.DjangoModelFactory):
-    """Login accounts: platform admins and ISP staff."""
+    """Login accounts: platform staff and ISP staff."""
 
     class Meta:
         model = User
@@ -30,6 +30,7 @@ class UserFactory(factory.django.DjangoModelFactory):
     operator = factory.SubFactory(OperatorFactory)
     phone = factory.Sequence(lambda n: f"2547{n:08d}")
     name = factory.Faker("name")
+    role = Role.TENANT_OWNER
 
 
 class SubscriberFactory(factory.django.DjangoModelFactory):

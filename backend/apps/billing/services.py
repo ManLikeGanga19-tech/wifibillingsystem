@@ -30,8 +30,8 @@ def credit_sale(tx) -> None:
     platform commission at source. Idempotent per transaction (DB constraint)."""
     operator = tx.operator
     gross = Decimal(tx.amount)
-    # str() first: unsaved instances may carry the field default as a float
-    rate = Decimal(str(operator.hotspot_commission_pct))
+    # effective_* is 0 for the platform's own ISP — Danamo never bills itself
+    rate = operator.effective_commission_pct
     commission = (gross * rate / Decimal("100")).quantize(
         Decimal("0.01"), rounding=ROUND_HALF_UP
     )
@@ -50,7 +50,7 @@ def credit_sale(tx) -> None:
                     entry_type=LedgerEntry.Type.COMMISSION,
                     amount=-commission,
                     transaction=tx,
-                    memo=f"{operator.hotspot_commission_pct}% platform commission",
+                    memo=f"{rate}% platform commission",
                 )
     except IntegrityError:
         return  # replayed callback — already credited
@@ -130,8 +130,15 @@ def charge_monthly_base_fees() -> int:
 
     period = timezone.localdate().strftime("%Y-%m")
     charged = 0
-    operators = list(Operator.objects.filter(status=Operator.Status.ACTIVE, base_fee__gt=0))
+    operators = list(
+        Operator.objects.filter(
+            status=Operator.Status.ACTIVE, base_fee__gt=0, is_platform_owned=False
+        )
+    )
     for operator in operators:
+        fee = operator.effective_base_fee
+        if fee <= 0:
+            continue
         try:
             # Savepoint per charge: a duplicate-month conflict must not poison
             # the surrounding transaction
@@ -139,7 +146,7 @@ def charge_monthly_base_fees() -> int:
                 LedgerEntry.objects.create(
                     operator=operator,
                     entry_type=LedgerEntry.Type.BASE_FEE,
-                    amount=-operator.base_fee,
+                    amount=-fee,
                     period=period,
                     memo=f"Platform subscription {period}",
                 )

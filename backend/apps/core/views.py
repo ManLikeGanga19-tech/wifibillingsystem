@@ -8,6 +8,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.models import Subscriber
+from apps.core.permissions import RequireTenant, TenantIsOperational
+from apps.core.tenancy import acting_tenant
 from apps.notifications.models import Campaign
 from apps.ops.models import Equipment, Lead, Ticket
 from apps.payments.models import Transaction
@@ -17,18 +19,17 @@ from apps.vouchers.models import Voucher
 
 
 def _scoped(qs, operator):
-    return qs.filter(operator=operator) if operator is not None else qs
+    """Always filters. Operator is guaranteed non-None by RequireTenant."""
+    return qs.filter(operator=operator)
 
 
 class NavCountsView(APIView):
-    """Live badge counts for the admin sidebar, scoped to the tenant."""
+    """Live badge counts for the admin sidebar, scoped to the acting tenant."""
 
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAdminUser, RequireTenant, TenantIsOperational]
 
     def get(self, request):
-        from apps.core.tenancy import request_operator
-
-        op = request_operator(request)
+        op = acting_tenant(request)
         return Response(
             {
                 "active_users": _scoped(
@@ -56,12 +57,10 @@ class DashboardStatsView(APIView):
     """KPIs + chart series for the operator dashboard. One round trip, everything
     a WISP owner needs to run the business day-to-day."""
 
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAdminUser, RequireTenant, TenantIsOperational]
 
     def get(self, request):
-        from apps.core.tenancy import request_operator
-
-        op = request_operator(request)
+        op = acting_tenant(request)
         now = timezone.now()
         today = now.replace(hour=0, minute=0, second=0, microsecond=0)
         month_start = today.replace(day=1)

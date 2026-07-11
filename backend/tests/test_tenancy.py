@@ -3,7 +3,7 @@
 import pytest
 from rest_framework.test import APIClient
 
-from apps.accounts.models import User
+from apps.accounts.models import Role, User
 from apps.core.models import Operator
 from apps.core.tenancy import _slug_from_host
 
@@ -147,7 +147,9 @@ class TestSignupAndApproval:
         api_client.post("/api/v1/tenants/signup/", self.SIGNUP, format="json")
         op = Operator.objects.get(slug="mtandao-wireless")
 
-        platform_admin = UserFactory(operator=None, is_staff=True, is_superuser=True)
+        platform_admin = UserFactory(
+            operator=None, is_staff=True, is_superuser=True, role=Role.PLATFORM_OWNER
+        )
         client = APIClient()
         client.force_authenticate(user=platform_admin)
         resp = client.post(f"/api/v1/platform/tenants/{op.id}/approve/")
@@ -230,15 +232,33 @@ class TestIdentitySeparation:
 class TestMe:
     def test_me_returns_tenant_context(self, two_tenants):
         op_a, _ = two_tenants
-        resp = staff_client(op_a).get("/api/v1/me/")
-        data = resp.json()
+        data = staff_client(op_a).get("/api/v1/me/").json()
         assert data["operator"]["slug"] == "wisp-a"
-        assert data["is_platform_admin"] is False
+        assert data["acting_operator"]["slug"] == "wisp-a"
+        assert data["is_platform_staff"] is False
+        assert data["role"] == Role.TENANT_OWNER
 
-    def test_platform_admin_flag(self, db):
-        admin = UserFactory(operator=None, is_staff=True, is_superuser=True)
+    def test_platform_staff_flag(self, db):
+        admin = UserFactory(
+            operator=None, is_staff=True, is_superuser=True, role=Role.PLATFORM_OWNER
+        )
         client = APIClient()
         client.force_authenticate(user=admin)
         data = client.get("/api/v1/me/").json()
-        assert data["is_platform_admin"] is True
+        assert data["is_platform_staff"] is True
+        assert data["can_manage_money"] is True
         assert data["operator"] is None
+        assert data["acting_operator"] is None  # must pick an ISP to see ISP data
+
+    def test_platform_owner_can_also_own_an_isp(self, two_tenants):
+        """Daniel's shape: one login, two hats."""
+        op_a, _ = two_tenants
+        daniel = UserFactory(
+            operator=op_a, is_staff=True, is_superuser=True, role=Role.PLATFORM_OWNER
+        )
+        client = APIClient()
+        client.force_authenticate(user=daniel)
+        data = client.get("/api/v1/me/").json()
+        assert data["is_platform_staff"] is True
+        assert data["operator"]["slug"] == "wisp-a"
+        assert data["acting_operator"]["slug"] == "wisp-a"
