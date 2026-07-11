@@ -26,17 +26,25 @@ class ServicePlanViewSet(TenantModelViewSet):
 
 class TowerViewSet(TenantModelViewSet):
     serializer_class = TowerSerializer
+    queryset = Tower.objects.all()
 
     def get_queryset(self):
-        return Tower.objects.annotate(access_point_count=Count("access_points")).order_by("name")
+        # super() applies the tenant filter (TenantScopedMixin) — never bypass it
+        return super().get_queryset().annotate(
+            access_point_count=Count("access_points")
+        ).order_by("name")
 
 
 class AccessPointViewSet(TenantModelViewSet):
     serializer_class = AccessPointSerializer
+    queryset = AccessPoint.objects.all()
 
     def get_queryset(self):
+        # super() applies the tenant filter (TenantScopedMixin) — never bypass it
         return (
-            AccessPoint.objects.select_related("tower")
+            super()
+            .get_queryset()
+            .select_related("tower")
             .annotate(
                 client_count=Count(
                     "clients", filter=Q(clients__status__in=Client.ACTIVE_STATUSES)

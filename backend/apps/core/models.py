@@ -56,9 +56,13 @@ class Operator(TimeStampedModel):
     payout_bank_account_number = models.CharField(max_length=40, blank=True)
     payout_bank_account_name = models.CharField(max_length=120, blank=True)
 
-    # Platform billing rates (editable per tenant from the platform portal)
+    # Platform billing rates (editable per tenant from the platform portal).
+    # Defaults are the agreed model: KES 500 base + 3% hotspot + KES 50/PPPoE-user.
     base_fee = models.DecimalField(
-        max_digits=10, decimal_places=2, default=0, help_text="Flat KSh/month for the subdomain"
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("500.00"),
+        help_text="Flat KSh/month for the subdomain",
     )
     hotspot_commission_pct = models.DecimalField(
         max_digits=4,
@@ -67,7 +71,10 @@ class Operator(TimeStampedModel):
         help_text="% of hotspot revenue",
     )
     pppoe_user_fee = models.DecimalField(
-        max_digits=10, decimal_places=2, default=0, help_text="KSh per active PPPoE user/month"
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("50.00"),
+        help_text="KSh per active PPPoE user/month",
     )
 
     RESERVED_SLUGS = {

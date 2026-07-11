@@ -210,9 +210,10 @@ class PlatformReconciliationView(APIView):
         from django.db.models import Sum
 
         from apps.billing.models import LedgerEntry, Payout
+        from apps.payments.models import C2BPayment, Transaction
 
-        def total(qs):
-            return qs.aggregate(v=Sum("amount"))["v"] or 0
+        def total(qs, field="amount"):
+            return qs.aggregate(v=Sum(field))["v"] or 0
 
         sales = total(LedgerEntry.objects.filter(entry_type=LedgerEntry.Type.SALE))
         commission = total(LedgerEntry.objects.filter(entry_type=LedgerEntry.Type.COMMISSION))
@@ -222,24 +223,36 @@ class PlatformReconciliationView(APIView):
             )
         )
         payouts_debit = total(LedgerEntry.objects.filter(entry_type=LedgerEntry.Type.PAYOUT))
-        owed_to_isps = total(LedgerEntry.objects.all())  # sum of all wallet balances
+        owed_to_isps = total(LedgerEntry.objects.all())
         paid_out = total(Payout.objects.filter(status=Payout.Status.PAID))
         pending_payouts = total(Payout.objects.filter(status=Payout.Status.REQUESTED))
+
+        # Transaction costs the platform bears (estimated; corrected at monthly
+        # true-up against the M-Pesa/I&M statement)
+        paid_tx = Transaction.objects.filter(status__in=Transaction.SUCCESS_STATUSES)
+        collect_cost = total(paid_tx, "platform_cost") + total(
+            C2BPayment.objects.all(), "platform_cost"
+        )
+        payout_cost = total(Payout.objects.filter(status=Payout.Status.PAID), "platform_cost")
+        tx_costs = collect_cost + payout_cost
+        gross_earnings = -(commission + fees)
 
         return Response(
             {
                 "scope": "all_isps",
-                # Money the platform collected on behalf of ISPs (gross sales)
                 "total_collected": sales,
-                # Platform's own earnings (commission + fees are stored negative)
-                "platform_earnings": -(commission + fees),
-                # Sum of every ISP wallet balance = what Danamo still owes them
+                # Gross platform fees before transaction costs
+                "platform_earnings": gross_earnings,
+                # What the M-Pesa/bank rails take (estimated)
+                "transaction_costs": tx_costs,
+                "collection_costs": collect_cost,
+                "payout_costs": payout_cost,
+                # True take-home after the rails
+                "net_margin": gross_earnings - tx_costs,
                 "owed_to_isps": owed_to_isps,
-                # Withdrawals actually disbursed (ledger debits are negative)
                 "total_disbursed": -payouts_debit,
                 "paid_out_recorded": paid_out,
                 "pending_payouts": pending_payouts,
-                # Float Danamo should be holding for ISPs right now
                 "current_float": owed_to_isps,
             }
         )

@@ -488,6 +488,10 @@ export interface Reconciliation {
   scope: 'all_isps';
   total_collected: string | number;
   platform_earnings: string | number;
+  transaction_costs: string | number;
+  collection_costs: string | number;
+  payout_costs: string | number;
+  net_margin: string | number;
   owed_to_isps: string | number;
   total_disbursed: string | number;
   pending_payouts: string | number;

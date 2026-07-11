@@ -30,6 +30,10 @@ services:
       POSTGRES_USER: wifi
       POSTGRES_PASSWORD: wifi
       POSTGRES_DB: wifi
+    # Exposed for local DB tools (DBeaver). Dev only — never expose in production.
+    # 5434 on the host: 5432 and 5433 are taken by other local Postgres/WSL services.
+    ports:
+      - "5434:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:

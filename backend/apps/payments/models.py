@@ -43,6 +43,9 @@ class Transaction(OperatorOwnedModel):
     raw_callback = models.JSONField(null=True, blank=True)
     callback_received_at = models.DateTimeField(null=True, blank=True)
     reconcile_attempts = models.PositiveSmallIntegerField(default=0)
+    # Estimated M-Pesa collection cost the platform (Danamo) bears. Not charged
+    # to the ISP; used for true-margin reporting.
+    platform_cost = models.DecimalField(max_digits=8, decimal_places=2, default=0)
 
     SUCCESS_STATUSES = (Status.SUCCESS, Status.RECONCILED)
     TERMINAL_STATUSES = (Status.SUCCESS, Status.RECONCILED, Status.FAILED, Status.TIMEOUT)
@@ -82,6 +85,7 @@ class C2BPayment(models.Model):
     )
     status = models.CharField(max_length=10, choices=Status.choices, db_index=True)
     raw_payload = models.JSONField(default=dict, blank=True)
+    platform_cost = models.DecimalField(max_digits=8, decimal_places=2, default=0)
     received_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

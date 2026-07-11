@@ -86,9 +86,12 @@ def process_stk_callback(payload: dict) -> Transaction | None:
         tx.result_desc = str(stk.get("ResultDesc", ""))[:255]
 
         if tx.result_code == 0:
+            from apps.billing.tariffs import collection_cost
+
             meta = _parse_callback_metadata(stk)
             tx.mpesa_receipt = str(meta.get("MpesaReceiptNumber", ""))[:30]
             tx.status = Transaction.Status.SUCCESS
+            tx.platform_cost = collection_cost(tx.amount)
         else:
             # 1032 = cancelled by user, 1037 = timeout, etc.
             tx.status = (

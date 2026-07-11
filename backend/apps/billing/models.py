@@ -93,6 +93,8 @@ class Payout(OperatorOwnedModel):
     # Reference of the actual transfer (M-Pesa code, or bank/Pesalink ref)
     mpesa_reference = models.CharField(max_length=40, blank=True)
     note = models.CharField(max_length=200, blank=True)
+    # Estimated payout cost the platform bears (M-Pesa B2C band / bank transfer).
+    platform_cost = models.DecimalField(max_digits=8, decimal_places=2, default=0)
 
     class Meta:
         ordering = ["-created_at"]

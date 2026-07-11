@@ -134,12 +134,18 @@ def request_payout(*, operator, amount: Decimal, user, method="mpesa", destinati
         fields["phone"] = destination["phone"]
         dest_label = fields["phone"]
 
+    from .tariffs import payout_cost
+
     with db_transaction.atomic():
         op_locked = type(operator).objects.select_for_update().get(pk=operator.pk)
         if amount > wallet_balance(op_locked):
             raise WalletError("Withdrawal exceeds your wallet balance.")
         payout = Payout.objects.create(
-            operator=op_locked, amount=amount, requested_by=user, **fields
+            operator=op_locked,
+            amount=amount,
+            requested_by=user,
+            platform_cost=payout_cost(amount, method),
+            **fields,
         )
         LedgerEntry.objects.create(
             operator=op_locked,

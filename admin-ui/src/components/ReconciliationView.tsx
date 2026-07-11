@@ -50,8 +50,15 @@ export default function ReconciliationView() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <Big label="Current Float (owed to ISPs)" value={fmtKsh(data.current_float)} accent
           hint="What Danamo is holding on behalf of ISPs right now — should match your bank/M-Pesa balance minus your own earnings." />
-        <Big label="Platform Earnings (all time)" value={fmtKsh(data.platform_earnings)}
-          hint="Your commissions + platform/PPPoE fees." />
+        <Big label="Net Margin (after rails)" value={fmtKsh(data.net_margin)} accent
+          hint="True take-home: gross platform fees minus the estimated M-Pesa/bank transaction costs the platform absorbs." />
+      </div>
+
+      {/* True-margin waterfall: gross fees → what the rails take → net */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <Tile label="Gross Platform Earnings" value={fmtKsh(data.platform_earnings)} />
+        <Tile label="− Transaction Costs" value={fmtKsh(data.transaction_costs)} sub={`collect ${fmtKsh(data.collection_costs)} · payout ${fmtKsh(data.payout_costs)}`} negative />
+        <Tile label="= Net Margin" value={fmtKsh(data.net_margin)} accent />
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -62,8 +69,9 @@ export default function ReconciliationView() {
       </div>
 
       <p className="text-[11px] font-mono text-[#141414]/50 leading-relaxed">
-        Identity: <b>collected − platform earnings − disbursed = float owed to ISPs</b>. When you
-        automate payouts (I&M), disbursed rises and float falls as ISPs are paid.
+        Identity: <b>collected − platform earnings − disbursed = float owed to ISPs</b>. Transaction
+        costs are <b>estimated</b> from the tariff table and trued-up monthly against the M-Pesa/I&M
+        statement. When you automate payouts (I&M), disbursed rises and float falls as ISPs are paid.
       </p>
     </div>
   );
@@ -79,11 +87,12 @@ function Big({ label, value, hint, accent }: { label: string; value: string; hin
   );
 }
 
-function Tile({ label, value }: { label: string; value: string }) {
+function Tile({ label, value, sub, accent, negative }: { label: string; value: string; sub?: string; accent?: boolean; negative?: boolean }) {
   return (
     <div className="bg-white border border-[#141414] p-3.5">
       <p className="text-[11px] font-mono uppercase text-[#141414]/60">{label}</p>
-      <p className="text-lg font-black font-mono mt-1">{value}</p>
+      <p className={`text-lg font-black font-mono mt-1 ${accent ? 'text-[#228B22]' : negative ? 'text-[#B22222]' : ''}`}>{value}</p>
+      {sub && <p className="text-[10px] font-mono text-[#141414]/45 mt-1">{sub}</p>}
     </div>
   );
 }

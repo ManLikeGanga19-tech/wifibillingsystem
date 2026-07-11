@@ -38,6 +38,8 @@ def process_c2b_confirmation(payload: dict) -> C2BPayment | None:
     amount = Decimal(str(payload.get("TransAmount", "0") or "0"))
     client = find_client(bill_ref)
 
+    from apps.billing.tariffs import collection_cost
+
     try:
         with db_transaction.atomic():
             payment = C2BPayment.objects.create(
@@ -50,6 +52,7 @@ def process_c2b_confirmation(payload: dict) -> C2BPayment | None:
                 client=client,
                 status=C2BPayment.Status.MATCHED if client else C2BPayment.Status.UNMATCHED,
                 raw_payload=payload,
+                platform_cost=collection_cost(amount),
             )
     except IntegrityError:
         # concurrent duplicate confirmation
