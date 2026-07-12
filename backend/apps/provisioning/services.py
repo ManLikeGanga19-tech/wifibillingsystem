@@ -159,8 +159,17 @@ def activate(session: Session) -> None:
     result = get_adapter(session.router).activate_user(session)
     session.status = Session.Status.ACTIVE
     session.provision_error = ""
-    session.expiry_warned_at = None  # a fresh/renewed window hasn't been warned yet
-    session.save(update_fields=["status", "provision_error", "expiry_warned_at", "updated_at"])
+    # A fresh/renewed window hasn't been warned yet — reset both nudges and the usage
+    # counter so a renewal starts clean.
+    session.expiry_warned_at = None
+    session.data_warned_at = None
+    session.data_used_mb = 0
+    session.save(
+        update_fields=[
+            "status", "provision_error", "expiry_warned_at",
+            "data_warned_at", "data_used_mb", "updated_at",
+        ]
+    )
     audit(
         "session_activated",
         operator=session.operator,

@@ -36,3 +36,10 @@ class Plan(OperatorOwnedModel):
     @property
     def duration_seconds(self) -> int:
         return int(self.duration.total_seconds())
+
+    @property
+    def rate_limit(self) -> str:
+        """MikroTik rate-limit string for the hotspot user: rx/tx = upload/download,
+        same convention as PPPoE (ServicePlan.rate_limit). Set on the user directly so
+        speed is enforced per session, not left to a hand-made profile on the router."""
+        return f"{self.upload_kbps}k/{self.download_kbps}k"

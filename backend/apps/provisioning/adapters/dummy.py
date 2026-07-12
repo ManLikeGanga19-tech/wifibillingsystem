@@ -5,6 +5,8 @@ from .base import ActiveSession, DeviceInfo, ProvisioningAdapter, ProvisionResul
 
 class DummyAdapter(ProvisioningAdapter):
     calls: list[tuple] = []  # class-level, shared across instances (reset in tests)
+    #: Tests set this to drive usage sync: {username: (bytes_in, bytes_out)}.
+    usage: dict[str, tuple[int, int]] = {}
 
     def activate_user(self, session) -> ProvisionResult:
         DummyAdapter.calls.append(("activate", session.hotspot_username))
@@ -15,7 +17,10 @@ class DummyAdapter(ProvisioningAdapter):
         return ProvisionResult(ok=True, message="dummy suspended")
 
     def get_active_sessions(self) -> list[ActiveSession]:
-        return []
+        return [
+            ActiveSession(username=user, bytes_in=bi, bytes_out=bo)
+            for user, (bi, bo) in DummyAdapter.usage.items()
+        ]
 
     def test_connection(self) -> bool:
         return True

@@ -153,6 +153,8 @@ class Session(OperatorOwnedModel):
     # When we sent the "expiring soon" SMS, so the beat task warns each session exactly
     # once instead of every time it runs.
     expiry_warned_at = models.DateTimeField(null=True, blank=True)
+    # Same, for the "you're nearly out of data" SMS on a capped plan.
+    data_warned_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-created_at"]

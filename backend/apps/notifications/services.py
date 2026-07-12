@@ -74,6 +74,23 @@ def notify_online(session):
     )
 
 
+def notify_data_low(session):
+    """"You're nearly out of data." Only fires on a capped plan, once, near the limit —
+    the same renewal nudge as expiry, for the customers whose plan runs out by bytes
+    rather than by clock."""
+    phone = _session_phone(session)
+    if not phone:
+        return
+    isp = session.operator.name
+    send_sms(
+        session.operator,
+        phone,
+        f"You've nearly used up the data on your {isp} {session.plan.name}. "
+        "Reconnect and pay to keep browsing.",
+        category=Message.Category.EXPIRY,
+    )
+
+
 def notify_expiring(session):
     """"Your time is almost up." The renewal nudge — the whole reason a hotspot keeps
     earning instead of silently dropping people offline."""

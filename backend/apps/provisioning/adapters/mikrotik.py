@@ -61,6 +61,9 @@ class MikroTikRestAdapter(ProvisioningAdapter):
             "password": session.hotspot_password,
             "profile": plan.mikrotik_profile,
             "limit-uptime": _ros_duration(plan.duration_seconds),
+            # Enforce the plan's speed on the USER, so bandwidth is capped even if the
+            # named profile on the router is misconfigured or missing. Belt and braces.
+            "rate-limit": plan.rate_limit,
             "comment": f"wifi.os session #{session.pk}",
         }
         if plan.data_cap_mb:
@@ -105,6 +108,8 @@ class MikroTikRestAdapter(ProvisioningAdapter):
                         mac_address=a.get("mac-address", ""),
                         ip_address=a.get("address", ""),
                         uptime=a.get("uptime", ""),
+                        bytes_in=_to_int(a.get("bytes-in")),
+                        bytes_out=_to_int(a.get("bytes-out")),
                     )
                     for a in resp.json()
                 ]

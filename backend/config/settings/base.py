@@ -199,6 +199,12 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.provisioning.tasks.warn_expiring_sessions",
         "schedule": 60.0,
     },
+    # Sync live data usage off the routers (for cap warnings + reporting). The router
+    # enforces the cap itself; this is so we know about it too.
+    "sync-hotspot-usage": {
+        "task": "apps.provisioning.tasks.sync_hotspot_usage",
+        "schedule": 120.0,
+    },
     # Reconnect paid customers whose provisioning failed while a router was briefly
     # down. Runs often, because a hotspot customer paid seconds ago and is waiting.
     "retry-failed-provisions": {

@@ -28,6 +28,10 @@ class ActiveSession:
     mac_address: str = ""
     ip_address: str = ""
     uptime: str = ""
+    # Bytes the router has counted for this live session, so we can sync usage back
+    # for data-cap warnings and reporting. 0 when the router doesn't report them.
+    bytes_in: int = 0
+    bytes_out: int = 0
 
 
 @dataclass

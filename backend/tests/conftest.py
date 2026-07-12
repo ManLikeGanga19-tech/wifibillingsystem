@@ -10,6 +10,7 @@ from .factories import OperatorFactory, RouterFactory, UserFactory
 @pytest.fixture(autouse=True)
 def _reset_dummies():
     DummyAdapter.calls = []
+    DummyAdapter.usage = {}
     DummyProvider.sent = []
     yield
 

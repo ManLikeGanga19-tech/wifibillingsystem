@@ -170,6 +170,56 @@ def warn_expiring_sessions():
             notify_expiring(session)
 
 
+#: Warn a capped customer once they've used this fraction of their data.
+DATA_WARN_FRACTION = 0.9
+
+
+@shared_task
+def sync_hotspot_usage():
+    """Pull live byte counters off each router into our sessions.
+
+    The router already ENFORCES the data cap (limit-bytes-total cuts them off). This
+    is so WE know the usage too — to warn a customer before they run dry, and to report
+    on real consumption. Best-effort per router: one unreachable box must not stop the
+    others."""
+    from apps.notifications.services import notify_data_low
+
+    from .adapters import get_adapter
+    from .models import Router, Session
+
+    router_ids = (
+        Session.objects.filter(status=Session.Status.ACTIVE)
+        .values_list("router_id", flat=True)
+        .distinct()
+    )
+    for router in Router.objects.filter(id__in=list(router_ids), is_active=True):
+        try:
+            actives = {a.username: a for a in get_adapter(router).get_active_sessions()}
+        except Exception:
+            logger.warning("usage sync: %s unreachable", router.name)
+            continue
+
+        sessions = Session.objects.filter(
+            router=router, status=Session.Status.ACTIVE
+        ).select_related("plan", "operator", "subscriber")
+        for session in sessions:
+            live = actives.get(session.hotspot_username)
+            if live is None:
+                continue
+            used_mb = (live.bytes_in + live.bytes_out) // (1024 * 1024)
+            if used_mb != session.data_used_mb:
+                session.data_used_mb = used_mb
+                session.save(update_fields=["data_used_mb", "updated_at"])
+
+            cap = session.plan.data_cap_mb
+            if cap and session.data_warned_at is None and used_mb >= cap * DATA_WARN_FRACTION:
+                claimed = Session.objects.filter(
+                    pk=session.pk, data_warned_at__isnull=True
+                ).update(data_warned_at=timezone.now())
+                if claimed:
+                    notify_data_low(session)
+
+
 @shared_task
 def expire_sessions():
     """Beat task (every minute): cut off sessions past expires_at. The status flip
