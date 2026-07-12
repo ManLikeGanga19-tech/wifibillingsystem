@@ -95,6 +95,26 @@ export interface Pnl {
   tenants: PnlRow[];
 }
 
+export interface UnmatchedSuggestion {
+  client_id: number;
+  account_number: string;
+  full_name: string;
+  operator: string;
+  confidence: number;
+  reason: string;
+}
+
+export interface UnmatchedPayment {
+  id: number;
+  trans_id: string;
+  typed_account: string;
+  amount: Money;
+  paid_from: string;
+  payer_name: string;
+  received_at: string;
+  suggestions: UnmatchedSuggestion[];
+}
+
 export interface Tenant {
   id: number;
   name: string;
@@ -255,6 +275,15 @@ export const api = {
     get<{ days: number; series: SeriesPoint[] }>(`/platform/timeseries/?days=${days}`),
   pnl: () => get<Pnl>('/platform/tenant-pnl/'),
   search: (q: string) => get<SearchResults>(`/platform/search/?q=${encodeURIComponent(q)}`),
+
+  /** The unmatched-payments queue: money that landed on a mistyped account number. */
+  unmatched: {
+    list: () => get<{ count: number; results: UnmatchedPayment[] }>('/payments/platform/unmatched/'),
+    resolve: (id: number, clientId: number) =>
+      post<{ detail: string; status: string }>(`/payments/platform/unmatched/${id}/resolve/`, {
+        client_id: clientId,
+      }),
+  },
 
   tenants: {
     list: () => get<Page<Tenant>>('/platform/tenants/'),

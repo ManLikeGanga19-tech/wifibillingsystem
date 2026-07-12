@@ -6,10 +6,12 @@ from .views import (
     C2BValidationView,
     DarajaCallbackView,
     DeviceStatusView,
+    ResolveUnmatchedView,
     RetryProvisionView,
     STKPushView,
     TransactionStatusView,
     TransactionViewSet,
+    UnmatchedPaymentsView,
 )
 
 router = SimpleRouter()
@@ -27,5 +29,13 @@ urlpatterns = [
     path("callback/<str:token>/", DarajaCallbackView.as_view(), name="daraja-callback"),
     path("c2b/confirmation/<str:token>/", C2BConfirmationView.as_view(), name="c2b-confirmation"),
     path("c2b/validation/<str:token>/", C2BValidationView.as_view(), name="c2b-validation"),
+    # The unmatched-payments queue (platform staff): money that landed on a mistyped
+    # account number, and the tool to reunite it with its client.
+    path("platform/unmatched/", UnmatchedPaymentsView.as_view(), name="unmatched-payments"),
+    path(
+        "platform/unmatched/<int:pk>/resolve/",
+        ResolveUnmatchedView.as_view(),
+        name="resolve-unmatched",
+    ),
     *router.urls,
 ]

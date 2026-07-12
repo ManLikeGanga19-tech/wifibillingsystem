@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { Scale, TrendingDown, TrendingUp, Wallet } from 'lucide-react';
+import { Link2, Scale, TrendingDown, TrendingUp, Wallet } from 'lucide-react';
 import { api, ksh, num, type PnlRow } from '../api/client';
 import PayoutsPanel from './PayoutsPanel';
+import UnmatchedPanel from './UnmatchedPanel';
 import {
   Badge,
   Btn,
@@ -26,7 +27,7 @@ import { SERIES } from '../components/charts';
  * back against it. This is the only place that subtracts them per tenant.
  */
 export default function FinanceView({ onOpenTenant }: { onOpenTenant: (id: number) => void }) {
-  const [tab, setTab] = useState<'pnl' | 'payouts'>('pnl');
+  const [tab, setTab] = useState<'pnl' | 'payouts' | 'unmatched'>('pnl');
   return (
     <div className="space-y-5">
       <div className="flex items-center gap-1.5">
@@ -36,8 +37,13 @@ export default function FinanceView({ onOpenTenant }: { onOpenTenant: (id: numbe
         <Btn variant={tab === 'payouts' ? 'dark' : 'outline'} onClick={() => setTab('payouts')}>
           <Wallet className="h-3.5 w-3.5" /> Payouts
         </Btn>
+        <Btn variant={tab === 'unmatched' ? 'dark' : 'outline'} onClick={() => setTab('unmatched')}>
+          <Link2 className="h-3.5 w-3.5" /> Unmatched
+        </Btn>
       </div>
-      {tab === 'pnl' ? <Pnl onOpenTenant={onOpenTenant} /> : <PayoutsPanel />}
+      {tab === 'pnl' && <Pnl onOpenTenant={onOpenTenant} />}
+      {tab === 'payouts' && <PayoutsPanel />}
+      {tab === 'unmatched' && <UnmatchedPanel />}
     </div>
   );
 }

@@ -13,7 +13,9 @@ from rest_framework.decorators import action
 from rest_framework.generics import RetrieveAPIView
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
+from rest_framework.views import APIView
 
+from apps.core.permissions import IsPlatformOwner, IsPlatformStaff
 from apps.core.public import PublicAPIView, PublicEndpointMixin
 from apps.core.schema import OBJECT_RESPONSE
 from apps.core.viewsets import TenantReadOnlyViewSet
@@ -235,6 +237,88 @@ class C2BValidationView(View):
             return JsonResponse({"ResultCode": "0", "ResultDesc": "Accepted"})
         # C2B00012 = invalid account number
         return JsonResponse({"ResultCode": "C2B00012", "ResultDesc": "Invalid account number"})
+
+
+class UnmatchedPaymentsView(APIView):
+    """The unmatched-payments queue: money that landed with a mistyped account number,
+    belonging to nobody until a human reunites it with its client.
+
+    Platform-only, because an unmatched payment has NO operator yet — we don't know
+    whose it is, which is the whole problem. Support works the queue with the
+    suggestion engine narrowing each one to a likely client or two.
+    """
+
+    permission_classes = [IsPlatformStaff]
+
+    @extend_schema(responses=OBJECT_RESPONSE, summary="List unmatched C2B payments")
+    def get(self, request):
+        from .c2b import suggest_clients_for
+        from .models import C2BPayment
+
+        rows = []
+        for p in C2BPayment.objects.filter(status=C2BPayment.Status.UNMATCHED).order_by(
+            "-received_at"
+        )[:200]:
+            suggestions = [
+                {
+                    "client_id": c.id,
+                    "account_number": c.account_number,
+                    "full_name": c.full_name,
+                    "operator": c.operator.name,
+                    "confidence": round(score, 2),
+                    "reason": reason,
+                }
+                for c, score, reason in suggest_clients_for(p)
+            ]
+            rows.append(
+                {
+                    "id": p.id,
+                    "trans_id": p.trans_id,
+                    "typed_account": p.bill_ref,
+                    "amount": p.amount,
+                    "paid_from": p.msisdn,
+                    "payer_name": p.first_name,
+                    "received_at": p.received_at,
+                    "suggestions": suggestions,
+                }
+            )
+        return Response({"count": len(rows), "results": rows})
+
+
+class ResolveUnmatchedView(APIView):
+    """Reunite one unmatched payment with its client — crediting them, restoring
+    service, and recording who fixed it and what the customer had mistyped."""
+
+    permission_classes = [IsPlatformOwner]
+
+    @extend_schema(request=None, responses=OBJECT_RESPONSE,
+                   summary="Assign an unmatched payment to a client")
+    def post(self, request, pk):
+        from apps.pppoe.models import Client
+
+        from .c2b import resolve_unmatched_payment
+        from .models import C2BPayment
+
+        payment = C2BPayment.objects.filter(pk=pk).first()
+        if payment is None:
+            return Response({"detail": "No such payment."}, status=status.HTTP_404_NOT_FOUND)
+        client = Client.objects.filter(pk=request.data.get("client_id")).first()
+        if client is None:
+            return Response({"detail": "No such client."}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            resolved = resolve_unmatched_payment(payment, client, actor=request.user)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+        return Response(
+            {
+                "detail": (
+                    f"KSh {resolved.amount} applied to {client.account_number} "
+                    f"({client.full_name})."
+                    + (" Held until the ISP goes live." if resolved.status == "held" else "")
+                ),
+                "status": resolved.status,
+            }
+        )
 
 
 class TransactionViewSet(TenantReadOnlyViewSet):
