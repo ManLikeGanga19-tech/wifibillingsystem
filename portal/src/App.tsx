@@ -7,12 +7,13 @@ import {
   listPlans,
   redeemVoucher,
   retryProvision,
+  getDeviceStatus,
   type PaymentStatus,
   type Plan,
   type SessionInfo,
 } from './api/client';
 import { getCaptiveParams, readPending, submitRouterLogin, writePending } from './captive';
-import { formatDuration, formatExpiry, formatKsh, formatSpeed, isValidKenyanPhone } from './format';
+import { formatCountdown, formatDuration, formatExpiry, formatKsh, formatSpeed, isValidKenyanPhone } from './format';
 
 const POLL_INTERVAL_MS = 3000;
 const POLL_TIMEOUT_MS = 120_000;
@@ -37,6 +38,14 @@ export default function App() {
   const [plans, setPlans] = useState<Plan[] | null>(null);
   const [loadError, setLoadError] = useState('');
   const [tab, setTab] = useState<'mpesa' | 'voucher'>('mpesa');
+  // The renewal prompt: set when the customer's previous session has ended (their tab
+  // timed out to zero, or the router redirected them back here after cutting them off).
+  // It turns the cold plan list into "your <plan> ended — tap to get back online".
+  const [renew, setRenew] = useState<{ planName: string } | null>(null);
+  // The phone they last paid with, kept in memory only (no storage) so a renewal in the
+  // same tab is one tap. Not recovered across a fresh page load — a MAC-keyed lookup
+  // returning phone numbers would be a PII leak on an open hotspot.
+  const [lastPhone, setLastPhone] = useState('');
   const [stage, setStage] = useState<Stage>(() => {
     // Resume polling if the customer refreshed mid-payment. The in-flight payment
     // lives in the URL, not in storage — so a refresh (or a deploy) can never
@@ -57,6 +66,21 @@ export default function App() {
   }, [captive.routerId]);
 
   useEffect(loadPlans, [loadPlans]);
+
+  // On load, greet a RETURNING device. If the router redirected them back here after
+  // their session ended, show a renewal prompt instead of a cold plan list. Only when
+  // we're browsing (not mid-payment), and only if they aren't already online.
+  useEffect(() => {
+    if (!captive.mac || stage.kind !== 'browse') return;
+    getDeviceStatus(captive.mac, captive.routerId)
+      .then((d) => {
+        if (d.found && d.expired && d.plan_name) setRenew({ planName: d.plan_name });
+      })
+      .catch(() => {
+        /* no prompt is fine — they still see the plan list */
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ---- payment polling ----------------------------------------------------
   const pollRef = useRef<number | undefined>(undefined);
@@ -110,6 +134,8 @@ export default function App() {
   }, [stage]);
 
   const startPayment = async (plan: Plan, phone: string) => {
+    setLastPhone(phone); // so an in-tab renewal is one tap
+    setRenew(null);
     const resp = await initiateStkPush({
       phone,
       plan_id: plan.id,
@@ -119,6 +145,15 @@ export default function App() {
     const pending = { txId: resp.transaction_id, planName: plan.name, startedAt: Date.now() };
     writePending(pending);
     setStage({ kind: 'waiting', ...pending });
+  };
+
+  // Their time is up. Send them back to the plans to renew — this is the "redirect to
+  // the payment screen instead of just disconnecting" the customer expects.
+  const onExpired = (planName: string) => {
+    writePending(null);
+    setRenew({ planName });
+    setTab('mpesa');
+    setStage({ kind: 'browse' });
   };
 
   const connectDevice = (session: SessionInfo) => {
@@ -169,6 +204,7 @@ export default function App() {
               <PlanList
                 plans={plans}
                 loadError={loadError}
+                renew={renew}
                 onRetry={loadPlans}
                 onSelect={(plan) => setStage({ kind: 'phone', plan })}
               />
@@ -184,7 +220,12 @@ export default function App() {
         )}
 
         {stage.kind === 'phone' && (
-          <PhoneEntry plan={stage.plan} onBack={() => setStage({ kind: 'browse' })} onSubmit={startPayment} />
+          <PhoneEntry
+            plan={stage.plan}
+            defaultPhone={lastPhone}
+            onBack={() => setStage({ kind: 'browse' })}
+            onSubmit={startPayment}
+          />
         )}
 
         {stage.kind === 'waiting' && (
@@ -205,7 +246,12 @@ export default function App() {
         )}
 
         {stage.kind === 'paid' && (
-          <SuccessCard status={stage.status} hasRouterLogin={!!captive.loginUrl} onConnect={connectDevice} />
+          <SuccessCard
+            status={stage.status}
+            hasRouterLogin={!!captive.loginUrl}
+            onConnect={connectDevice}
+            onExpired={onExpired}
+          />
         )}
 
         {stage.kind === 'paid-not-connected' && (
@@ -309,11 +355,13 @@ function TabButton({
 function PlanList({
   plans,
   loadError,
+  renew,
   onRetry,
   onSelect,
 }: {
   plans: Plan[] | null;
   loadError: string;
+  renew: { planName: string } | null;
   onRetry: () => void;
   onSelect: (plan: Plan) => void;
 }) {
@@ -334,6 +382,16 @@ function PlanList({
     );
   return (
     <div className="space-y-3">
+      {renew && (
+        <div className="border border-[#B26B00] bg-[#FFF8EC] p-3.5 flex items-start gap-2.5">
+          <RefreshCw className="h-4 w-4 text-[#B26B00] shrink-0 mt-0.5" />
+          <p className="text-sm leading-relaxed">
+            <b>Your {renew.planName} has ended.</b>
+            <br />
+            <span className="text-[#141414]/70">Pick a plan below to get back online.</span>
+          </p>
+        </div>
+      )}
       {plans.map((plan) => (
         <button
           key={plan.id}
@@ -364,14 +422,16 @@ function PlanList({
 
 function PhoneEntry({
   plan,
+  defaultPhone,
   onBack,
   onSubmit,
 }: {
   plan: Plan;
+  defaultPhone?: string;
   onBack: () => void;
   onSubmit: (plan: Plan, phone: string) => Promise<void>;
 }) {
-  const [phone, setPhone] = useState('');
+  const [phone, setPhone] = useState(defaultPhone ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const valid = isValidKenyanPhone(phone);
@@ -431,10 +491,12 @@ function SuccessCard({
   status,
   hasRouterLogin,
   onConnect,
+  onExpired,
 }: {
   status: PaymentStatus;
   hasRouterLogin: boolean;
   onConnect: (session: SessionInfo) => void;
+  onExpired: (planName: string) => void;
 }) {
   const session = status.session!;
   // Auto-connect the device shortly after success when the router gave us a login URL
@@ -443,6 +505,22 @@ function SuccessCard({
     const t = window.setTimeout(() => onConnect(session), 2500);
     return () => window.clearTimeout(t);
   }, [hasRouterLogin, onConnect, session]);
+
+  // Live countdown. When the paid time runs out AND the customer still has this tab
+  // open, we send them straight back to the plans to renew — instead of them silently
+  // dropping offline with no idea why or what to do.
+  const [left, setLeft] = useState(() => formatCountdown(session.expires_at));
+  useEffect(() => {
+    const t = window.setInterval(() => {
+      const c = formatCountdown(session.expires_at);
+      setLeft(c);
+      if (!c) {
+        window.clearInterval(t);
+        onExpired(status.plan_name || 'session');
+      }
+    }, 1000);
+    return () => window.clearInterval(t);
+  }, [session.expires_at, status.plan_name, onExpired]);
 
   return (
     <Card>
@@ -454,6 +532,12 @@ function SuccessCard({
           <br />
           Access active until <b>{formatExpiry(session.expires_at)}</b>
         </p>
+        {left && (
+          <div className="w-full border border-[#228B22]/40 bg-[#228B22]/5 py-2">
+            <p className="text-[11px] uppercase tracking-wide text-[#141414]/50">Time remaining</p>
+            <p className="font-mono font-black text-2xl text-[#228B22] tabular-nums">{left}</p>
+          </div>
+        )}
         <CredentialBox session={session} />
         {hasRouterLogin ? (
           <>

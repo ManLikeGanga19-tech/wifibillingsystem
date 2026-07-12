@@ -41,6 +41,19 @@ export function formatExpiry(iso: string): string {
   });
 }
 
+/** Time left until `iso`, as H:MM:SS or M:SS. Empty string once it's in the past —
+ *  the caller treats that as "expired, offer a renewal". */
+export function formatCountdown(iso: string, now: number = Date.now()): string {
+  let secs = Math.floor((new Date(iso).getTime() - now) / 1000);
+  if (secs <= 0) return '';
+  const h = Math.floor(secs / 3600);
+  secs -= h * 3600;
+  const m = Math.floor(secs / 60);
+  const s = secs - m * 60;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+}
+
 /** Client-side Kenyan phone sanity check (server re-validates authoritatively). */
 export function isValidKenyanPhone(raw: string): boolean {
   const digits = raw.replace(/\D/g, '');

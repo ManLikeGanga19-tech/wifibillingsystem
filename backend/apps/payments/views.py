@@ -3,6 +3,7 @@ import logging
 
 from django.conf import settings
 from django.http import Http404, JsonResponse
+from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
@@ -77,6 +78,58 @@ class TransactionStatusView(PublicEndpointMixin, RetrieveAPIView):
     serializer_class = TransactionStatusSerializer
     queryset = Transaction.objects.select_related("plan")
     lookup_field = "public_id"
+
+
+@extend_schema(responses=OBJECT_RESPONSE,
+               summary="This device's latest session — so an expired customer can renew")
+class DeviceStatusView(PublicAPIView):
+    """"What's the state of the device in front of this router?"
+
+    The portal calls this on load. If the device's last session has EXPIRED, the portal
+    greets a returning customer with "your <plan> ended — renew" and pre-selects it,
+    instead of dumping them on a cold plan list. That is the auto-renew prompt.
+
+    Deliberately returns NO phone number. It is keyed by MAC, and a MAC is trivially
+    spoofable on an open hotspot — returning the phone would turn this into a way to
+    harvest customers' numbers. Plan and expiry are not sensitive; the customer
+    re-enters their own number, which they know.
+    """
+
+    def get(self, request):
+        from apps.provisioning.models import Router, Session
+
+        mac = (request.query_params.get("mac") or "").strip()
+        operator = getattr(request, "tenant", None)
+        if operator is None:
+            router_id = request.query_params.get("router", "")
+            if router_id.isdigit():
+                router = Router.objects.filter(pk=int(router_id), is_active=True).first()
+                operator = router.operator if router else None
+        if operator is None or not mac:
+            return Response({"found": False})
+
+        session = (
+            Session.objects.filter(operator=operator, mac_address__iexact=mac)
+            .select_related("plan")
+            .order_by("-created_at")
+            .first()
+        )
+        if session is None:
+            return Response({"found": False})
+
+        now = timezone.now()
+        active = session.status == Session.Status.ACTIVE and session.expires_at > now
+        return Response(
+            {
+                "found": True,
+                # `expired` drives the renewal prompt: they had a session, and it's done.
+                "expired": not active,
+                "active": active,
+                "plan_id": session.plan_id,
+                "plan_name": session.plan.name,
+                "expires_at": session.expires_at.isoformat(),
+            }
+        )
 
 
 @extend_schema(request=None, responses=OBJECT_RESPONSE,

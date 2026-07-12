@@ -5,6 +5,7 @@ from .views import (
     C2BConfirmationView,
     C2BValidationView,
     DarajaCallbackView,
+    DeviceStatusView,
     RetryProvisionView,
     STKPushView,
     TransactionStatusView,
@@ -16,6 +17,7 @@ router.register("transactions", TransactionViewSet, basename="transaction")
 
 urlpatterns = [
     path("stk-push/", STKPushView.as_view(), name="stk-push"),
+    path("device-status/", DeviceStatusView.as_view(), name="device-status"),
     path("status/<uuid:public_id>/", TransactionStatusView.as_view(), name="payment-status"),
     path(
         "status/<uuid:public_id>/retry/",

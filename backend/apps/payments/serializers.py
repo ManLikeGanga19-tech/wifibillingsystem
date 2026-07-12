@@ -59,6 +59,7 @@ class STKPushRequestSerializer(serializers.Serializer):
 class TransactionStatusSerializer(serializers.ModelSerializer):
     session_active = serializers.SerializerMethodField()
     session = serializers.SerializerMethodField()
+    plan_name = serializers.CharField(source="plan.name", read_only=True)
     #: THE FIELD THAT ENDS THE INFINITE SPINNER. The portal used to poll only
     #: session_active and had no way to tell "still connecting" from "failed forever",
     #: so a paid customer whose provisioning failed span until they gave up. This says
@@ -74,6 +75,7 @@ class TransactionStatusSerializer(serializers.ModelSerializer):
             "amount",
             "mpesa_receipt",
             "result_desc",
+            "plan_name",
             "session_active",
             "session",
             "provisioning",

@@ -25,6 +25,7 @@ export interface PaymentStatus {
   amount: string;
   mpesa_receipt: string;
   result_desc: string;
+  plan_name: string;
   session_active: boolean;
   session: SessionInfo | null;
   /** The state that lets the portal stop spinning. `pending` before payment,
@@ -92,6 +93,23 @@ export function getPaymentStatus(transactionId: string): Promise<PaymentStatus> 
  *  re-drives provisioning after a failure. */
 export function retryProvision(transactionId: string): Promise<{ detail: string }> {
   return request(`/payments/status/${transactionId}/retry/`, { method: 'POST' });
+}
+
+export interface DeviceStatus {
+  found: boolean;
+  expired?: boolean;
+  active?: boolean;
+  plan_id?: number;
+  plan_name?: string;
+  expires_at?: string;
+}
+
+/** The device's latest session, so a returning/expired customer lands on renewal
+ *  instead of a cold plan list. Returns no phone (MAC is spoofable — see the view). */
+export function getDeviceStatus(mac: string, routerId?: number | null): Promise<DeviceStatus> {
+  const q = new URLSearchParams({ mac });
+  if (routerId) q.set('router', String(routerId));
+  return request(`/payments/device-status/?${q}`);
 }
 
 export function redeemVoucher(params: {
