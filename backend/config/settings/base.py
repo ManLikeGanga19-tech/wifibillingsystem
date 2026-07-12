@@ -199,9 +199,12 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.provisioning.tasks.retry_failed_provisions",
         "schedule": 60.0,
     },
+    # Every 20s, not every 5 min: this is the safety net that connects a paid customer
+    # when the M-Pesa callback is lost, and it has to fire while they are still waiting
+    # at the hotspot — not minutes later once the portal has timed out.
     "reconcile-pending-transactions": {
         "task": "apps.payments.tasks.reconcile_pending_transactions",
-        "schedule": 300.0,
+        "schedule": 20.0,
     },
     "check-router-health": {
         "task": "apps.provisioning.tasks.check_router_health",
