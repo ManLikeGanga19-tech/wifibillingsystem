@@ -1,12 +1,32 @@
 name: CI
 
+# Cheap on purpose — this all runs on GitHub's free tier for a repo this size. Every job
+# exists because it catches a class of bug we have actually shipped:
+#
+#   lint/test    — the obvious one
+#   migrations   — a model change with no migration passes tests, then 500s in production
+#   schema       — a broken OpenAPI schema silently breaks any generated client
+#   deploy check — Django auditing its own prod settings (DEBUG, cookies, HSTS)
+#   typecheck    — the frontends have no tests; the compiler IS their test suite
+#   audit        — a CVE in a dependency is not something to learn about from an attacker
+#
+# If this ever gets slow enough that people start skipping it, that is a bug in the
+# pipeline, not a reason to skip it.
+
 on:
   push:
     branches: [main, master]
   pull_request:
 
+concurrency:
+  # A new push supersedes the old run — nobody needs CI results for a commit that has
+  # already been replaced.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   backend:
+    name: Backend — lint, tests, schema, migrations
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -22,9 +42,16 @@ jobs:
       redis:
         image: redis:7-alpine
         ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s
+          --health-timeout 3s --health-retries 10
     defaults:
       run:
         working-directory: backend
+    env:
+      DATABASE_URL: postgres://wifi:wifi@localhost:5432/wifi
+      REDIS_URL: redis://localhost:6379/0
+      NOTIFICATIONS_PROVIDER: dummy
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -32,9 +59,133 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements.txt -r requirements-dev.txt
-      - run: ruff check .
-      - run: pytest -v
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Tests
+        run: pytest -q
         env:
-          DATABASE_URL: postgres://wifi:wifi@localhost:5432/wifi
-          REDIS_URL: redis://localhost:6379/0
-          NOTIFICATIONS_PROVIDER: dummy
+          DJANGO_SETTINGS_MODULE: config.settings.test
+
+      # A model changed and nobody generated the migration: tests pass (they build the
+      # schema straight from the models) and then production migrates into a table that
+      # does not match the code. This is what catches that.
+      - name: No missing migrations
+        run: python manage.py makemigrations --check --dry-run
+
+      # Zero errors AND zero warnings. A warning here means a client generated from this
+      # schema gets a field it cannot name.
+      - name: OpenAPI schema is clean
+        run: python manage.py spectacular --fail-on-warn --file /tmp/schema.yaml
+
+      # Django auditing its own production settings — DEBUG off, secure cookies, HSTS, a
+      # real secret key. Fails BEFORE the deploy rather than after it.
+      - name: Production settings audit
+        run: python manage.py check --deploy --fail-level WARNING
+        env:
+          DJANGO_SETTINGS_MODULE: config.settings.prod
+          # Long and varied enough to satisfy check --deploy's own SECRET_KEY audit.
+          # It is a CI throwaway and grants nothing — the real key lives in the
+          # server's environment and is never in this repo.
+          DJANGO_SECRET_KEY: qP7xR2mK9vL4wZ8cT6yB1nH5jF3dS0gA7uE2iO9pX4rM6kW8zV
+          FIELD_ENCRYPTION_KEY: 4F9nOZ0OQ7t3vJ8pQ0h3sVv1nJ5Zc2xX9mB6lK1yA0M=
+          DJANGO_ALLOWED_HOSTS: wifios.co.ke
+          DARAJA_CALLBACK_TOKEN: ci-only
+
+  frontends:
+    name: Frontends — typecheck + build
+    runs-on: ubuntu-latest
+    strategy:
+      # One broken frontend must not hide a second broken frontend.
+      fail-fast: false
+      matrix:
+        app: [admin-ui, super-admin, portal, marketing]
+    defaults:
+      run:
+        working-directory: ${{ matrix.app }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ${{ matrix.app }}/package-lock.json
+
+      # `npm ci`, never `npm install`: it installs EXACTLY the lockfile, so what CI
+      # tested is what the image ships.
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run lint
+
+      # The build IS a test. Type errors can hide behind bundler config until it
+      # actually tries to emit output.
+      - name: Build
+        run: npm run build
+
+  audit:
+    name: Security — dependencies and secrets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # gitleaks needs history to scan it
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Advisory, not blocking: a new CVE in a transitive dependency should tell us, not
+      # block a hotfix at 2am. Make it blocking once there is a team to triage it.
+      - name: Python dependencies (pip-audit)
+        continue-on-error: true
+        run: |
+          pip install pip-audit
+          pip-audit -r backend/requirements.txt
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: JS dependencies (npm audit)
+        continue-on-error: true
+        run: |
+          for app in admin-ui super-admin portal marketing; do
+            echo "--- $app"
+            (cd "$app" && npm audit --audit-level=high --omit=dev) || true
+          done
+
+      # NOT advisory. The rule for this repo is zero keys in source, and this is what
+      # enforces it instead of trusting everyone to remember. A committed Daraja key is
+      # a rotation and an incident, not a code review comment.
+      - name: Secret scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  images:
+    name: Images build + scan
+    runs-on: ubuntu-latest
+    needs: [backend, frontends]
+    steps:
+      - uses: actions/checkout@v4
+
+      # A Dockerfile that does not build is a deploy that fails at the worst possible
+      # moment. Built with the production args, so we build what we would actually ship.
+      - name: Build the API image
+        run: docker build --build-arg INSTALL_DEV=0 -t wifios/api:ci backend
+
+      - name: Build the frontend images
+        run: |
+          for app in admin-ui super-admin portal marketing; do
+            docker build -f deploy/Dockerfile.static -t "wifios/$app:ci" "$app"
+          done
+
+      - name: Scan the API image for known CVEs
+        uses: aquasecurity/trivy-action@master
+        continue-on-error: true
+        with:
+          image-ref: wifios/api:ci
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true

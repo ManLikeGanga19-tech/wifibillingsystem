@@ -1,0 +1,162 @@
+# The edge. Everything the internet touches arrives here first.
+#
+# WHY CADDY: automatic TLS, including for *.wifios.co.ke, with no certbot cron and no
+# renewal that silently expires at 2am. It is one binary and one config file, which is
+# the whole point — the next person to touch this should understand it in ten minutes,
+# not inherit a Kubernetes cluster they did not ask for.
+#
+# THE ROUTING MODEL, and why it is worth understanding before changing anything:
+#
+#   wifios.co.ke              -> the marketing site
+#   api.wifios.co.ke          -> Django. A FIXED address, because Safaricom's callbacks
+#                                are registered against it and must never move.
+#   admin.wifios.co.ke        -> Platform Control (Danamo's own console)
+#   <slug>.wifios.co.ke       -> that ISP's console
+#   <slug>.wifios.co.ke/api/* -> Django, SAME ORIGIN as the console
+#   <slug>.wifios.co.ke/portal-> the captive portal that ISP's customers see
+#
+# The same-origin /api is the load-bearing bit. Auth is an httpOnly cookie (no browser
+# storage anywhere — the hard rule of this system), and a same-origin API is what lets
+# the browser attach it with no CORS, no preflight on every request, and no second
+# trusted-origins list to keep in sync. Cross-origin cookies would also mean
+# SameSite=None, which is a strictly worse security posture.
+
+{
+	email {$ACME_EMAIL}
+
+	# Wildcard certificates need a DNS challenge (Let's Encrypt will not issue *.x
+	# over HTTP-01). The token is scoped to DNS edits on this zone and lives in the
+	# environment — never in this file, never in the repo.
+	acme_dns cloudflare {$CLOUDFLARE_API_TOKEN}
+
+	# Staging ACME while you are still fighting DNS: Let's Encrypt's production rate
+	# limits are unforgiving (5 failures/hour), and hitting them locks you out for the
+	# afternoon. Uncomment, get it working, then comment out and delete the certs.
+	# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+}
+
+# Headers every response gets, everywhere. Cheap, and each one closes a real class of
+# attack rather than decorating a scan report.
+(security_headers) {
+	header {
+		# We are HTTPS-only and say so for two years, including every ISP subdomain.
+		# Once a browser has seen this it will not even attempt http:// — which kills
+		# the "downgrade them on the coffee-shop wifi" attack outright. NB: hard to
+		# undo, so it goes on LAST, once the domain is settled.
+		Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+
+		# No framing: nobody wraps an ISP's console in an invisible iframe and farms
+		# clicks off it.
+		X-Frame-Options "DENY"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+
+		# We ask for none of these. Saying so means a compromised script cannot either.
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+
+		# Don't advertise what we run.
+		-Server
+		-X-Powered-By
+	}
+}
+
+# The console and portal SPAs are self-contained: their JS and CSS are bundled, and
+# nothing is fetched from a CDN. So a strict CSP costs us nothing and turns "attacker
+# injected a <script src=evil.com>" from a catastrophe into a blocked request.
+#
+# 'unsafe-inline' for styles only, because the bundlers inline critical CSS. Scripts
+# get no such exemption — that is where it actually matters.
+(csp_spa) {
+	header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'"
+}
+
+# ---------------------------------------------------------------------------
+# The marketing site
+# ---------------------------------------------------------------------------
+wifios.co.ke, www.wifios.co.ke {
+	import security_headers
+	# The marketing site embeds screen recordings and (eventually) an og image, so
+	# media-src is open to self; still no third-party scripts.
+	header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data:; media-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'"
+
+	# The signup wizard talks to the API from this origin. Same-origin, so the draft
+	# cookie rides along without CORS.
+	handle /api/* {
+		reverse_proxy api:8000
+	}
+
+	handle {
+		reverse_proxy marketing:80
+	}
+
+	encode zstd gzip
+}
+
+# ---------------------------------------------------------------------------
+# The API's own address. Safaricom's C2B validation/confirmation URLs and the STK
+# callback point HERE, and they are registered with Safaricom — this hostname must not
+# change without a change on their portal too.
+# ---------------------------------------------------------------------------
+api.wifios.co.ke {
+	import security_headers
+	reverse_proxy api:8000
+	encode zstd gzip
+}
+
+# ---------------------------------------------------------------------------
+# Platform Control — Danamo's own console. Every ISP's money is visible from here, so
+# it is the highest-value target on the platform.
+# ---------------------------------------------------------------------------
+admin.wifios.co.ke {
+	import security_headers
+	import csp_spa
+
+	handle /api/* {
+		reverse_proxy api:8000
+	}
+	handle {
+		reverse_proxy super-admin:80
+	}
+
+	encode zstd gzip
+}
+
+# ---------------------------------------------------------------------------
+# Every ISP: <slug>.wifios.co.ke
+#
+# Django resolves the tenant from the Host header (core.tenancy._slug_from_host), so
+# the subdomain IS the tenant. Reserved names (www, api, admin, portal…) are refused at
+# signup — see Operator.RESERVED_SLUGS — which is what stops an ISP from registering
+# the slug "api" and hijacking the callback host.
+# ---------------------------------------------------------------------------
+*.wifios.co.ke {
+	import security_headers
+	import csp_spa
+
+	# Same-origin API: the cookie just works.
+	handle /api/* {
+		reverse_proxy api:8000
+	}
+
+	# Django's own surfaces (schema, admin) stay reachable per-tenant for support.
+	handle /admin/* {
+		reverse_proxy api:8000
+	}
+	handle /static/* {
+		reverse_proxy api:8000
+	}
+
+	# The captive portal: what an ISP's CUSTOMERS see when they connect to the wifi.
+	# The router's walled garden redirects here.
+	handle /portal/* {
+		uri strip_prefix /portal
+		reverse_proxy portal:80
+	}
+
+	# Everything else is the ISP's console.
+	handle {
+		reverse_proxy admin-ui:80
+	}
+
+	encode zstd gzip
+}

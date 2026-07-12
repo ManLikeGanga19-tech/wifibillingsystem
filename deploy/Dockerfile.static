@@ -1,0 +1,33 @@
+# One Dockerfile for all four frontends. They are all "npm install, npm run build, serve
+# the dist folder" — three near-identical files would just be three things to forget to
+# update.
+#
+# Multi-stage on purpose: node and the entire node_modules tree (hundreds of MB, and a
+# large supply-chain surface) exist only in the build stage. What actually ships is a
+# few hundred KB of static files and a web server, so there is no npm, no build tooling
+# and no source in the running container for an attacker to find.
+
+FROM node:22-alpine AS build
+WORKDIR /app
+
+# Copy the lockfile first so a source-only change does not re-download the world.
+COPY package*.json ./
+# `npm ci` — installs EXACTLY the lockfile. `npm install` would silently pick up newer
+# versions at build time, which means the thing you tested is not the thing you shipped.
+RUN npm ci
+
+COPY . .
+RUN npm run build
+
+# ---- what actually ships -------------------------------------------------------
+FROM caddy:2-alpine
+
+# Astro emits to dist/, Vite emits to dist/ — both land here.
+COPY --from=build /app/dist /srv
+
+# A single-page app must serve index.html for any path it does not recognise, or a
+# refresh on /wallet is a 404. The API is NOT proxied here — the edge Caddy owns that,
+# so this container has no route to anything but its own files.
+RUN printf ':80 {\n\troot * /srv\n\tencode zstd gzip\n\ttry_files {path} /index.html\n\tfile_server\n}\n' > /etc/caddy/Caddyfile
+
+EXPOSE 80

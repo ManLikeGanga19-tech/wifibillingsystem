@@ -165,3 +165,77 @@ def test_resolve_identifier_never_leaks_whether_an_account_exists():
     assert resolve_identifier("nobody@nowhere.com") == "nobody@nowhere.com"
     assert resolve_identifier("0712345678") == "254712345678"
     assert resolve_identifier("!!!") == "!!!"
+
+
+class TestBruteForce:
+    """Nothing stopped password guessing before this. Two limits, because each one
+    alone is trivially bypassed: an IP limit falls to a botnet, and an account limit
+    falls to spraying one password across every account."""
+
+    def setup_method(self):
+        from django.core.cache import cache
+
+        cache.clear()  # the lockout counters live in Redis and outlive a test
+
+    def test_an_account_locks_after_repeated_failures(self):
+        from apps.accounts.auth_views import LOCKOUT_THRESHOLD
+
+        user = make_owner(email="ann@acme.co.ke")
+        c = APIClient()
+
+        for _ in range(LOCKOUT_THRESHOLD):
+            c.post(LOGIN, {"phone": user.phone, "password": "wrong"}, format="json")
+
+        # Even the RIGHT password is now refused.
+        resp = c.post(LOGIN, {"phone": user.phone, "password": PASSWORD}, format="json")
+        assert resp.status_code == 429
+        assert "too many" in resp.json()["detail"].lower()
+
+    def test_the_lock_follows_the_ACCOUNT_not_the_connection(self):
+        """The whole point. A botnet gives an attacker a fresh IP per attempt; the
+        counter has to hang on the identifier they are attacking."""
+        from apps.accounts.auth_views import LOCKOUT_THRESHOLD
+
+        user = make_owner(email="ann@acme.co.ke")
+
+        for i in range(LOCKOUT_THRESHOLD):
+            # A different "machine" every single time.
+            APIClient(REMOTE_ADDR=f"10.0.0.{i + 1}").post(
+                LOGIN, {"phone": user.phone, "password": "wrong"}, format="json"
+            )
+
+        resp = APIClient(REMOTE_ADDR="10.0.0.200").post(
+            LOGIN, {"phone": user.phone, "password": PASSWORD}, format="json"
+        )
+        assert resp.status_code == 429
+
+    def test_locking_by_EMAIL_locks_the_same_account_as_by_phone(self):
+        """Two identifiers, one account — so they must share one counter, or an
+        attacker just alternates between them and doubles their attempts."""
+        from apps.accounts.auth_views import LOCKOUT_THRESHOLD
+
+        user = make_owner(email="ann@acme.co.ke")
+        c = APIClient()
+
+        for _ in range(LOCKOUT_THRESHOLD):
+            c.post(LOGIN, {"phone": "ann@acme.co.ke", "password": "wrong"}, format="json")
+
+        resp = c.post(LOGIN, {"phone": user.phone, "password": PASSWORD}, format="json")
+        assert resp.status_code == 429
+
+    def test_a_successful_login_clears_the_counter(self):
+        """Otherwise a user who fumbles their password nine times over a fortnight is
+        locked out on a typo."""
+        from django.core.cache import cache
+
+        from apps.accounts.auth_views import LOCKOUT_THRESHOLD, _lock_key
+
+        user = make_owner()
+        c = APIClient()
+        for _ in range(LOCKOUT_THRESHOLD - 1):
+            c.post(LOGIN, {"phone": user.phone, "password": "wrong"}, format="json")
+
+        assert c.post(
+            LOGIN, {"phone": user.phone, "password": PASSWORD}, format="json"
+        ).status_code == 200
+        assert cache.get(_lock_key(user.phone)) is None

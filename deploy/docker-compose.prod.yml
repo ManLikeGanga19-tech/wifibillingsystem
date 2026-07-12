@@ -1,0 +1,187 @@
+# Staging and production. One VPS, one file.
+#
+# Deliberately NOT Kubernetes. This runs a pilot and the first paying ISPs on a ~$25
+# box, and any engineer you hire can read it in ten minutes. When one machine genuinely
+# stops being enough, the move is a second machine and a load balancer — not a control
+# plane nobody on the team knows how to debug at 3am.
+#
+#   docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env up -d
+#
+# STAGING vs PRODUCTION is the env file, not the topology. Staging points EMAIL_HOST at
+# mailpit (so a test run cannot post invoices to real ISPs) and uses the Daraja sandbox.
+
+name: wifios
+
+x-django: &django
+  image: ${IMAGE_API:-wifios/api:latest}
+  build:
+    context: ../backend
+    args:
+      INSTALL_DEV: "0"
+  restart: unless-stopped
+  env_file: .env
+  environment:
+    DJANGO_SETTINGS_MODULE: config.settings.prod
+  depends_on:
+    db:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  # The application never needs to write to its own code. If something is trying to,
+  # that is either a bug or an attacker.
+  read_only: true
+  tmpfs:
+    - /tmp
+  security_opt:
+    - no-new-privileges:true
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    # The ONLY ports open to the internet. Everything else talks over the private
+    # docker network and is unreachable from outside the box.
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data # certificates. LOSING THIS MEANS RE-ISSUING EVERY CERT.
+      - caddy_config:/config
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL}
+      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN}
+    depends_on: [api, admin-ui, super-admin, portal, marketing]
+    security_opt:
+      - no-new-privileges:true
+
+  api:
+    <<: *django
+    command: >
+      sh -c "python manage.py migrate --noinput &&
+             python manage.py collectstatic --noinput &&
+             gunicorn config.wsgi:application
+               --bind 0.0.0.0:8000
+               --workers ${GUNICORN_WORKERS:-3}
+               --timeout 30
+               --access-logfile - --error-logfile -"
+
+  worker:
+    <<: *django
+    command: celery -A config worker -l warning --concurrency ${CELERY_CONCURRENCY:-4}
+
+  beat:
+    <<: *django
+    command: celery -A config beat -l warning
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./backups:/backups
+    # NO `ports:`. THIS IS THE POINT. The database is reachable only from the private
+    # docker network. Publishing 5432 to the host — which the dev compose does, for
+    # DBeaver — would put every ISP's payment history one weak password away from the
+    # open internet, and Postgres is scanned constantly.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    security_opt:
+      - no-new-privileges:true
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # Redis holds Celery's queue and our cached Daraja token. It is also famously
+    # trivial to abuse if exposed, so: no published port, and a password anyway.
+    command: redis-server --requirepass ${REDIS_PASSWORD} --appendonly yes
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    security_opt:
+      - no-new-privileges:true
+
+  # ---- the four frontends: static files, served by tiny Caddys -----------------
+  admin-ui:
+    image: ${IMAGE_ADMIN_UI:-wifios/admin-ui:latest}
+    build:
+      context: ../admin-ui
+      dockerfile: ../deploy/Dockerfile.static
+    restart: unless-stopped
+    security_opt: [no-new-privileges:true]
+
+  super-admin:
+    image: ${IMAGE_SUPER_ADMIN:-wifios/super-admin:latest}
+    build:
+      context: ../super-admin
+      dockerfile: ../deploy/Dockerfile.static
+    restart: unless-stopped
+    security_opt: [no-new-privileges:true]
+
+  portal:
+    image: ${IMAGE_PORTAL:-wifios/portal:latest}
+    build:
+      context: ../portal
+      dockerfile: ../deploy/Dockerfile.static
+    restart: unless-stopped
+    security_opt: [no-new-privileges:true]
+
+  marketing:
+    image: ${IMAGE_MARKETING:-wifios/marketing:latest}
+    build:
+      context: ../marketing
+      dockerfile: ../deploy/Dockerfile.static
+    restart: unless-stopped
+    security_opt: [no-new-privileges:true]
+
+  # ---- staging only ------------------------------------------------------------
+  # A mailbox that cannot reach a human. STAGING MUST USE THIS. A staging box wired to
+  # a real SMTP provider will cheerfully email real ISPs invoices and suspension
+  # notices generated from test data. Set EMAIL_HOST=mailpit in the staging env file.
+  #
+  # In production, this service is simply not started (--scale mailpit=0), and
+  # EMAIL_HOST points at the real provider.
+  mailpit:
+    image: axllent/mailpit:latest
+    restart: unless-stopped
+    profiles: ["staging"]
+    environment:
+      MP_MAX_MESSAGES: 5000
+      MP_SMTP_AUTH_ACCEPT_ANY: 1
+      MP_SMTP_AUTH_ALLOW_INSECURE: 1
+    # Bound to LOCALHOST on the host, so you reach the inbox over an SSH tunnel
+    # rather than publishing every test email to the internet:
+    #   ssh -L 8025:localhost:8025 you@staging
+    ports:
+      - "127.0.0.1:8025:8025"
+
+  # Nightly pg_dump. A backup you have never restored is not a backup — see
+  # docs/DEPLOYMENT.md for the restore drill, and do it before you take real money.
+  backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./backups:/backups
+      - ./backup.sh:/backup.sh:ro
+    entrypoint: ["/bin/sh", "/backup.sh"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  redisdata:
+  caddy_data:
+  caddy_config:

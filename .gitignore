@@ -24,3 +24,6 @@ Thumbs.db
 
 # Local Claude agent state (memory, plans) — never commit
 .claude/
+
+deploy/.env
+deploy/backups/

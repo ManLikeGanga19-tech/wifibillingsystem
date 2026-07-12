@@ -119,6 +119,11 @@ REST_FRAMEWORK = {
     "PAGE_SIZE": 50,
     "DEFAULT_THROTTLE_RATES": {
         "anon": "60/min",
+        # Password guessing. Per-IP, and paired with a per-ACCOUNT lockout in
+        # auth_views — an attacker with a botnet walks straight past an IP limit, and
+        # an attacker spraying one password across every account walks straight past an
+        # account limit. You need both.
+        "login": "10/min",
         "stk-push": "10/min",
         "voucher-redeem": "15/min",
         # The 5-step wizard makes several calls per applicant, so the old

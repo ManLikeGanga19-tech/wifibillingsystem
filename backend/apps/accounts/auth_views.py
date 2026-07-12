@@ -6,11 +6,15 @@ automatically. Logging out clears the cookies. There is nothing in localStorage
 to go stale, and nothing for a user to "clear their cache" to fix.
 """
 
+import logging
+
+from django.core.cache import cache
 from django.middleware.csrf import get_token
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
@@ -28,6 +32,8 @@ from .cookie_auth import (
     clear_auth_cookies,
     set_auth_cookies,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def resolve_identifier(raw: str) -> str:
@@ -56,6 +62,46 @@ def resolve_identifier(raw: str) -> str:
         return ident
 
 
+# ---- brute force ---------------------------------------------------------------
+#
+# TWO limits, because each one alone is trivially bypassed:
+#
+#   PER IP (the `login` DRF throttle, 10/min) stops one machine grinding through a
+#   dictionary. An attacker with a botnet — or a single ISP behind CGNAT — walks past it.
+#
+#   PER ACCOUNT (below) stops the botnet. It also means an attacker spraying ONE common
+#   password across every account we have gets one attempt per account per window,
+#   which is the attack that actually works against real user passwords.
+#
+# The lockout is on the ACCOUNT IDENTIFIER, not the session, and lives in Redis so it
+# survives a deploy and is shared across every worker.
+LOCKOUT_THRESHOLD = 10
+LOCKOUT_MINUTES = 15
+
+
+def _lock_key(identifier: str) -> str:
+    return f"login-fail:{identifier.lower()}"
+
+
+def _is_locked(identifier: str) -> bool:
+    return cache.get(_lock_key(identifier), 0) >= LOCKOUT_THRESHOLD
+
+
+def _record_failure(identifier: str) -> None:
+    key = _lock_key(identifier)
+    try:
+        count = cache.incr(key)
+    except ValueError:  # first failure — incr on a missing key raises
+        cache.set(key, 1, timeout=LOCKOUT_MINUTES * 60)
+        count = 1
+    if count >= LOCKOUT_THRESHOLD:
+        logger.warning("Login locked out for %s after %s failures", identifier, count)
+
+
+def _clear_failures(identifier: str) -> None:
+    cache.delete(_lock_key(identifier))
+
+
 @extend_schema(
     request=LoginRequestSerializer,
     responses={200: LoginResponseSerializer, 401: DetailSerializer},
@@ -68,24 +114,45 @@ class CookieLoginView(APIView):
 
     permission_classes = [AllowAny]
     authentication_classes = []
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "login"
 
     def post(self, request):
+        identifier = resolve_identifier(
+            str(request.data.get("phone") or request.data.get("email") or "")
+        )
+
+        if _is_locked(identifier):
+            # Deliberately says "too many attempts" rather than "wrong password": at
+            # this point we are talking to an attacker, and there is nothing left to
+            # protect by pretending otherwise. The real owner is told what to do.
+            return Response(
+                {
+                    "detail": (
+                        f"Too many failed attempts. Try again in {LOCKOUT_MINUTES} "
+                        "minutes, or reset your password."
+                    )
+                },
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
+
         credentials = {
-            "phone": resolve_identifier(
-                str(request.data.get("phone") or request.data.get("email") or "")
-            ),
+            "phone": identifier,
             "password": request.data.get("password") or "",
         }
         serializer = TokenObtainPairSerializer(data=credentials)
         try:
             serializer.is_valid(raise_exception=True)
         except Exception:
+            _record_failure(identifier)
             return Response(
                 # Deliberately one message for both fields and both identifiers —
                 # naming which half was wrong tells an attacker which half was right.
                 {"detail": "Wrong phone/email or password."},
                 status=status.HTTP_401_UNAUTHORIZED,
             )
+
+        _clear_failures(identifier)
         tokens = serializer.validated_data
         # Hand the client a CSRF token to echo back on future writes. It is a
         # readable cookie ON PURPOSE (double-submit): an attacker's site cannot read
