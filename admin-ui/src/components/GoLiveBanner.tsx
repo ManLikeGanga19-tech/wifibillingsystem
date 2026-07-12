@@ -1,5 +1,6 @@
 import { CheckCircle2, Circle, Rocket } from 'lucide-react';
 import { MeOperator } from '../api/client';
+import SettlementSetup from './SettlementSetup';
 
 /**
  * The honest explanation of the money gate.
@@ -13,7 +14,13 @@ import { MeOperator } from '../api/client';
  * ISP to accept: your customers pay US, not you. Say why, plainly, and say what
  * they get for it.
  */
-export default function GoLiveBanner({ operator }: { operator: MeOperator }) {
+export default function GoLiveBanner({
+  operator,
+  onWentLive,
+}: {
+  operator: MeOperator;
+  onWentLive: () => void;
+}) {
   if (operator.can_transact) return null;
 
   const blockers = operator.go_live_blockers ?? [];
@@ -53,24 +60,43 @@ export default function GoLiveBanner({ operator }: { operator: MeOperator }) {
         </div>
 
         {!suspended && blockers.length > 0 && (
-          <ol className="mt-4 space-y-2.5 border-t border-[#141414]/10 pt-4">
+          <ol className="mt-4 space-y-4 border-t border-[#141414]/10 pt-4">
             {blockers.map((b, i) => (
               <li key={b.key} className="flex items-start gap-2.5">
-                {b.actionable ? (
+                {b.done ? (
+                  <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5 text-[#228B22]" />
+                ) : b.actionable ? (
                   <Circle className="h-4 w-4 shrink-0 mt-0.5 text-[#B26B00]" />
                 ) : (
-                  <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5 text-[#141414]/25" />
+                  <Circle className="h-4 w-4 shrink-0 mt-0.5 text-[#141414]/20" />
                 )}
-                <div className="min-w-0">
-                  <p className="text-xs font-bold font-mono uppercase">
+                <div className="min-w-0 flex-1">
+                  <p
+                    className={`text-xs font-bold font-mono uppercase ${
+                      b.done ? 'text-[#141414]/40 line-through' : ''
+                    }`}
+                  >
                     {i + 1}. {b.label}
-                    {b.actionable && (
-                      <span className="ml-2 text-[10px] text-[#B26B00]">← your move</span>
+                    {b.actionable && !b.done && (
+                      <span className="ml-2 text-[10px] text-[#B26B00] no-underline">
+                        ← your move
+                      </span>
                     )}
                   </p>
-                  <p className="text-[11px] font-mono text-[#141414]/60 mt-0.5 leading-relaxed">
-                    {b.detail}
-                  </p>
+                  {!b.done && (
+                    <p className="text-[11px] font-mono text-[#141414]/60 mt-0.5 leading-relaxed">
+                      {b.detail}
+                    </p>
+                  )}
+
+                  {/* The form lives INSIDE the step it satisfies. Explaining a
+                      blocker and then making someone hunt for where to fix it is
+                      how a checklist becomes a chore. */}
+                  {b.key === 'settlement_account' && (
+                    <div className="mt-3 border border-[#141414]/15 bg-[#f0efec] p-3">
+                      <SettlementSetup onVerified={onWentLive} />
+                    </div>
+                  )}
                 </div>
               </li>
             ))}

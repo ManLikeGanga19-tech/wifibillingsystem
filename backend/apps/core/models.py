@@ -4,8 +4,6 @@ from django.conf import settings
 from django.db import models
 from django.db.models.functions import Lower
 
-from .fields import EncryptedTextField
-
 
 class TimeStampedModel(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
@@ -42,11 +40,12 @@ class Operator(TimeStampedModel):
         max_length=40, blank=True, help_text="How they heard about us"
     )
 
-    # Per-operator M-Pesa credentials. Blank means "use the env-var defaults" (pilot).
-    mpesa_shortcode = models.CharField(max_length=20, blank=True)
-    mpesa_passkey = EncryptedTextField(blank=True)
-    daraja_consumer_key = EncryptedTextField(blank=True)
-    daraja_consumer_secret = EncryptedTextField(blank=True)
+    # NOTE: there are deliberately NO per-ISP Daraja/collection credentials here.
+    # Customers NEVER pay an ISP directly — every shilling lands on Danamo's own
+    # paybill and is attributed to the ISP in the ledger (DarajaClient ignores the
+    # operator entirely). Fields implying otherwise used to exist and were actively
+    # misleading: they are what made the suspended-pay page tell a subscriber to pay
+    # the ISP's shortcode, where we would never have seen the money.
 
     # Danamo Tech's own WISP: charges itself nothing. Guarded so rates can't be
     # fat-fingered back on.
@@ -55,13 +54,40 @@ class Operator(TimeStampedModel):
         help_text="Platform's own ISP: exempt from all commission and platform fees.",
     )
 
-    # Saved payout destinations (the ISP fills these once; the wallet withdraw
-    # form pre-fills from them). Bank payouts are executed manually now, and by
-    # the I&M H2H integration later.
-    payout_phone = models.CharField(max_length=12, blank=True)
+    # ---- SETTLEMENT: where WE pay THEM ---------------------------------------
+    # This is an OUTBOX, not a collection account. It is also our KYC bar: to hold a
+    # paybill or a business bank account, Safaricom/the bank already ran full KYC on
+    # this business — so we inherit it for free. A shell company cannot produce one.
+    class Settlement(models.TextChoices):
+        PAYBILL = "paybill", "M-Pesa Paybill (B2B)"
+        BANK = "bank", "Bank account (Pesalink/EFT)"
+
+    settlement_method = models.CharField(
+        max_length=8, choices=Settlement.choices, blank=True
+    )
+    settlement_paybill = models.CharField(
+        max_length=20, blank=True, help_text="Their OWN paybill — we send money TO it"
+    )
+    settlement_name = models.CharField(
+        max_length=120, blank=True, help_text="Registered name on the account"
+    )
     payout_bank_name = models.CharField(max_length=80, blank=True)
     payout_bank_account_number = models.CharField(max_length=40, blank=True)
     payout_bank_account_name = models.CharField(max_length=120, blank=True)
+    # Legacy M-Pesa-phone payout destination (kept for existing tenants).
+    payout_phone = models.CharField(max_length=12, blank=True)
+
+    # ---- Proof they actually CONTROL that account ----------------------------
+    # Anyone can type "123456". So we prove it the way banks do: send a few
+    # shillings carrying a random reference, and ask them to read it back. Cannot be
+    # faked without access to the account's own statement.
+    settlement_verified_at = models.DateTimeField(null=True, blank=True)
+    verification_ref = models.CharField(max_length=16, blank=True)
+    verification_amount = models.DecimalField(
+        max_digits=6, decimal_places=2, null=True, blank=True
+    )
+    verification_sent_at = models.DateTimeField(null=True, blank=True)
+    verification_attempts = models.PositiveSmallIntegerField(default=0)
 
     # Platform billing rates (editable per tenant from the platform portal).
     # Model: 1-month free trial, then KES 500 base + 3% hotspot + per-PPPoE-user
@@ -146,10 +172,43 @@ class Operator(TimeStampedModel):
     def can_transact(self) -> bool:
         """May money move for this ISP — collect, provision, or withdraw?
 
-        Only once they are ACTIVE, which today means a human approved them and
-        (Phase B2) their settlement account is verified.
+        Two independent conditions, and BOTH must hold:
+          1. ACTIVE (not pending, not suspended, not killed)
+          2. a VERIFIED settlement account — we have proved they control the
+             paybill/bank we would pay them into
+
+        (2) is defence in depth on purpose. Verification is what flips them ACTIVE
+        in the first place, so it should be redundant — but if anyone ever sets
+        status=active by hand, in the admin or straight in the database, money still
+        does not move for a business we have not proved out. The gate does not
+        depend on one flag being right.
+
+        Danamo's own WISP is exempt: settling to ourselves is meaningless.
         """
-        return self.is_active and self.status == self.Status.ACTIVE
+        if not (self.is_active and self.status == self.Status.ACTIVE):
+            return False
+        if self.is_platform_owned:
+            return True
+        return self.settlement_verified_at is not None
+
+    @property
+    def has_settlement_account(self) -> bool:
+        if self.settlement_method == self.Settlement.PAYBILL:
+            return bool(self.settlement_paybill)
+        if self.settlement_method == self.Settlement.BANK:
+            return bool(self.payout_bank_name and self.payout_bank_account_number)
+        return False
+
+    @property
+    def settlement_destination(self) -> str:
+        if self.settlement_method == self.Settlement.PAYBILL:
+            return f"Paybill {self.settlement_paybill} ({self.settlement_name})"
+        if self.settlement_method == self.Settlement.BANK:
+            return (
+                f"{self.payout_bank_name} · {self.payout_bank_account_number} "
+                f"({self.payout_bank_account_name})"
+            )
+        return ""
 
     @property
     def effective_commission_pct(self) -> Decimal:
@@ -179,9 +238,6 @@ class Operator(TimeStampedModel):
         on_date = on_date or timezone.localdate()
         return on_date <= self.trial_ends_at
 
-    @property
-    def has_mpesa_credentials(self) -> bool:
-        return bool(self.mpesa_shortcode and self.daraja_consumer_key)
 
 
 class OperatorOwnedModel(TimeStampedModel):

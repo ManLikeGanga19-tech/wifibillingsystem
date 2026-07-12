@@ -189,11 +189,17 @@ class TestAuditLogApi:
         assert filtered["results"][0]["operator_slug"] == "acme"
 
     def test_filter_by_tenant(self):
+        """Approving writes two rows (tenant_activated from the shared activation
+        service, plus tenant_approved) — what matters is that the filter returns
+        ONLY tenant a's."""
         a, b = OperatorFactory(slug="a"), OperatorFactory(slug="b")
         c, _ = platform_client()
         c.post(f"/api/v1/platform/tenants/{a.id}/approve/")
         c.post(f"/api/v1/platform/tenants/{b.id}/approve/")
-        assert c.get("/api/v1/platform/audit/?tenant=a").json()["count"] == 1
+
+        rows = c.get("/api/v1/platform/audit/?tenant=a").json()["results"]
+        assert rows, "tenant a should have audit rows"
+        assert {r["operator_slug"] for r in rows} == {"a"}  # and nothing from b
 
     def test_action_names_endpoint(self):
         op = OperatorFactory()

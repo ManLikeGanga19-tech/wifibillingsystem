@@ -39,7 +39,20 @@ pytestmark = pytest.mark.django_db
 
 
 def pending_isp(**kw):
-    return OperatorFactory(status=Operator.Status.PENDING, **kw)
+    """A FRESHLY signed-up ISP: pending, and no settlement account yet.
+
+    The factory's default operator is a normal live trading ISP (verified
+    settlement), so these have to be cleared explicitly — otherwise we would be
+    testing the gate against an ISP that has already done the work.
+    """
+    return OperatorFactory(
+        status=Operator.Status.PENDING,
+        settlement_method="",
+        settlement_paybill="",
+        settlement_name="",
+        settlement_verified_at=None,
+        **kw,
+    )
 
 
 def owner_of(operator):
@@ -287,9 +300,14 @@ class TestTheIspIsToldWhy:
 
         assert me["operator"]["can_transact"] is False
         blockers = me["operator"]["go_live_blockers"]
-        assert [b["key"] for b in blockers] == ["settlement_account", "verification"]
+        assert [b["key"] for b in blockers] == [
+            "settlement_account",
+            "verify_ownership",
+            "go_live",
+        ]
         # It tells them what to DO, not just that they can't.
         assert any(b["actionable"] for b in blockers)
+        assert not any(b["done"] for b in blockers)  # nothing done yet
 
     def test_a_live_isp_has_no_blockers(self):
         op = OperatorFactory(status=Operator.Status.ACTIVE)

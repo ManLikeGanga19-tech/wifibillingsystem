@@ -68,13 +68,19 @@ class Payout(OperatorOwnedModel):
         REJECTED = "rejected", "Rejected"
 
     class Method(models.TextChoices):
-        MPESA = "mpesa", "M-Pesa"
+        MPESA = "mpesa", "M-Pesa (B2C, to a phone)"
+        # The settlement rail: paybill -> paybill. This is the one an ISP with their
+        # own shortcode uses, and it is also the account we KYC'd them against.
+        PAYBILL = "paybill", "M-Pesa Paybill (B2B)"
         BANK = "bank", "Bank (EFT/Pesalink)"
 
     amount = models.DecimalField(max_digits=12, decimal_places=2)
-    method = models.CharField(max_length=6, choices=Method.choices, default=Method.MPESA)
+    # max_length must fit the longest choice ("paybill" = 7).
+    method = models.CharField(max_length=8, choices=Method.choices, default=Method.MPESA)
     # M-Pesa destination
     phone = models.CharField(max_length=12, blank=True, help_text="M-Pesa number to pay")
+    # Paybill destination (B2B) — the ISP's own shortcode
+    paybill = models.CharField(max_length=20, blank=True)
     # Bank destination (paid manually now; the I&M H2H integration will execute
     # bank-method payouts automatically later)
     bank_name = models.CharField(max_length=80, blank=True)
@@ -107,4 +113,6 @@ class Payout(OperatorOwnedModel):
     def destination(self) -> str:
         if self.method == self.Method.BANK:
             return f"{self.bank_name} · {self.bank_account_number} ({self.bank_account_name})"
+        if self.method == self.Method.PAYBILL:
+            return f"Paybill {self.paybill}"
         return self.phone

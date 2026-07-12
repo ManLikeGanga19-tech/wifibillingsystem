@@ -222,10 +222,18 @@ class TestApiAndIsolation:
 
 
 class TestSuspendedNotice:
-    def test_notice_returns_pay_info_and_client(self):
+    def test_notice_returns_pay_info_and_client(self, settings):
+        """This test used to ASSERT THE BUG: that a cut-off subscriber is told to pay
+        the ISP's own shortcode. C2B confirmations only ever arrive at DANAMO's
+        paybill, so anyone who followed that would have paid the ISP directly — we'd
+        never have seen it, and they'd have stayed cut off despite having paid.
+
+        The paybill is ALWAYS ours. The client's globally-unique account number is
+        the only thing that routes the money to the right ISP and subscriber."""
         from apps.core.models import Operator
 
-        op = OperatorFactory(slug="paynet", name="PayNet ISP", mpesa_shortcode="123456")
+        settings.DARAJA_SHORTCODE = "4123456"  # Danamo's paybill
+        op = OperatorFactory(slug="paynet", name="PayNet ISP")
         Operator.objects.filter(pk=op.pk).update(status="active")
         router = RouterFactory(operator=op)
         client = PppoeClientFactory(
@@ -237,7 +245,7 @@ class TestSuspendedNotice:
         assert resp.status_code == 200
         body = resp.json()
         assert body["provider"] == "PayNet ISP"
-        assert body["paybill"] == "123456"
+        assert body["paybill"] == "4123456"  # OURS — never the ISP's
         assert body["client"]["account_number"] == client.account_number
         assert body["client"]["suspended"] is True
 

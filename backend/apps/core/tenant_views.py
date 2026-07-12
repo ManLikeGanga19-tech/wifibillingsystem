@@ -148,37 +148,30 @@ class PlatformTenantViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def approve(self, request, pk=None):
-        """Flip the money gate ON. This is the moment an ISP can actually earn."""
-        from datetime import timedelta
+        """Platform override: activate an ISP by hand.
 
-        from apps.payments.c2b import release_held_payments
+        Normally an ISP activates ITSELF by verifying its settlement account — no
+        human needed, live in minutes. This is the manual path for a flagged signup
+        or a special case, and it goes through the SAME activation service so the
+        two can never drift (trial start, held-payment release, audit).
+
+        NB: activating without a verified settlement account still will not let money
+        move — `can_transact` requires both. That is deliberate.
+        """
+        from .settlement import activate_operator
 
         operator = self.get_object()
-        operator.status = Operator.Status.ACTIVE
-        operator.approved_at = timezone.now()
-        # One month free before the base fee starts (only set on first approval)
-        if operator.trial_ends_at is None:
-            operator.trial_ends_at = timezone.localdate() + timedelta(days=30)
-        operator.save(
-            update_fields=["status", "approved_at", "trial_ends_at", "updated_at"]
+        released = activate_operator(
+            operator, actor=request.user, reason="approved by platform"
         )
-
-        # Anything their customers paid while we were verifying them is credited
-        # now. Nobody loses a shilling because WE made them wait.
-        released = release_held_payments(operator)
-
-        audit(
-            "tenant_approved",
-            operator=operator,
-            actor=request.user,
-            target=operator,
-            released_payments=released,
-        )
+        audit("tenant_approved", operator=operator, actor=request.user, target=operator)
         return Response(
             {
                 "status": operator.status,
                 "trial_ends_at": operator.trial_ends_at,
                 "released_payments": released,
+                "can_transact": operator.can_transact,
+                "settlement_verified": operator.settlement_verified_at is not None,
             }
         )
 
@@ -388,7 +381,6 @@ class PlatformOverviewView(APIView):
         from datetime import timedelta
 
         from django.db.models import Sum
-        from django.utils import timezone
 
         from apps.billing.models import LedgerEntry
         from apps.payments.models import Transaction

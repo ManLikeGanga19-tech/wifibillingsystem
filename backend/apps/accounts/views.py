@@ -78,26 +78,47 @@ def _go_live_blockers(op) -> list[dict]:
                 "actionable": False,
             }
         ]
-    # PENDING. Phase B2 adds the settlement-account check here; today the bar is a
-    # platform review.
+    # The real, live checklist — each step is either done, yours to do, or ours.
+    has_account = op.has_settlement_account
+    verifying = bool(op.verification_ref) and not op.settlement_verified_at
+    verified = op.settlement_verified_at is not None
+
     return [
         {
             "key": "settlement_account",
             "label": "Add your settlement account",
             "detail": (
                 "Tell us the M-Pesa paybill or bank account we should pay YOU into. "
-                "Your customers always pay WIFI.OS; we hold the money, attribute it "
-                "to you, and settle it to this account."
+                "Your customers always pay WIFI.OS; we hold the money, attribute every "
+                "shilling to you, absorb the M-Pesa charges, and settle to this account."
             ),
-            "actionable": True,
+            "done": has_account,
+            "actionable": not has_account,
         },
         {
-            "key": "verification",
-            "label": "We verify your business",
-            "detail": (
-                "We check the settlement account really belongs to you. Once it does, "
-                "payments switch on and your free month starts."
+            "key": "verify_ownership",
+            "label": (
+                "Confirm the reference we sent you"
+                if verifying
+                else "Prove you own that account"
             ),
+            "detail": (
+                "We've sent a few shillings to it. Find them on your statement and type "
+                "back the reference they carry — that proves the account is really yours."
+                if verifying
+                else "We'll send a few shillings carrying a reference. Read it back to us."
+            ),
+            "done": verified,
+            "actionable": has_account and not verified,
+        },
+        {
+            "key": "go_live",
+            "label": "Payments switch on",
+            "detail": (
+                "Verification is instant — no waiting for a human. Your free month "
+                "starts the moment you can actually earn."
+            ),
+            "done": False,
             "actionable": False,
         },
     ]

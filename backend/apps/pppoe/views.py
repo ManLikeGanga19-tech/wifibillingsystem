@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db.models import Count, Q
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
@@ -193,17 +194,30 @@ class SuspendedNoticeView(PublicAPIView):
                 except ProvisioningError:
                     pass
 
+        # 🔴 THIS USED TO SEND THE MONEY INTO A VOID.
+        #
+        # It showed `operator.mpesa_shortcode` — the ISP's OWN paybill. But C2B
+        # confirmations only ever arrive at DANAMO's shortcode. So a subscriber who
+        # followed these instructions either paid the ISP directly (we never saw it,
+        # the ledger never knew, and they STAYED CUT OFF despite having paid) or, if
+        # the ISP had no shortcode set, was shown no paybill at all.
+        #
+        # The correct instruction is always: pay DANAMO's paybill, quoting the
+        # client's globally-unique account number. That account number is the only
+        # thing that routes the money to the right ISP and the right subscriber, and
+        # it is exactly what the C2B matcher is built to receive.
         body = {
             "provider": operator.name,
-            "paybill": operator.mpesa_shortcode or None,
+            "paybill": settings.DARAJA_SHORTCODE or None,
             "how_to_pay": (
-                "Go to M-Pesa → Lipa na M-Pesa → Pay Bill. Enter the paybill "
-                "number, then your account number, then your monthly amount."
+                "Go to M-Pesa → Lipa na M-Pesa → Pay Bill. Enter the paybill number, "
+                "then YOUR ACCOUNT NUMBER shown below, then the amount. Your internet "
+                "comes back automatically."
             ),
         }
         if client:
             body["client"] = {
-                "account_number": client.account_number,
+                "account_number": client.account_number,  # the routing key
                 "full_name": client.full_name,
                 "plan": client.plan.name,
                 "monthly": str(client.plan.price),
@@ -244,5 +258,7 @@ def account_lookup(request):
             "monthly": str(client.plan.price),
             "balance": str(client.balance),
             "status": client.status,
+            # Always DANAMO's paybill — never the ISP's. See SuspendedNoticeView.
+            "paybill": settings.DARAJA_SHORTCODE or None,
         }
     )

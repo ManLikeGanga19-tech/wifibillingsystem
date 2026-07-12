@@ -23,6 +23,14 @@ class OperatorFactory(factory.django.DjangoModelFactory):
     slug = "test-wisp"
     status = Operator.Status.ACTIVE
 
+    # `can_transact` requires ACTIVE **and** a verified settlement account. The
+    # default factory operator is a normal, live, trading ISP, so it has one.
+    # A test that wants an unverified ISP passes settlement_verified_at=None.
+    settlement_method = Operator.Settlement.PAYBILL
+    settlement_paybill = factory.Sequence(lambda n: f"{600000 + n}")
+    settlement_name = factory.LazyAttribute(lambda o: o.name)
+    settlement_verified_at = factory.LazyFunction(timezone.now)
+
 
 class UserFactory(factory.django.DjangoModelFactory):
     """Login accounts: platform staff and ISP staff."""

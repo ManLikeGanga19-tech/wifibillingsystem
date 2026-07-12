@@ -282,8 +282,27 @@ export interface GoLiveBlocker {
   key: string;
   label: string;
   detail: string;
-  /** True if the ISP can do something about it themselves. */
+  /** Already satisfied. */
+  done: boolean;
+  /** True if the ISP can do something about it themselves, right now. */
   actionable: boolean;
+}
+
+export interface Settlement {
+  method: 'paybill' | 'bank' | null;
+  destination: string | null;
+  has_account: boolean;
+  verified: boolean;
+  verified_at: string | null;
+  can_transact: boolean;
+  verification: {
+    in_progress: boolean;
+    sent_at: string | null;
+    /** Shown so they can find the row on their statement. The REFERENCE never is. */
+    amount: string | null;
+    attempts_left: number | null;
+  };
+  explainer: string;
 }
 
 export interface MeOperator {
@@ -599,6 +618,26 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({}),
     }),
+
+  /** Where WE pay THEM — and the micro-transfer that proves they own it.
+   *  Verifying is what switches their payments on. */
+  settlement: {
+    get: () => request<Settlement>('/operator/settlement/'),
+    set: (body: Record<string, string>) =>
+      request<Settlement>('/operator/settlement/', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    send: () =>
+      request<Settlement & { detail: string }>('/operator/settlement/send/', {
+        method: 'POST',
+      }),
+    verify: (reference: string) =>
+      request<Settlement & { detail: string }>('/operator/settlement/verify/', {
+        method: 'POST',
+        body: JSON.stringify({ reference }),
+      }),
+  },
 
   operatorSettings: {
     get: () => request<OperatorSettings>('/operator/settings/'),

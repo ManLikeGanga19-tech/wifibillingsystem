@@ -5,7 +5,7 @@ from .models import AuditLog, Operator
 
 @admin.register(Operator)
 class OperatorAdmin(admin.ModelAdmin):
-    list_display = ("name", "slug", "mpesa_shortcode", "is_active", "created_at")
+    list_display = ("name", "slug", "status", "settlement_verified_at", "is_active", "created_at")
     prepopulated_fields = {"slug": ("name",)}
 
 

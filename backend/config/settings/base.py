@@ -201,6 +201,13 @@ CELERY_BEAT_SCHEDULE = {
     },
 }
 
+# Settlement verification auto-activates an ISP (live in minutes, no human in the
+# loop) because Safaricom/the bank already ran KYC to issue the account we just
+# proved they control. Flip this on to force a human review for flagged signups.
+SETTLEMENT_REQUIRES_MANUAL_REVIEW = (
+    os.getenv("SETTLEMENT_REQUIRES_MANUAL_REVIEW", "false").lower() == "true"
+)
+
 # Safaricom Daraja (defaults are the public sandbox values)
 DARAJA_BASE_URL = os.getenv("DARAJA_BASE_URL", "https://sandbox.safaricom.co.ke")
 DARAJA_CONSUMER_KEY = os.getenv("DARAJA_CONSUMER_KEY", "")

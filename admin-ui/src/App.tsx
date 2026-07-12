@@ -518,8 +518,17 @@ export default function App() {
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 min-h-0">
           <div className="max-w-7xl mx-auto space-y-6">
             {/* Pinned until they can take payments. Without it, every blocked
-                action just looks like a broken product. */}
-            {acting && !acting.can_transact && <GoLiveBanner operator={acting} />}
+                action just looks like a broken product. Verifying settlement flips
+                the gate, so re-ask the server who we are and the banner vanishes. */}
+            {acting && !acting.can_transact && (
+              <GoLiveBanner
+                operator={acting}
+                onWentLive={() => {
+                  loadMe().catch(() => {});
+                  toast('success', 'Payments are ON. Your free month starts now.');
+                }}
+              />
+            )}
 
             {activeTab === 'dashboard' && <LiveDashboard onNavigate={(tab) => setActiveTab(tab as TabId)} />}
             {activeTab === 'active_users' && <ActiveUsersView />}
