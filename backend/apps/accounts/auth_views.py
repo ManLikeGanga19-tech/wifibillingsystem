@@ -16,6 +16,7 @@ from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from apps.core.phone import InvalidPhoneError, normalize_msisdn
 from apps.core.schema import (
     DetailSerializer,
     LoginRequestSerializer,
@@ -29,34 +30,71 @@ from .cookie_auth import (
 )
 
 
+def resolve_identifier(raw: str) -> str:
+    """Phone OR email in, the login username (phone) out.
+
+    Two identifiers, one account. An ISP signs up with an email and never types a
+    phone number again, so making them remember which one we wanted at the login box
+    is a self-inflicted support ticket.
+
+    It is NOT an enumeration oracle: an unknown email resolves to the raw string,
+    which then fails authentication exactly like a wrong password — same response,
+    same timing shape. We never say "no such account".
+    """
+    from .models import User
+
+    ident = (raw or "").strip()
+    if "@" in ident:
+        match = User.objects.filter(email__iexact=ident).values_list("phone", flat=True).first()
+        return match or ident
+    try:
+        # 0712…, +254712…, 712… — all the same account. A number they cannot dial
+        # wrong is a number they cannot fail to log in with.
+        return normalize_msisdn(ident)
+    except InvalidPhoneError:
+        # Garbage is not a 500 — it is a failed login, handled like any other.
+        return ident
+
+
 @extend_schema(
     request=LoginRequestSerializer,
     responses={200: LoginResponseSerializer, 401: DetailSerializer},
-    summary="Sign in (sets httpOnly cookies; no token in the body)",
+    summary="Sign in with phone or email (sets httpOnly cookies; no token in the body)",
 )
 class CookieLoginView(APIView):
-    """POST {phone, password} -> httpOnly cookies. Returns no token in the body:
-    if JavaScript can't read it, XSS can't steal it."""
+    """POST {phone, password} -> httpOnly cookies. `phone` accepts an email address
+    too. Returns no token in the body: if JavaScript can't read it, XSS can't steal
+    it."""
 
     permission_classes = [AllowAny]
     authentication_classes = []
 
     def post(self, request):
-        serializer = TokenObtainPairSerializer(data=request.data)
+        credentials = {
+            "phone": resolve_identifier(
+                str(request.data.get("phone") or request.data.get("email") or "")
+            ),
+            "password": request.data.get("password") or "",
+        }
+        serializer = TokenObtainPairSerializer(data=credentials)
         try:
             serializer.is_valid(raise_exception=True)
         except Exception:
             return Response(
-                {"detail": "Wrong phone number or password."},
+                # Deliberately one message for both fields and both identifiers —
+                # naming which half was wrong tells an attacker which half was right.
+                {"detail": "Wrong phone/email or password."},
                 status=status.HTTP_401_UNAUTHORIZED,
             )
-        data = serializer.validated_data
+        tokens = serializer.validated_data
         # Hand the client a CSRF token to echo back on future writes. It is a
         # readable cookie ON PURPOSE (double-submit): an attacker's site cannot read
         # it cross-origin, so they cannot forge the X-CSRFToken header.
         csrf_token = get_token(request)
         resp = Response({"detail": "Signed in.", "csrf_token": csrf_token})
-        return set_auth_cookies(resp, access=str(data["access"]), refresh=str(data["refresh"]))
+        return set_auth_cookies(
+            resp, access=str(tokens["access"]), refresh=str(tokens["refresh"])
+        )
 
 
 @extend_schema(request=None, responses={200: DetailSerializer, 401: DetailSerializer},

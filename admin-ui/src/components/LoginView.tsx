@@ -26,7 +26,10 @@ export default function LoginView({ onLoggedIn }: { onLoggedIn: () => void }) {
     setBusy(true);
     setError('');
     try {
-      await login(phone.replace(/\D/g, ''), password);
+      // Send it as typed. Stripping non-digits used to be safe when this box only
+      // took a phone number; it would now shred an email address into nothing. The
+      // server canonicalises either identifier.
+      await login(phone.trim(), password);
       onLoggedIn();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');
@@ -89,8 +92,8 @@ export default function LoginView({ onLoggedIn }: { onLoggedIn: () => void }) {
         ) : mode === 'login' ? (
           <form onSubmit={doLogin} className="space-y-4">
             <div>
-              <label className={label}>Phone Number</label>
-              <input type="tel" autoFocus required value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="2547XXXXXXXX" className={input} />
+              <label className={label}>Phone or Email</label>
+              <input type="text" autoComplete="username" autoFocus required value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="07XX… or you@company.co.ke" className={input} />
             </div>
             <div>
               <label className={label}>Password</label>

@@ -83,24 +83,20 @@ class Command(BaseCommand):
                 "PLATFORM OWNER + ISP owner -> 254700000000 / admin12345 (DEV ONLY)"
             )
         )
-        if not User.objects.filter(phone="254700000002").exists():
-            User.objects.create_user(
-                phone="254700000002",
-                password="admin12345",
-                name="ISP Manager",
-                operator=operator,
-                role=Role.TENANT_MANAGER,
-                is_staff=True,
-            )
-            self.stdout.write("ISP manager -> 254700000002 / admin12345 (no withdrawals)")
+        # Read-only PLATFORM support: the hat we actually use (troubleshooting an ISP
+        # without the power to change anything). The ISP side has one role — owner —
+        # so there are no sub-role logins left to seed.
         if not User.objects.filter(phone="254700000003").exists():
             User.objects.create_user(
                 phone="254700000003",
                 password="admin12345",
-                name="ISP Support",
-                operator=operator,
-                role=Role.TENANT_SUPPORT,
+                name="Platform Support",
+                email="support@danamo.co.ke",
+                role=Role.PLATFORM_SUPPORT,
                 is_staff=True,
             )
-            self.stdout.write("ISP support -> 254700000003 / admin12345 (read-only)")
+            self.stdout.write(
+                "Platform support -> 254700000003 / admin12345 (read-only, "
+                "or sign in with support@danamo.co.ke)"
+            )
         self.stdout.write(self.style.SUCCESS("Seed complete."))

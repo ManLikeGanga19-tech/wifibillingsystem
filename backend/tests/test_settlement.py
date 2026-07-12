@@ -134,9 +134,10 @@ class TestPlugAndPlay:
         assert op.can_transact is False
 
     def test_only_the_OWNER_may_set_it(self):
-        """Setting the destination IS withdrawing, one step removed."""
+        """Setting the destination IS withdrawing, one step removed — so read-only
+        platform staff cannot do it either."""
         op = fresh_isp()
-        assert owner_of(op, role=Role.TENANT_SUPPORT).post(
+        assert owner_of(op, role=Role.PLATFORM_SUPPORT).post(
             SET, PAYBILL, format="json"
         ).status_code == 403
 

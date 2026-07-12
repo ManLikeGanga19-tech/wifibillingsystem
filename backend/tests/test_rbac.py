@@ -168,11 +168,14 @@ class TestTenantRoles:
         tx = TransactionFactory(operator=operator, amount=Decimal(amount))
         credit_sale(tx)
 
-    def test_manager_cannot_withdraw(self, two_isps):
+    def test_read_only_staff_cannot_withdraw(self, two_isps):
+        """Money is owner-only. The ISP side has exactly one role, so the read-only
+        hat that can still reach an ISP's console is PLATFORM support — and it must
+        not be able to move their money."""
         isp_a, _ = two_isps
         self._fund(isp_a)
-        manager = UserFactory(operator=isp_a, is_staff=True, role=Role.TENANT_MANAGER)
-        resp = client_for(manager).post(
+        support = UserFactory(operator=isp_a, is_staff=True, role=Role.PLATFORM_SUPPORT)
+        resp = client_for(support).post(
             "/api/v1/billing/payouts/withdraw/",
             {"amount": "200.00", "phone": "0712345678"},
             format="json",
@@ -192,7 +195,7 @@ class TestTenantRoles:
 
     def test_support_cannot_write_anything(self, two_isps):
         isp_a, _ = two_isps
-        support = UserFactory(operator=isp_a, is_staff=True, role=Role.TENANT_SUPPORT)
+        support = UserFactory(operator=isp_a, is_staff=True, role=Role.PLATFORM_SUPPORT)
         client = client_for(support)
         assert client.get("/api/v1/plans/").status_code == 200  # may look
         resp = client.post(
@@ -208,10 +211,10 @@ class TestTenantRoles:
         )
         assert resp.status_code == 403
 
-    def test_manager_can_run_operations(self, two_isps):
+    def test_the_owner_can_run_operations(self, two_isps):
         isp_a, _ = two_isps
-        manager = UserFactory(operator=isp_a, is_staff=True, role=Role.TENANT_MANAGER)
-        resp = client_for(manager).post(
+        owner = UserFactory(operator=isp_a, is_staff=True, role=Role.TENANT_OWNER)
+        resp = client_for(owner).post(
             "/api/v1/ops/tickets/", {"subject": "Site down", "priority": "high"}, format="json"
         )
         assert resp.status_code == 201

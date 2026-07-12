@@ -1,5 +1,6 @@
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 from django.db import models
+from django.db.models.functions import Lower
 from django.utils import timezone
 
 from apps.core.models import Operator
@@ -25,16 +26,25 @@ class UserManager(BaseUserManager):
 
 
 class Role(models.TextChoices):
-    """Who you are decides what you may do. Platform roles act across tenants;
-    tenant roles act only within their own ISP."""
+    """Who you are decides what you may do.
+
+    PLATFORM roles (Danamo Tech) act across tenants. The TENANT side has exactly ONE
+    role: the ISP owner.
+
+    We shipped tenant_manager and tenant_support and then retired them. They were a
+    guess at what ISPs would want, and they bought us nothing: a sub-role that cannot
+    touch money, routers or plans can barely do anything, while every screen, test and
+    permission check had to carry the branching anyway. An ISP that wants a second pair
+    of hands gives them an owner login; if a real demand for delegated access shows up,
+    it comes back as a designed feature (scoped invites, audited), not as three enum
+    values nobody asked for.
+    """
 
     # Platform (Danamo Tech)
     PLATFORM_OWNER = "platform_owner", "Platform owner"
     PLATFORM_SUPPORT = "platform_support", "Platform support (read-only)"
-    # Tenant (an ISP)
+    # Tenant (an ISP) — one role, on purpose.
     TENANT_OWNER = "tenant_owner", "ISP owner"
-    TENANT_MANAGER = "tenant_manager", "ISP manager"
-    TENANT_SUPPORT = "tenant_support", "ISP support (read-only)"
 
     @classmethod
     def platform_roles(cls):
@@ -42,7 +52,7 @@ class Role(models.TextChoices):
 
     @classmethod
     def read_only_roles(cls):
-        return {cls.PLATFORM_SUPPORT, cls.TENANT_SUPPORT}
+        return {cls.PLATFORM_SUPPORT}
 
 
 class User(AbstractBaseUser, PermissionsMixin):
@@ -68,6 +78,10 @@ class User(AbstractBaseUser, PermissionsMixin):
     )
     phone = models.CharField(max_length=12, unique=True, db_index=True)
     name = models.CharField(max_length=120, blank=True)
+    #: A SECOND login identifier, not just a contact field — you may sign in with
+    #: either. Hence unique (case-insensitively, below): two accounts sharing an
+    #: address would make "sign in with your email" ambiguous, and the payout-change
+    #: code is emailed here, so it must point at exactly one account.
     email = models.EmailField(blank=True)
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
@@ -77,6 +91,25 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     USERNAME_FIELD = "phone"
     REQUIRED_FIELDS = []
+
+    class Meta:
+        constraints = [
+            # Case-insensitive: Ann@acme.co.ke and ann@acme.co.ke are one person, and
+            # a login must never depend on which capitalisation they typed. Blank is
+            # exempt — platform/system accounts sign in by phone and have no email.
+            models.UniqueConstraint(
+                Lower("email"),
+                condition=~models.Q(email=""),
+                name="user_email_unique_ci",
+            )
+        ]
+
+    def save(self, *args, **kwargs):
+        # Normalise at the door. The constraint would catch duplicates anyway, but
+        # storing one canonical form keeps lookups, emails and audit trails honest.
+        if self.email:
+            self.email = self.email.strip().lower()
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return self.name or self.phone

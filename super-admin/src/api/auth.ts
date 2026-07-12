@@ -58,7 +58,7 @@ export async function login(phone: string, password: string): Promise<void> {
   });
   if (!resp.ok) {
     throw new Error(
-      resp.status === 401 ? 'Wrong phone number or password.' : `Sign-in failed (${resp.status})`
+      resp.status === 401 ? 'Wrong phone/email or password.' : `Sign-in failed (${resp.status})`
     );
   }
   // Nothing to store. The cookies are already set.

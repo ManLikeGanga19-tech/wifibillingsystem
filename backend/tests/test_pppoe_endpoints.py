@@ -241,8 +241,9 @@ class TestInvoiceEndpoints:
 
 class TestSupportRoleReadOnly:
     def test_support_cannot_create_plan(self):
+        """Read-only means read-only, even for platform staff inside a tenant."""
         op = OperatorFactory()
-        c = staff(op, role=Role.TENANT_SUPPORT)
+        c = staff(op, role=Role.PLATFORM_SUPPORT)
         resp = c.post(
             "/api/v1/pppoe/plans/",
             {"name": "P", "price": "1500", "download_kbps": 8192,

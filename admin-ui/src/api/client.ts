@@ -49,7 +49,7 @@ export async function login(phone: string, password: string): Promise<void> {
   });
   if (!resp.ok) {
     throw new Error(
-      resp.status === 401 ? 'Wrong phone number or password.' : `Login failed (HTTP ${resp.status})`
+      resp.status === 401 ? 'Wrong phone/email or password.' : `Login failed (HTTP ${resp.status})`
     );
   }
   // Nothing to store — the cookies are already set.
@@ -274,9 +274,10 @@ export interface ApiEquipment {
 export type Role =
   | 'platform_owner'
   | 'platform_support'
-  | 'tenant_owner'
-  | 'tenant_manager'
-  | 'tenant_support';
+  /** The ISP side has exactly one role. tenant_manager/tenant_support were retired:
+   *  a sub-role that cannot touch money, routers or plans can barely do anything,
+   *  while every screen had to carry the branching anyway. */
+  | 'tenant_owner';
 
 export interface GoLiveBlocker {
   key: string;

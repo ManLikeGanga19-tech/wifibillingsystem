@@ -30,7 +30,12 @@ class DetailSerializer(serializers.Serializer):
 
 
 class LoginRequestSerializer(serializers.Serializer):
-    phone = serializers.CharField(help_text="Kenyan MSISDN, e.g. 254700000000")
+    phone = serializers.CharField(
+        help_text=(
+            "Phone OR email — whichever they remember. A Kenyan MSISDN in any form "
+            "(0712…, +254712…, 712…) or the address they signed up with."
+        )
+    )
     password = serializers.CharField(write_only=True)
 
 

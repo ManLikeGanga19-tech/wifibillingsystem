@@ -58,14 +58,15 @@ export default function LoginView({ onLoggedIn }: { onLoggedIn: () => void }) {
             className="text-[11px] uppercase tracking-wider"
             style={{ color: 'var(--text-muted)' }}
           >
-            Phone
+            Phone or Email
           </span>
           <input
             autoFocus
+            autoComplete="username"
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
-            placeholder="254700000000"
-            className="mt-1 tnum"
+            placeholder="0700… or you@danamo.co.ke"
+            className="mt-1"
           />
         </label>
 
