@@ -42,5 +42,16 @@ else
 fi
 echo "→ Wrote it to .env"
 
-docker compose up -d api >/dev/null
-echo "✓ API restarted. M-Pesa callbacks now reach $URL — payments will connect instantly."
+# --build and ALL services on purpose. A payment is only delivered if the WORKER is
+# alive too — and the worker/beat run the same image as the API. Rebuilding just the API
+# after a dependency change once left the worker crash-looping on a missing module,
+# silently, so paid customers never got provisioned. Never rebuild one; rebuild all.
+docker compose up -d --build >/dev/null
+echo "✓ Rebuilt & restarted api + worker + beat. Callbacks now reach $URL."
+echo "  Verifying the worker came up clean…"
+sleep 5
+if docker compose logs worker --since 20s 2>&1 | grep -q "ModuleNotFoundError\|Traceback"; then
+  echo "  ✗ WORKER IS CRASHING — payments will NOT provision. Check: docker compose logs worker" >&2
+  exit 1
+fi
+echo "  ✓ Worker healthy. Pay now — it will connect within seconds."
