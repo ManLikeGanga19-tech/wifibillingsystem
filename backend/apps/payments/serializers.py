@@ -59,6 +59,12 @@ class STKPushRequestSerializer(serializers.Serializer):
 class TransactionStatusSerializer(serializers.ModelSerializer):
     session_active = serializers.SerializerMethodField()
     session = serializers.SerializerMethodField()
+    #: THE FIELD THAT ENDS THE INFINITE SPINNER. The portal used to poll only
+    #: session_active and had no way to tell "still connecting" from "failed forever",
+    #: so a paid customer whose provisioning failed span until they gave up. This says
+    #: which it is: connecting | active | failed (or pending, before payment lands).
+    provisioning = serializers.SerializerMethodField()
+    provision_message = serializers.SerializerMethodField()
 
     class Meta:
         model = Transaction
@@ -70,6 +76,8 @@ class TransactionStatusSerializer(serializers.ModelSerializer):
             "result_desc",
             "session_active",
             "session",
+            "provisioning",
+            "provision_message",
         ]
 
     def _active_session(self, obj):
@@ -77,6 +85,38 @@ class TransactionStatusSerializer(serializers.ModelSerializer):
         if session and session.status == session.Status.ACTIVE:
             return session
         return None
+
+    def _provisioning_state(self, obj) -> str:
+        # Not paid yet: the STK prompt is still out, or it failed/timed out. The
+        # portal reads `status` for that; provisioning has not begun.
+        if obj.status not in Transaction.SUCCESS_STATUSES:
+            return "pending"
+        session = getattr(obj, "session", None)
+        if session and session.status == session.Status.ACTIVE:
+            return "active"
+        # Paid, but the connection could not be built — either the session failed on
+        # the router, or no session exists and the failure is recorded on the
+        # transaction (no router at all). Both are terminal for the customer.
+        if (session and session.status == session.Status.FAILED) or obj.provision_error:
+            return "failed"
+        # Paid, session being built. The portal keeps polling — but with a client-side
+        # safety timeout, so even a stuck task never becomes a forever-spinner.
+        return "connecting"
+
+    def get_provisioning(self, obj) -> str:
+        return self._provisioning_state(obj)
+
+    def get_provision_message(self, obj) -> str:
+        state = self._provisioning_state(obj)
+        if state != "failed":
+            return ""
+        # What the customer reads. It must reassure them the MONEY is safe first —
+        # that is their actual worry — then tell them what happens next.
+        return (
+            "We received your payment, but couldn't connect you automatically. "
+            "Your payment is safe. We'll keep trying — tap retry, or ask the operator "
+            "for help if it doesn't connect shortly."
+        )
 
     def get_session_active(self, obj) -> bool:
         return self._active_session(obj) is not None

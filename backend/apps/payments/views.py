@@ -23,7 +23,7 @@ from .serializers import (
     TransactionAdminSerializer,
     TransactionStatusSerializer,
 )
-from .services import initiate_stk_push, process_stk_callback
+from .services import ProvisioningUnavailable, initiate_stk_push, process_stk_callback
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +49,13 @@ class STKPushView(PublicAPIView):
             tx = initiate_stk_push(
                 phone=data["phone"], plan=data["plan"], mac=data["mac"], router=data["router"]
             )
+        except ProvisioningUnavailable as exc:
+            # No money was taken — we refused before the push. 409, not 502: nothing
+            # is broken on M-Pesa's side; this hotspot simply cannot serve yet.
+            return Response(
+                {"detail": str(exc), "reason": "no_router"},
+                status=status.HTTP_409_CONFLICT,
+            )
         except DarajaError as exc:
             logger.error("STK push failed: %s", exc)
             return Response(
@@ -67,6 +74,43 @@ class TransactionStatusView(PublicEndpointMixin, RetrieveAPIView):
     serializer_class = TransactionStatusSerializer
     queryset = Transaction.objects.select_related("plan")
     lookup_field = "public_id"
+
+
+@extend_schema(request=None, responses=OBJECT_RESPONSE,
+               summary="Re-attempt the connection for a paid transaction")
+class RetryProvisionView(PublicAPIView):
+    """The customer paid, provisioning failed, and they tapped "retry".
+
+    Anonymous on purpose (a hotspot customer has no login) and safe to be so: it is
+    keyed by the transaction's unguessable public_id, it only ever RE-ATTEMPTS a
+    connection the customer already paid for, and it moves no money. The worst an
+    abuser can do is enqueue a provisioning attempt for a transaction they already
+    know the id of — which does nothing but reconnect its rightful owner.
+    """
+
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "stk-push"
+
+    def post(self, request, public_id):
+        tx = Transaction.objects.select_related("session").filter(public_id=public_id).first()
+        if tx is None:
+            return Response({"detail": "Unknown payment."}, status=status.HTTP_404_NOT_FOUND)
+        if tx.status not in Transaction.SUCCESS_STATUSES:
+            return Response(
+                {"detail": "That payment hasn't completed yet."},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        from apps.provisioning.tasks import provision_transaction
+
+        # Clear the recorded transaction-level failure so the portal flips back to
+        # "connecting" immediately rather than showing stale "failed" until the task
+        # runs. The session (if any) is re-driven by the task itself.
+        if tx.provision_error:
+            tx.provision_error = ""
+            tx.save(update_fields=["provision_error", "updated_at"])
+        provision_transaction.delay(tx.id)
+        return Response({"detail": "Reconnecting you now.", "provisioning": "connecting"})
 
 
 @method_decorator(csrf_exempt, name="dispatch")

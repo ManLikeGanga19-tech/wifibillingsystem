@@ -16,11 +16,24 @@ RETRY_KWARGS = {
 
 @shared_task(bind=True, **RETRY_KWARGS)
 def provision_transaction(self, transaction_id: int):
-    """Paid transaction -> session on the router. Retries with backoff; a paid
-    customer must never be lost because a router blinked."""
+    """Paid transaction -> session on the router.
+
+    A PAID CUSTOMER MUST NEVER FALL INTO A VOID. The portal spins until it sees the
+    connection succeed OR fail, so this task's contract is: on the final attempt, the
+    transaction ends in a state the portal can read — an ACTIVE session, or a recorded
+    failure. Never "paid, and nothing happened".
+
+    Two failure shapes, both handled:
+      - the session cannot even be CREATED (the ISP deleted their last router between
+        the push and the callback): there is no session to mark, so the failure is
+        recorded on the TRANSACTION.
+      - the session is created but the router will not accept it (unreachable, tunnel
+        down): the SESSION is marked FAILED.
+    """
     from apps.payments.models import Transaction
 
     from . import services
+    from .models import Router
 
     tx = Transaction.objects.select_related("plan", "operator", "subscriber", "router").get(
         pk=transaction_id
@@ -28,25 +41,59 @@ def provision_transaction(self, transaction_id: int):
     if tx.status not in Transaction.SUCCESS_STATUSES:
         logger.warning("provision_transaction called for non-paid tx %s (%s)", tx.pk, tx.status)
         return
-    session = services.create_session_for_transaction(tx)
+
+    # Build the session. If there is no router at all, no session can exist (router is
+    # PROTECT/non-null) — so the failure has to live on the transaction, or the portal
+    # would poll a null session forever.
+    try:
+        session = services.create_session_for_transaction(tx)
+    except Router.DoesNotExist as exc:
+        _record_tx_provision_failure(tx, str(exc))
+        logger.error("Tx %s paid but no router to provision onto: %s", tx.pk, exc)
+        return  # nothing to retry — a router will not appear on its own
+
     try:
         services.activate(session)
+        # Success clears any earlier failure note so a retry reads clean.
+        if tx.provision_error:
+            _record_tx_provision_failure(tx, "")
     except Exception as exc:
         if self.request.retries >= self.max_retries:
+            # Final attempt. Record the failure and RETURN — do not re-raise. The
+            # customer's state is now visible (session FAILED) and there is nothing
+            # left to retry, so raising would only log a spurious task crash.
             session.status = session.Status.FAILED
             session.provision_error = str(exc)[:255]
             session.save(update_fields=["status", "provision_error", "updated_at"])
             logger.error("Session %s permanently failed to provision: %s", session.pk, exc)
-        raise
+            return
+        raise  # earlier attempts: raise so Celery retries with backoff
+
+
+def _record_tx_provision_failure(tx, message: str) -> None:
+    tx.provision_error = message[:255]
+    tx.save(update_fields=["provision_error", "updated_at"])
 
 
 @shared_task(bind=True, **RETRY_KWARGS)
 def activate_session(self, session_id: int):
-    """Provision an already-created session (voucher redemptions)."""
+    """Provision an already-created session (voucher redemptions, and retries of a
+    failed hotspot session). Ends in a visible state: ACTIVE, or FAILED on the last
+    attempt — never stuck PENDING, which the portal cannot tell from 'still trying'."""
     from .models import Session
     from .services import activate
 
-    activate(Session.objects.select_related("plan", "router", "operator").get(pk=session_id))
+    session = Session.objects.select_related("plan", "router", "operator").get(pk=session_id)
+    try:
+        activate(session)
+    except Exception as exc:
+        if self.request.retries >= self.max_retries:
+            session.status = Session.Status.FAILED
+            session.provision_error = str(exc)[:255]
+            session.save(update_fields=["status", "provision_error", "updated_at"])
+            logger.error("Session %s permanently failed to provision: %s", session.pk, exc)
+            return
+        raise
 
 
 @shared_task(bind=True, **RETRY_KWARGS)
@@ -58,6 +105,36 @@ def suspend_session(self, session_id: int, new_status: str | None = None):
         Session.objects.select_related("plan", "router", "operator").get(pk=session_id),
         new_status,
     )
+
+
+@shared_task
+def retry_failed_provisions():
+    """Beat task: reconnect paid customers whose provisioning FAILED, once the router
+    is likely back.
+
+    A hotspot session is short-lived, so this only bothers with recent failures — an
+    hour old at most. Beyond that the customer has given up and re-paying is cleaner
+    than silently connecting someone who walked away an hour ago. The point is the
+    common case: the router blinked for thirty seconds, five people paid during the
+    outage, and they all reconnect on their own without a support call.
+    """
+    from datetime import timedelta
+
+    from .models import Session
+
+    cutoff = timezone.now() - timedelta(hours=1)
+    stale = Session.objects.filter(
+        status=Session.Status.FAILED,
+        updated_at__gte=cutoff,
+        expires_at__gt=timezone.now(),  # don't revive a window that has already closed
+    ).values_list("id", flat=True)
+    for session_id in list(stale):
+        # Flip to PENDING so it is not picked up twice, then re-attempt.
+        flipped = Session.objects.filter(
+            id=session_id, status=Session.Status.FAILED
+        ).update(status=Session.Status.PENDING)
+        if flipped:
+            activate_session.delay(session_id)
 
 
 @shared_task

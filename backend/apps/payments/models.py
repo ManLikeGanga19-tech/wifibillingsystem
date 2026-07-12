@@ -43,6 +43,12 @@ class Transaction(OperatorOwnedModel):
     raw_callback = models.JSONField(null=True, blank=True)
     callback_received_at = models.DateTimeField(null=True, blank=True)
     reconcile_attempts = models.PositiveSmallIntegerField(default=0)
+    # Set when provisioning permanently fails AFTER a successful payment — including
+    # the case where no session could even be created (e.g. the ISP has no router).
+    # Without this, a paid customer whose connection could not be built is invisible
+    # to the portal, which then spins forever. This is the customer's proof that we
+    # took the money and know the connection failed.
+    provision_error = models.CharField(max_length=255, blank=True)
     # Estimated M-Pesa collection cost the platform (Danamo) bears. Not charged
     # to the ISP; used for true-margin reporting.
     platform_cost = models.DecimalField(max_digits=8, decimal_places=2, default=0)

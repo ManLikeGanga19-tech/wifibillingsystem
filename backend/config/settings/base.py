@@ -193,6 +193,12 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.provisioning.tasks.expire_sessions",
         "schedule": 60.0,
     },
+    # Reconnect paid customers whose provisioning failed while a router was briefly
+    # down. Runs often, because a hotspot customer paid seconds ago and is waiting.
+    "retry-failed-provisions": {
+        "task": "apps.provisioning.tasks.retry_failed_provisions",
+        "schedule": 60.0,
+    },
     "reconcile-pending-transactions": {
         "task": "apps.payments.tasks.reconcile_pending_transactions",
         "schedule": 300.0,

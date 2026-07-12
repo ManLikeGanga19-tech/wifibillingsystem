@@ -16,11 +16,44 @@ from .models import Transaction
 logger = logging.getLogger(__name__)
 
 
+class ProvisioningUnavailable(Exception):
+    """We cannot connect this customer, so we must not take their money.
+
+    Raised BEFORE the STK push. The single worst thing this system can do is charge a
+    customer and then fail to connect them — so if we already know we cannot deliver
+    (the ISP has no working router), we refuse at the door instead of taking money we
+    cannot honour and leaving them staring at a spinner.
+    """
+
+
 def initiate_stk_push(*, phone: str, plan, mac: str = "", router=None) -> Transaction:
     """Tenant context comes from the plan: money always flows to the paybill of
     the operator who owns the plan being bought."""
     phone = normalize_msisdn(phone)
     operator = plan.operator
+
+    # PRE-FLIGHT. Do not charge for what we cannot deliver. A customer's payment is a
+    # promise to connect them; if the ISP has no active router, that promise is
+    # already broken and the honest answer is "not now", not a debit followed by a
+    # forever-spinner. A specific router was validated by the serializer to belong to
+    # this operator, so its presence is enough; otherwise the operator needs at least
+    # one active router.
+    from apps.provisioning.models import Router
+
+    has_router = router is not None or Router.objects.filter(
+        operator=operator, is_active=True
+    ).exists()
+    if not has_router:
+        logger.error(
+            "STK push refused for %s: operator %s has no active router",
+            phone,
+            operator.slug,
+        )
+        raise ProvisioningUnavailable(
+            "This hotspot is not ready to accept payments yet. Please tell the "
+            "operator, or try again shortly."
+        )
+
     subscriber, _ = Subscriber.get_or_create_for(operator, phone)
     tx = Transaction.objects.create(
         operator=operator,

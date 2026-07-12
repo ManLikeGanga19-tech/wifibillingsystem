@@ -27,6 +27,14 @@ export interface PaymentStatus {
   result_desc: string;
   session_active: boolean;
   session: SessionInfo | null;
+  /** The state that lets the portal stop spinning. `pending` before payment,
+   *  then `connecting` -> `active`, or `failed` if we took the money but couldn't
+   *  build the connection. Without this the portal could not tell "still connecting"
+   *  from "failed forever" and span indefinitely after a paid-but-unprovisioned. */
+  provisioning: 'pending' | 'connecting' | 'active' | 'failed';
+  /** Customer-facing, non-empty only when provisioning === 'failed'. Leads with
+   *  "your payment is safe" because that is what they are actually afraid of. */
+  provision_message: string;
 }
 
 export interface VoucherRedeemResponse {
@@ -78,6 +86,12 @@ export function initiateStkPush(params: {
 
 export function getPaymentStatus(transactionId: string): Promise<PaymentStatus> {
   return request(`/payments/status/${transactionId}/`);
+}
+
+/** Re-attempt a connection the customer already paid for. Money doesn't move; it just
+ *  re-drives provisioning after a failure. */
+export function retryProvision(transactionId: string): Promise<{ detail: string }> {
+  return request(`/payments/status/${transactionId}/retry/`, { method: 'POST' });
 }
 
 export function redeemVoucher(params: {

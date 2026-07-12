@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Wifi, Smartphone, Ticket, ArrowLeft, Loader2, CheckCircle2, XCircle, RefreshCw } from 'lucide-react';
+import { Wifi, Smartphone, Ticket, ArrowLeft, Loader2, CheckCircle2, XCircle, RefreshCw, AlertTriangle } from 'lucide-react';
 import {
   ApiError,
   getPaymentStatus,
   initiateStkPush,
   listPlans,
   redeemVoucher,
+  retryProvision,
   type PaymentStatus,
   type Plan,
   type SessionInfo,
@@ -15,12 +16,19 @@ import { formatDuration, formatExpiry, formatKsh, formatSpeed, isValidKenyanPhon
 
 const POLL_INTERVAL_MS = 3000;
 const POLL_TIMEOUT_MS = 120_000;
+// Last-resort net for the "connecting" phase: if the backend never resolves it to
+// active or failed (Celery down, say), we still stop spinning and show the money-safe
+// recovery screen. Generous, because the backend legitimately retries with backoff.
+const CONNECT_GRACE_MS = 90_000;
 
 type Stage =
   | { kind: 'browse' }
   | { kind: 'phone'; plan: Plan }
   | { kind: 'waiting'; planName: string; txId: string; startedAt: number }
   | { kind: 'paid'; status: PaymentStatus }
+  // Paid, but we could not build the connection. A TERMINAL, money-safe, retryable
+  // state — the thing that replaces the infinite spinner.
+  | { kind: 'paid-not-connected'; txId: string; status: PaymentStatus }
   | { kind: 'failed'; reason: string; planName?: string }
   | { kind: 'voucher-ok'; session: SessionInfo };
 
@@ -62,11 +70,23 @@ export default function App() {
         return; // transient network error — next tick retries
       }
       if (status.status === 'success' || status.status === 'reconciled') {
-        if (status.session_active) {
+        // Payment landed. Now the connection — and this is where the old code could
+        // spin forever, because it only recognised the ACTIVE case and had no exit
+        // for a provisioning failure. The `provisioning` field gives us the three
+        // real outcomes.
+        if (status.provisioning === 'active') {
           writePending(null);
           setStage({ kind: 'paid', status });
+        } else if (
+          status.provisioning === 'failed' ||
+          Date.now() - stage.startedAt > CONNECT_GRACE_MS
+        ) {
+          // Terminal, money-safe, retryable. NEVER leave them on a spinner after we
+          // took their money.
+          writePending(null);
+          setStage({ kind: 'paid-not-connected', txId: stage.txId, status });
         }
-        // paid but session still provisioning: keep polling until session_active
+        // else 'connecting' and still within grace — keep polling.
       } else if (status.status !== 'pending') {
         writePending(null);
         const reason =
@@ -105,6 +125,19 @@ export default function App() {
     if (captive.loginUrl) {
       submitRouterLogin(captive.loginUrl, session.hotspot_username, session.hotspot_password, captive.origUrl);
     }
+  };
+
+  // From the money-safe recovery screen: re-attempt the connection they paid for,
+  // then resume polling so a success flips them straight to connected.
+  const retryConnection = async (txId: string, planName: string) => {
+    try {
+      await retryProvision(txId);
+    } catch {
+      /* the poll below will still surface the real state */
+    }
+    const pending = { txId, planName, startedAt: Date.now() };
+    writePending(pending);
+    setStage({ kind: 'waiting', ...pending });
   };
 
   return (
@@ -173,6 +206,36 @@ export default function App() {
 
         {stage.kind === 'paid' && (
           <SuccessCard status={stage.status} hasRouterLogin={!!captive.loginUrl} onConnect={connectDevice} />
+        )}
+
+        {stage.kind === 'paid-not-connected' && (
+          <Card>
+            <div className="flex flex-col items-center text-center py-4 gap-3">
+              {/* Amber, NOT red. Red says "your money is gone"; this is "money safe,
+                  connection pending" — a completely different feeling, and the true one. */}
+              <AlertTriangle className="h-12 w-12 text-[#B26B00]" />
+              <h2 className="font-bold text-lg">Payment received — connecting you</h2>
+              <p className="text-sm text-[#141414]/70 leading-relaxed">
+                {stage.status.provision_message ||
+                  "We received your payment, but couldn't connect you automatically. Your payment is safe."}
+              </p>
+              {stage.status.mpesa_receipt && (
+                <p className="text-xs font-mono text-[#141414]/50">
+                  M-Pesa receipt: <b>{stage.status.mpesa_receipt}</b>
+                </p>
+              )}
+              <button
+                onClick={() => retryConnection(stage.txId, '')}
+                className="mt-2 w-full bg-[#228B22] text-white font-bold py-3.5 flex items-center justify-center gap-2 active:opacity-85"
+              >
+                <RefreshCw className="h-4 w-4" /> Retry connection
+              </button>
+              <p className="text-xs text-[#141414]/50 leading-relaxed">
+                No need to pay again. If it still doesn&apos;t connect, show this screen to
+                the WiFi operator — your receipt above proves your payment.
+              </p>
+            </div>
+          </Card>
         )}
 
         {stage.kind === 'voucher-ok' && (
