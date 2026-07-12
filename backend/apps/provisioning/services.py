@@ -88,6 +88,67 @@ def create_session_for_voucher(voucher, mac: str = "", router=None) -> Session:
     )
 
 
+class ReprovisionError(Exception):
+    """Something the ISP can fix (the payment isn't complete, no router). Safe to show."""
+
+
+def reprovision_transaction(tx, *, actor=None, compensate: bool = True):
+    """The ISP (or support) reconnecting a paid customer who never got online.
+
+    This is the human-authorised recovery for "payment came through — including via
+    reconciliation — but the customer never connected". Unlike the automatic beat
+    retry, which is conservative and only touches sessions still inside their window,
+    this is a person saying "yes, reconnect them", so it COMPENSATES: the customer paid
+    for the full plan and received nothing, so their time starts fresh from now.
+
+    Returns the session, left in PENDING with a re-attempt queued. The dashboard then
+    shows it going connecting -> active exactly like a first-time payment.
+    """
+    from apps.payments.models import Transaction
+
+    if tx.status not in Transaction.SUCCESS_STATUSES:
+        raise ReprovisionError("This payment hasn't completed, so there's nothing to reconnect.")
+
+    try:
+        session = create_session_for_transaction(tx)
+    except Router.DoesNotExist as exc:
+        raise ReprovisionError(
+            "No active router to connect them to. Add or bring a router online first."
+        ) from exc
+
+    now = timezone.now()
+    if compensate or session.expires_at <= now:
+        # Fresh full window — they got zero service for what they paid.
+        session.starts_at = now
+        session.expires_at = now + tx.plan.duration
+    session.status = Session.Status.PENDING
+    session.provision_error = ""
+    session.save(
+        update_fields=["starts_at", "expires_at", "status", "provision_error", "updated_at"]
+    )
+
+    # Clear any transaction-level failure note so the portal/dashboard flip to
+    # "connecting" immediately.
+    if tx.provision_error:
+        tx.provision_error = ""
+        tx.save(update_fields=["provision_error", "updated_at"])
+
+    audit(
+        "session_reconnected",
+        operator=tx.operator,
+        actor=actor,
+        target=session,
+        transaction=str(tx.public_id),
+        compensated=compensate,
+        new_expiry=session.expires_at.isoformat(),
+    )
+
+    from .tasks import activate_session
+
+    activate_session.delay(session.id)
+    return session
+
+
 def activate(session: Session) -> None:
     """Push credentials to the router. Raises on failure so Celery retries."""
     if session.status == Session.Status.ACTIVE:

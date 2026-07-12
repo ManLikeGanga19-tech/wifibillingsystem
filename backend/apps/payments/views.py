@@ -8,6 +8,7 @@ from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
+from rest_framework.decorators import action
 from rest_framework.generics import RetrieveAPIView
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
@@ -15,6 +16,8 @@ from rest_framework.throttling import ScopedRateThrottle
 from apps.core.public import PublicAPIView, PublicEndpointMixin
 from apps.core.schema import OBJECT_RESPONSE
 from apps.core.viewsets import TenantReadOnlyViewSet
+from apps.provisioning.models import Session
+from apps.provisioning.services import ReprovisionError, reprovision_transaction
 
 from .daraja import DarajaError
 from .models import Transaction
@@ -185,11 +188,44 @@ class TransactionViewSet(TenantReadOnlyViewSet):
     """Admin UI: live transaction feed (tenant-scoped)."""
 
     serializer_class = TransactionAdminSerializer
-    queryset = Transaction.objects.select_related("plan").order_by("-created_at")
+    queryset = Transaction.objects.select_related("plan", "session").order_by("-created_at")
 
     def get_queryset(self):
         qs = super().get_queryset()
         status_param = self.request.query_params.get("status")
         if status_param:
             qs = qs.filter(status=status_param)
+        # "Paid but never connected" — the queue the ISP works from. A paid transaction
+        # (incl. reconciled) whose session is not ACTIVE, or that has no session at all.
+        if self.request.query_params.get("unconnected"):
+            qs = qs.filter(status__in=Transaction.SUCCESS_STATUSES).exclude(
+                session__status=Session.Status.ACTIVE
+            )
         return qs
+
+    @extend_schema(request=None, responses=OBJECT_RESPONSE,
+                   summary="Reconnect a paid customer who never got online (fresh window)")
+    @action(detail=True, methods=["post"])
+    def reconnect(self, request, pk=None):
+        """The ISP reconnecting a paid customer manually — the far-away-customer case.
+
+        NOT gated by the money-impersonation block: reconnecting delivers a service the
+        customer already paid for, it moves no money, and it is exactly what platform
+        support should be able to do while helping. Read-only support still can't (they
+        can't write anything), which is correct."""
+        tx = self.get_object()  # tenant-scoped by TenantScopedMixin
+        try:
+            session = reprovision_transaction(tx, actor=request.user, compensate=True)
+        except ReprovisionError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        tx.refresh_from_db()
+        return Response(
+            {
+                **TransactionAdminSerializer(tx).data,
+                "detail": (
+                    "Reconnecting them now with a fresh "
+                    f"{tx.plan.name} — their time starts over."
+                ),
+                "new_expiry": session.expires_at.isoformat(),
+            }
+        )

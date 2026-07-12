@@ -136,6 +136,11 @@ class TransactionStatusSerializer(serializers.ModelSerializer):
 
 class TransactionAdminSerializer(serializers.ModelSerializer):
     plan_name = serializers.CharField(source="plan.name", read_only=True)
+    #: So the ISP dashboard can flag "they paid but never connected" — the exact case
+    #: this ISP-facing reconnect flow exists for. Reuses the same states the portal
+    #: sees: connecting | active | failed (or pending, before payment).
+    provisioning = serializers.SerializerMethodField()
+    session_expires_at = serializers.SerializerMethodField()
 
     class Meta:
         model = Transaction
@@ -152,4 +157,20 @@ class TransactionAdminSerializer(serializers.ModelSerializer):
             "result_desc",
             "created_at",
             "callback_received_at",
+            "provisioning",
+            "session_expires_at",
         ]
+
+    def get_provisioning(self, obj) -> str:
+        if obj.status not in Transaction.SUCCESS_STATUSES:
+            return "pending"
+        session = getattr(obj, "session", None)
+        if session and session.status == session.Status.ACTIVE:
+            return "active"
+        if (session and session.status == session.Status.FAILED) or obj.provision_error:
+            return "failed"
+        return "connecting"
+
+    def get_session_expires_at(self, obj) -> str | None:
+        session = getattr(obj, "session", None)
+        return session.expires_at.isoformat() if session else None

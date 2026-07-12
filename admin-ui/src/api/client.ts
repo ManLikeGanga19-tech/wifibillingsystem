@@ -128,6 +128,11 @@ export interface ApiTransaction {
   result_desc: string;
   created_at: string;
   callback_received_at: string | null;
+  /** Whether the paid customer actually got online. `failed` (or a paid tx with no
+   *  active session) is the "they paid but never connected" case the reconnect flow
+   *  exists for. */
+  provisioning: 'pending' | 'connecting' | 'active' | 'failed';
+  session_expires_at: string | null;
 }
 
 export interface ApiCampaign {
@@ -751,6 +756,15 @@ export const api = {
   transactions: {
     list: (status?: string) =>
       request<Paginated<ApiTransaction>>(`/payments/transactions/${status ? `?status=${status}` : ''}`),
+    /** The "paid but never connected" queue — paid (incl. reconciled) with no active session. */
+    unconnected: () =>
+      request<Paginated<ApiTransaction>>('/payments/transactions/?unconnected=1'),
+    /** Reconnect a paid customer with a fresh full window (compensation). */
+    reconnect: (id: number) =>
+      request<ApiTransaction & { detail: string; new_expiry: string }>(
+        `/payments/transactions/${id}/reconnect/`,
+        { method: 'POST' }
+      ),
   },
 
   campaigns: {
