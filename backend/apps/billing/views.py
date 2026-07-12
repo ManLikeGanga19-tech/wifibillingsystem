@@ -7,6 +7,8 @@ from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.accounts import mfa
+from apps.accounts.mfa import MfaError, MfaRequired
 from apps.core.permissions import (
     CanManageMoney,
     IsPlatformOwner,
@@ -87,6 +89,23 @@ class MyPayoutsViewSet(TenantReadOnlyViewSet):
             perms = [*perms, TenantCanTransact()]
         return perms
 
+    def handle_exception(self, exc):
+        if isinstance(exc, MfaRequired):
+            # A DEMAND, not a failure. `mfa_required` tells the console to show the
+            # code box (or the enrol-your-authenticator screen, if `enrolled` is false)
+            # instead of rendering this as a red error and stranding them.
+            return Response(
+                {
+                    "detail": str(exc),
+                    "mfa_required": True,
+                    "enrolled": mfa.is_enrolled(self.request.user),
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if isinstance(exc, MfaError):
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return super().handle_exception(exc)
+
     @action(detail=False, methods=["post"])
     def withdraw(self, request):
         operator = self.get_operator()
@@ -94,6 +113,12 @@ class MyPayoutsViewSet(TenantReadOnlyViewSet):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
         method = data["method"]
+
+        # THE SECOND FACTOR, enforced here rather than inside request_payout: the
+        # service is also driven by platform tooling and tests, where a six-digit code
+        # from someone's phone has no meaning. This is the only door an ISP can push
+        # money through, so this is where the lock belongs.
+        mfa.require(request.user, data.get("mfa_code", ""))
 
         destination = {}
         if method == "mpesa":

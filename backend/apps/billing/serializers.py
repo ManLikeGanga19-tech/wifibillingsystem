@@ -44,3 +44,6 @@ class WithdrawSerializer(serializers.Serializer):
     bank_name = serializers.CharField(max_length=80, required=False, allow_blank=True)
     bank_account_number = serializers.CharField(max_length=40, required=False, allow_blank=True)
     bank_account_name = serializers.CharField(max_length=120, required=False, allow_blank=True)
+    #: The 6-digit code from the ISP owner's authenticator app — or one of their
+    #: recovery codes. Required: this is money leaving our custody.
+    mfa_code = serializers.CharField(max_length=32, required=False, allow_blank=True)

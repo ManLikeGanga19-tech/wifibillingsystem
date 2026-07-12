@@ -145,3 +145,25 @@ class VoucherFactory(factory.django.DjangoModelFactory):
     operator = factory.SubFactory(OperatorFactory)
     plan = factory.SubFactory(PlanFactory)
     code = factory.Sequence(lambda n: f"TESTV{n:04d}")
+
+
+def enrol_mfa(user) -> str:
+    """Give a user a working authenticator and hand back the shared secret.
+
+    Withdrawing needs a second factor now, so any test that moves money through the
+    API has to hold one. Doing it through the real enrolment path (rather than poking
+    a row into the DB) means these tests would notice if enrolment itself broke.
+    """
+    import pyotp
+
+    from apps.accounts import mfa
+
+    device = mfa.begin_enrolment(user)
+    mfa.confirm_enrolment(user, pyotp.TOTP(device.secret).now())
+    return device.secret
+
+
+def mfa_code(secret: str) -> str:
+    import pyotp
+
+    return pyotp.TOTP(secret).now()

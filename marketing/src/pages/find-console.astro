@@ -1,0 +1,32 @@
+---
+import FindConsole from '../components/FindConsole';
+import Base from '../layouts/Base.astro';
+---
+
+<Base
+  title="Find my console — WIFI.OS"
+  description="Lost the link to your WIFI.OS console? Enter your email and we'll send it to you."
+  hideCta
+>
+  <section>
+    <div class="mx-auto max-w-xl px-4 py-14 sm:px-6 sm:py-20">
+      <h1 class="font-serif text-3xl font-bold sm:text-4xl">Where do I sign in?</h1>
+      <p class="mt-3 text-sm leading-relaxed text-ink/70">
+        You don't sign in here. Every ISP has its own address —
+        <span class="font-mono font-bold">yourname.wifios.co.ke</span> — and we emailed it
+        to you when your account was created. Lost it? Put your email in below and we'll
+        send it again.
+      </p>
+
+      <div class="mt-7">
+        <FindConsole client:load />
+      </div>
+
+      <p class="mt-6 font-mono text-[10px] leading-relaxed text-ink/50">
+        Don't have an account yet?{' '}
+        <a href="/signup" class="font-bold underline">Create one</a> — it takes about two
+        minutes.
+      </p>
+    </div>
+  </section>
+</Base>

@@ -32,13 +32,14 @@ const links = [
       }
     </div>
 
+    {/*
+      NO "SIGN IN" BUTTON — deliberately. There is no shared front door to point it
+      at: every ISP signs in at their OWN address (theirslug.wifios.co.ke), which they
+      get by email the moment their account is created. A generic button would lead
+      nowhere. The way back for someone who has lost that link is /find-console, in
+      the footer.
+    */}
     <div class="ml-auto flex items-center gap-2 md:ml-0">
-      <a
-        href="http://localhost:4600"
-        class="border border-ink bg-card px-3 py-2 font-mono text-[11px] font-bold uppercase transition hover:bg-hover"
-      >
-        Sign in
-      </a>
       {
         !hideCta && (
           <a

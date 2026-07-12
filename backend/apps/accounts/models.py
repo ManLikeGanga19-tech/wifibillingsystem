@@ -162,3 +162,9 @@ class Subscriber(models.Model):
         return cls.objects.get_or_create(
             operator=operator, phone=normalize_msisdn(phone), defaults=defaults
         )
+
+
+# The MFA models live in mfa.py (they belong with the logic that uses them), but
+# Django only discovers models imported from models.py. The string reference to
+# "accounts.User" inside them keeps this from being circular.
+from .mfa import MfaDevice, RecoveryCode  # noqa: E402,F401

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Wallet, ArrowDownToLine, Loader2 } from 'lucide-react';
-import { api, ApiLedgerEntry, ApiPayout, Settlement, WalletSummary } from '../api/client';
+import { api, ApiLedgerEntry, ApiPayout, asMfaChallenge, MfaChallenge, Settlement, WalletSummary, WithdrawPayload } from '../api/client';
 import ConfirmPayout from './ConfirmPayout';
+import MfaGate from './MfaGate';
 import SettlementSetup from './SettlementSetup';
 import { Badge, Btn, Field, inputCls, Panel, RefreshBtn, TableShell, tdCls, toast, ViewHeader, fmtDateTime, fmtKsh } from './ui';
 
@@ -26,6 +27,9 @@ export default function WalletView() {
   const [phone, setPhone] = useState('');
   const [bank, setBank] = useState({ bank_name: '', bank_account_number: '', bank_account_name: '' });
   const [busy, setBusy] = useState(false);
+  // The second factor. Held in memory for one request and then dropped — a code that
+  // authorises a withdrawal is the last thing that should ever touch storage.
+  const [challenge, setChallenge] = useState<MfaChallenge | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -49,22 +53,37 @@ export default function WalletView() {
     load();
   }, [load]);
 
-  const withdraw = async (e: FormEvent) => {
-    e.preventDefault();
-    if (busy) return;
+  /** One place the withdrawal is actually sent, so the retry-with-a-code path is the
+   *  SAME code path as the first attempt — not a second, subtly different one. */
+  const send = async (mfa_code?: string) => {
+    const payload: WithdrawPayload =
+      method === 'mpesa'
+        ? { amount, method, phone, mfa_code }
+        : { amount, method, ...bank, mfa_code };
+
     setBusy(true);
     try {
-      await api.billing.payouts.withdraw(
-        method === 'mpesa' ? { amount, method, phone } : { amount, method, ...bank }
-      );
+      await api.billing.payouts.withdraw(payload);
+      setChallenge(null);
       toast('success', 'Withdrawal requested — the platform will pay it out shortly.');
       setAmount('');
       load();
     } catch (err) {
-      toast('error', err instanceof Error ? err.message : 'Withdrawal failed.');
+      // Not an error to shout about: the server is asking for the second factor (or
+      // telling us they have no authenticator yet). Open the gate instead of painting
+      // the screen red.
+      const mfa = asMfaChallenge(err);
+      if (mfa) setChallenge(mfa);
+      else toast('error', err instanceof Error ? err.message : 'Withdrawal failed.');
     } finally {
       setBusy(false);
     }
+  };
+
+  const withdraw = (e: FormEvent) => {
+    e.preventDefault();
+    if (busy) return;
+    send();
   };
 
   if (!summary && !error)
@@ -83,6 +102,14 @@ export default function WalletView() {
       >
         <RefreshBtn onClick={load} />
       </ViewHeader>
+
+      {challenge && (
+        <MfaGate
+          challenge={challenge}
+          onCode={(code) => send(code)}
+          onCancel={() => setChallenge(null)}
+        />
+      )}
 
       {/* Pinned above everything: their money is already out, and this is what
           unlocks the next withdrawal. Blocking a payout without explaining it is

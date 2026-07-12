@@ -22,6 +22,7 @@ from .services import (
     RateLimited,
     SignupError,
     complete_signup,
+    find_console,
     name_available,
     resend_code,
     set_company,
@@ -126,6 +127,10 @@ class DetailsSerializer(serializers.Serializer):
             return normalize_msisdn(value)
         except InvalidPhoneError as exc:
             raise serializers.ValidationError(str(exc)) from exc
+
+
+class FindConsoleSerializer(serializers.Serializer):
+    email = serializers.EmailField()
 
 
 class CompleteSerializer(serializers.Serializer):
@@ -317,3 +322,31 @@ class CompleteView(_Base):
         # The draft is spent. Drop the cookie so a refresh doesn't re-enter the wizard.
         resp.delete_cookie(SIGNUP_COOKIE, path="/")
         return resp
+
+
+@extend_schema(request=FindConsoleSerializer, responses=OBJECT_RESPONSE,
+               summary="Email me the address of my console")
+class FindConsoleView(_Base):
+    """Every ISP signs in at their own subdomain, so there is no shared front door to
+    put a "Sign in" button on. This is the door instead: tell us your email, and the
+    link goes to your inbox.
+
+    The response NEVER changes. Registered or not, the caller is told the same thing —
+    a lookup that answers "yes, that ISP banks with us" is an enumeration oracle
+    wearing a helpful face.
+    """
+
+    throttle_scope = "signup-check"
+
+    def post(self, request):
+        s = FindConsoleSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        find_console(email=s.validated_data["email"], ip=_ip(request))
+        return Response(
+            {
+                "detail": (
+                    "If that address has an account, we've emailed you the link to "
+                    "your console."
+                )
+            }
+        )

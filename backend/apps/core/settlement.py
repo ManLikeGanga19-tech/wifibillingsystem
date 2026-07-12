@@ -196,14 +196,29 @@ def set_settlement_account(
     """
     changing = operator.has_settlement_account
     if changing:
-        if not code:
+        # TWO WAYS TO PROVE IT, and we take the stronger one they have.
+        #
+        # An authenticator beats an emailed code at this job: it does not depend on
+        # mail delivery, and an attacker who owns the owner's inbox still cannot
+        # produce a code. So if they have enrolled one, that is what we ask for — the
+        # email code is not offered as an alternative, or it becomes the weakest link
+        # and the strong factor is decoration.
+        #
+        # Either way the owner gets a tripwire EMAIL once the change lands. Being
+        # asked and being told are different things, and they need both.
+        from apps.accounts import mfa
+
+        if actor is not None and mfa.is_enrolled(actor):
+            mfa.verify(actor, code)  # raises MfaRequired with no code, MfaError if wrong
+        elif not code:
             # Not a rejection — a step. Send the code and tell them where it went.
             masked = request_change_code(operator, actor=actor)
             raise ChangeCodeRequired(
                 f"Changing where we pay you needs a code. We've emailed one to "
                 f"{masked}. Enter it to lock in the new account."
             )
-        _check_change_code(operator, code, actor=actor)
+        else:
+            _check_change_code(operator, code, actor=actor)
 
     was_confirmed = operator.settlement_verified_at is not None
     old_destination = operator.settlement_destination

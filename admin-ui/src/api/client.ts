@@ -398,6 +398,40 @@ export interface WithdrawPayload {
   bank_name?: string;
   bank_account_number?: string;
   bank_account_name?: string;
+  /** Six digits from the owner's authenticator app — or one of their recovery codes.
+   *  Money does not leave without it. */
+  mfa_code?: string;
+}
+
+export interface MfaStatus {
+  enrolled: boolean;
+  confirmed_at: string | null;
+  recovery_codes_left: number;
+  why: string;
+}
+
+export interface MfaSetup {
+  /** A PNG data URI. Rendered server-side — our CSP forbids fetching a QR library
+   *  from a CDN, and bundling one to draw a picture of a secret the server already
+   *  has would be silly. */
+  qr: string;
+  uri: string;
+  /** For anyone who cannot scan (a desktop authenticator, say). */
+  secret: string;
+}
+
+/** A 403 the console must not render as a red error: it means "ask for a code", or
+ *  "send them to enrol", depending on `enrolled`. */
+export interface MfaChallenge {
+  mfa_required: true;
+  enrolled: boolean;
+  detail: string;
+}
+
+export function asMfaChallenge(err: unknown): MfaChallenge | null {
+  if (!(err instanceof ApiError)) return null;
+  const body = err.body as Partial<MfaChallenge> | null;
+  return body?.mfa_required ? (body as MfaChallenge) : null;
 }
 
 export interface ApiTenant {
@@ -628,6 +662,26 @@ export const api = {
 
   /** Where WE pay THEM. Registering is INSTANT — that's what switches payments on.
    *  The first payout then carries a code they read back, which unlocks the rest. */
+  mfa: {
+    status: () => request<MfaStatus>('/auth/mfa/'),
+    setup: () => request<MfaSetup>('/auth/mfa/setup/', { method: 'POST' }),
+    confirm: (code: string) =>
+      request<{ detail: string; recovery_codes: string[]; warning: string }>(
+        '/auth/mfa/confirm/',
+        { method: 'POST', body: JSON.stringify({ code }) }
+      ),
+    regenerate: (code: string) =>
+      request<{ recovery_codes: string[]; detail: string }>('/auth/mfa/recovery-codes/', {
+        method: 'POST',
+        body: JSON.stringify({ code }),
+      }),
+    disable: (code: string) =>
+      request<{ detail: string }>('/auth/mfa/disable/', {
+        method: 'POST',
+        body: JSON.stringify({ code }),
+      }),
+  },
+
   settlement: {
     get: () => request<Settlement>('/operator/settlement/'),
     set: (body: Record<string, string>) =>

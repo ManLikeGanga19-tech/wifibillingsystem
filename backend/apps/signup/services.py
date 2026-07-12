@@ -317,16 +317,66 @@ def _send_code(email: str, name: str, code: str) -> None:
     )
 
 
+def console_url_for(user) -> str:
+    """An ISP does not sign in at a shared front door — they sign in at their OWN
+    address. There is no generic /signin to send anybody to."""
+    if user and user.operator:
+        return f"https://{user.operator.slug}.wifios.co.ke"
+    return CONSOLE_URL
+
+
 def _send_already_registered(email: str) -> None:
     """The anti-enumeration path: the caller gets the same response either way, but
     the real owner of the inbox gets told what's actually going on."""
+    user = User.objects.filter(email__iexact=email).first()
     _send(
         "You already have a WIFI.OS account",
         "Hi,\n\n"
         "Someone (probably you) tried to create a WIFI.OS account with this email "
         "address — but you already have one.\n\n"
-        f"Sign in instead: {CONSOLE_URL}/signin\n\n"
+        f"Sign in instead: {console_url_for(user)}\n\n"
         "If this wasn't you, no action is needed. Your account is untouched.\n\n"
+        "— WIFI.OS",
+        email,
+    )
+
+
+def find_console(*, email: str, ip: str | None = None) -> None:
+    """"I've forgotten where my console lives."
+
+    Every ISP signs in at their own subdomain, so an operator who lands back on the
+    marketing site six months later has no door to knock on. This is that door.
+
+    It tells the CALLER nothing — same response whether or not the address is
+    registered — because a lookup that answers "yes, that ISP banks with us" is an
+    enumeration oracle wearing a helpful face. The answer goes to the inbox, which is
+    the only place that can prove it owns the address.
+    """
+    email = (email or "").strip().lower()
+    if not email:
+        return
+
+    # Same per-target counters as signup: this endpoint sends mail to an address the
+    # caller chooses, which is exactly how you get used to bomb someone's inbox.
+    if not SignupThrottle.hit(f"find:{email}", SignupThrottle.MAX_PER_EMAIL):
+        raise RateLimited("Too many requests for this address. Try again later.")
+    if ip and not SignupThrottle.hit(f"ip:{ip}", SignupThrottle.MAX_PER_IP):
+        raise RateLimited("Too many requests from this network. Try again later.")
+
+    user = User.objects.filter(email__iexact=email).select_related("operator").first()
+    if user is None or user.operator is None:
+        # Say nothing, send nothing, act the same. The 200 the caller gets is a lie
+        # by omission, and it is the whole point.
+        logger.info("Console lookup for unknown address %s — no mail sent", email)
+        return
+
+    _send(
+        f"Your WIFI.OS console — {user.operator.name}",
+        f"Hi {user.name or 'there'},\n\n"
+        f"Here is your console:\n\n    {console_url_for(user)}\n\n"
+        "Sign in with this email address or your phone number, and the password you "
+        "set when you signed up.\n\n"
+        "If you didn't ask for this, you can ignore it — nothing has changed.\n\n"
         "— WIFI.OS",
         email,
     )

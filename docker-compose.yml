@@ -17,11 +17,21 @@ x-backend: &backend
     DARAJA_CALLBACK_TOKEN: ${DARAJA_CALLBACK_TOKEN:-dev-callback-token}
     AT_API_KEY: ${AT_API_KEY:-}
     NOTIFICATIONS_PROVIDER: ${NOTIFICATIONS_PROVIDER:-dummy}
+    # Real SMTP, into a mailbox that cannot reach a human. This exercises the ACTUAL
+    # send path — Celery task, SMTP handshake, headers, subject, body — which the
+    # console backend never did; it just printed to stdout and hid delivery bugs.
+    EMAIL_BACKEND: ${EMAIL_BACKEND:-django.core.mail.backends.smtp.EmailBackend}
+    EMAIL_HOST: ${EMAIL_HOST:-mailpit}
+    EMAIL_PORT: ${EMAIL_PORT:-1025}
+    EMAIL_USE_TLS: ${EMAIL_USE_TLS:-0}
+    DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL:-WIFI.OS <noreply@wifios.co.ke>}
   depends_on:
     db:
       condition: service_healthy
     redis:
       condition: service_healthy
+    mailpit:
+      condition: service_started
 
 services:
   db:
@@ -49,6 +59,23 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  # The dev/staging mailbox. Speaks real SMTP on 1025 and SWALLOWS EVERYTHING — no
+  # message can escape to an actual person. Read them at http://localhost:8025.
+  #
+  # This belongs on STAGING too, and that is the point of it. A staging box wired to a
+  # real SMTP provider will cheerfully post invoices and suspension notices to the real
+  # email addresses sitting in its copy of the data. Mailpit is what stands between a
+  # test run and an ISP's inbox.
+  mailpit:
+    image: axllent/mailpit:latest
+    environment:
+      MP_MAX_MESSAGES: 5000
+      MP_SMTP_AUTH_ACCEPT_ANY: 1
+      MP_SMTP_AUTH_ALLOW_INSECURE: 1
+    ports:
+      - "8025:8025" # web inbox
+      - "1025:1025" # SMTP
 
   api:
     <<: *backend

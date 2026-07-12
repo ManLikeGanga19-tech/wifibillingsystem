@@ -18,7 +18,13 @@ from apps.billing.services import (
 from apps.core.models import Operator
 from apps.payments.models import Transaction
 
-from .factories import OperatorFactory, TransactionFactory, UserFactory
+from .factories import (
+    OperatorFactory,
+    TransactionFactory,
+    UserFactory,
+    enrol_mfa,
+    mfa_code,
+)
 
 pytestmark = pytest.mark.django_db
 
@@ -175,11 +181,16 @@ class TestPayouts:
     def test_withdraw_api(self, operator):
         self._fund(operator)
         user = UserFactory(operator=operator, is_staff=True)
+        # Money leaving our custody needs the owner's authenticator (see test_mfa.py).
+        secret = enrol_mfa(user)
         client = APIClient()
         client.force_authenticate(user=user)
         resp = client.post(
             "/api/v1/billing/payouts/withdraw/",
-            {"amount": "250.00", "method": "mpesa", "phone": "0712345678"},
+            {
+                "amount": "250.00", "method": "mpesa", "phone": "0712345678",
+                "mfa_code": mfa_code(secret),
+            },
             format="json",
         )
         assert resp.status_code == 201, resp.content

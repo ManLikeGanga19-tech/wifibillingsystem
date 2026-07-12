@@ -12,6 +12,8 @@ from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.accounts.mfa import MfaError, MfaRequired
+
 from .models import Operator
 from .permissions import CanManageMoney, RequireTenant, TenantIsOperational
 from .schema import OBJECT_RESPONSE
@@ -58,6 +60,16 @@ class _Base(APIView):
     permission_classes = [IsAdminUser, RequireTenant, TenantIsOperational, CanManageMoney]
 
     def handle_exception(self, exc):
+        if isinstance(exc, MfaRequired):
+            # They have an authenticator, so THAT is what we ask for — not an emailed
+            # code. Offering both would make the change only as strong as the weaker
+            # one, and the strong factor would be decoration.
+            return Response(
+                {"detail": str(exc), "mfa_required": True, "enrolled": True},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if isinstance(exc, MfaError):
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         if isinstance(exc, ChangeCodeRequired):
             # Not a failure — a step. The code is already on its way to the owner's
             # inbox; the UI flips to asking for it.

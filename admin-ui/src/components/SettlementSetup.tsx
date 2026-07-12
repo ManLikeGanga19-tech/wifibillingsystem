@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { Banknote, CheckCircle2, KeyRound, Loader2, Pencil, ShieldAlert, Smartphone, X, Zap } from 'lucide-react';
-import { api, ApiError, Settlement } from '../api/client';
+import { api, ApiError, asMfaChallenge, type MfaChallenge, Settlement } from '../api/client';
+import MfaGate from './MfaGate';
 import { toast } from './ui';
 
 /**
@@ -28,6 +29,10 @@ export default function SettlementSetup({ onWentLive }: { onWentLive: () => void
   const [busy, setBusy] = useState(false);
   // Held in memory only, never in storage, and dropped the moment the change lands.
   const [codeStep, setCodeStep] = useState<{ sentTo: string } | null>(null);
+  // If they have an authenticator, THAT is what we ask for — the emailed code is not
+  // offered as an alternative, or the change is only as strong as the weaker of the
+  // two and the authenticator is decoration.
+  const [challenge, setChallenge] = useState<MfaChallenge | null>(null);
   const pending = useRef<Record<string, string> | null>(null);
 
   const load = useCallback(async () => {
@@ -51,12 +56,18 @@ export default function SettlementSetup({ onWentLive }: { onWentLive: () => void
       setState(s);
       setEditing(false);
       setCodeStep(null);
+      setChallenge(null);
       pending.current = null;
       toast('success', s.detail);
       if (s.can_transact) onWentLive();
     } catch (err) {
-      // Not a failure — a step. The code is already in the owner's inbox.
-      if (err instanceof ApiError && (err.body as { code_required?: boolean })?.code_required) {
+      // Neither of these is a failure — both are steps.
+      const mfa = asMfaChallenge(err);
+      if (mfa) {
+        pending.current = body;
+        setChallenge(mfa);
+      } else if (err instanceof ApiError && (err.body as { code_required?: boolean })?.code_required) {
+        // No authenticator: fall back to the code we just emailed the owner.
         pending.current = body;
         setCodeStep({ sentTo: err.message });
       } else {
@@ -83,6 +94,20 @@ export default function SettlementSetup({ onWentLive }: { onWentLive: () => void
       <div className="flex justify-center py-6">
         <Loader2 className="h-5 w-5 animate-spin text-[#141414]/40" />
       </div>
+    );
+  }
+
+  if (challenge) {
+    return (
+      <MfaGate
+        challenge={challenge}
+        onCode={(code) => submit({ ...(pending.current ?? {}), code })}
+        onCancel={() => {
+          setChallenge(null);
+          pending.current = null;
+          setEditing(false);
+        }}
+      />
     );
   }
 

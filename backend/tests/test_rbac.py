@@ -22,6 +22,8 @@ from .factories import (
     TransactionFactory,
     UserFactory,
     VoucherFactory,
+    enrol_mfa,
+    mfa_code,
 )
 
 pytestmark = pytest.mark.django_db
@@ -186,9 +188,10 @@ class TestTenantRoles:
         isp_a, _ = two_isps
         self._fund(isp_a)
         owner = UserFactory(operator=isp_a, is_staff=True, role=Role.TENANT_OWNER)
+        secret = enrol_mfa(owner)  # withdrawing needs the second factor
         resp = client_for(owner).post(
             "/api/v1/billing/payouts/withdraw/",
-            {"amount": "200.00", "phone": "0712345678"},
+            {"amount": "200.00", "phone": "0712345678", "mfa_code": mfa_code(secret)},
             format="json",
         )
         assert resp.status_code == 201

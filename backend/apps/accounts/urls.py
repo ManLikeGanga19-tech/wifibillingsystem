@@ -3,12 +3,27 @@ from rest_framework.routers import SimpleRouter
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from .auth_views import CookieLoginView, CookieRefreshView, LogoutView
+from .mfa_views import (
+    MfaConfirmView,
+    MfaDisableView,
+    MfaRecoveryCodesView,
+    MfaSetupView,
+    MfaStatusView,
+)
 from .views import MeView, SubscriberViewSet
 
 router = SimpleRouter()
 router.register("subscribers", SubscriberViewSet, basename="subscriber")
 
 urlpatterns = [
+    # Two-factor for the actions that move money (withdrawals, changing the payout
+    # account). NOT for login — losing a phone must cost an ISP their payouts, not
+    # their whole console.
+    path("auth/mfa/", MfaStatusView.as_view(), name="mfa-status"),
+    path("auth/mfa/setup/", MfaSetupView.as_view(), name="mfa-setup"),
+    path("auth/mfa/confirm/", MfaConfirmView.as_view(), name="mfa-confirm"),
+    path("auth/mfa/recovery-codes/", MfaRecoveryCodesView.as_view(), name="mfa-recovery"),
+    path("auth/mfa/disable/", MfaDisableView.as_view(), name="mfa-disable"),
     # Browser auth: the server sets httpOnly cookies. The frontends never hold a
     # token, so there is NO browser storage to go stale (see cookie_auth.py).
     path("auth/login/", CookieLoginView.as_view(), name="auth-login"),

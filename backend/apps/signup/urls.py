@@ -5,6 +5,7 @@ from .views import (
     CompanyView,
     CompleteView,
     DetailsView,
+    FindConsoleView,
     ResendView,
     StartView,
     StateView,
@@ -21,4 +22,6 @@ urlpatterns = [
     path("company/", CompanyView.as_view(), name="signup-company"),
     path("details/", DetailsView.as_view(), name="signup-details"),
     path("complete/", CompleteView.as_view(), name="signup-complete"),
+    # Not part of the wizard: the way BACK IN for an ISP who forgot their subdomain.
+    path("find-console/", FindConsoleView.as_view(), name="signup-find-console"),
 ]
