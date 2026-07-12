@@ -168,3 +168,28 @@ All mutations: **`IsPlatformOwner`**.
 - [ ] Safaricom: confirm **External Validation** can be enabled on our shortcode
       (added to the tariff RFI / go-live checklist)
 - [ ] Refund rail: B2C back to the payer — confirm the tariff (we absorb it)
+
+---
+
+## Protecting the payout destination (account takeover)
+
+Misattribution is one way to lose money. The other is the destination itself being
+swapped by someone who got into an ISP's console. Three controls, in order:
+
+1. **Registering** an account is instant — plug and play. The paybill IS the KYC
+   (Safaricom vetted the business to issue it), and we will not pay transfer fees to
+   verify accounts for ISPs who may never trade.
+2. **The first payout proves it, free.** The ISP is paid in full; that payout carries a
+   short code (`WOS-XXXX`) they read back off their statement. Until they do, no
+   SECOND payout leaves — a wrong or hijacked destination is capped at one payout,
+   never an open drain.
+3. **Changing** a saved account needs a 6-digit code emailed to the **owner's login
+   address** — deliberately *not* `contact_email`, which is editable in Settings and
+   would let an attacker post themselves the code. The code is hashed at rest, expires
+   in 15 minutes, dies after 5 wrong attempts, is burned on use, and is rate-limited to
+   one per minute. A completed change also re-arms step 2 and emails the owner a "this
+   changed" tripwire.
+
+Every step writes an AuditLog entry (`settlement_change_code_sent`,
+`settlement_change_code_failed`, `settlement_account_changed`), so Platform Control can
+answer "who moved this ISP's money, and when" without guessing.

@@ -94,6 +94,19 @@ class Operator(TimeStampedModel):
     )
     verification_attempts = models.PositiveSmallIntegerField(default=0)
 
+    # ---- CHANGING the payout account needs a code from the owner's inbox -----
+    # Adding an account for the first time is plug-and-play. CHANGING one is the
+    # single most dangerous thing anyone can do in an ISP's console — it is exactly
+    # what an attacker who got in would do — so it takes a second factor: a code
+    # emailed to the OWNER'S LOGIN ADDRESS.
+    #
+    # Deliberately NOT contact_email: that field is editable in Settings, so an
+    # attacker would simply change it first and post themselves the code.
+    change_code_hash = models.CharField(max_length=128, blank=True)
+    change_code_expires_at = models.DateTimeField(null=True, blank=True)
+    change_code_sent_at = models.DateTimeField(null=True, blank=True)
+    change_code_attempts = models.PositiveSmallIntegerField(default=0)
+
     # Platform billing rates (editable per tenant from the platform portal).
     # Model: 1-month free trial, then KES 500 base + 3% hotspot + per-PPPoE-user
     # (Centipid-matched flat rate via apps.billing.pricing) + an OPT-IN one-time

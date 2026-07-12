@@ -296,6 +296,9 @@ export interface Settlement {
   confirmed: boolean;
   confirmed_at: string | null;
   can_transact: boolean;
+  /** Changing an existing payout account takes a code emailed to the owner's login
+   *  address — the one inbox an attacker inside the console cannot reach. */
+  change_requires_code: boolean;
   /** Set while a paid-out payout is still unconfirmed. While it is, NO further
    *  payout leaves — that caps a wrong or hijacked destination at one payout. */
   awaiting_confirmation: {

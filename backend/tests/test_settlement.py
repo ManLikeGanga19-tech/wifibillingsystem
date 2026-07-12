@@ -10,21 +10,25 @@ SECOND payout leaves.
 
 What that really defends is ACCOUNT TAKEOVER — someone in an ISP's console swapping
 the payout destination and draining the wallet. Verifying at signup would not have
-touched it; the account is already verified before an attacker changes it. So
-changing a confirmed account re-arms the cycle and warns the real owner.
+touched it; the account is already verified before an attacker changes it. So the
+CHANGE is what we gate: a code emailed to the owner's login address (an inbox the
+console cannot reach), the confirmation cycle re-armed, and the real owner warned.
 """
 
+import re
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
 from django.core import mail
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.accounts.models import Role
 from apps.billing.models import LedgerEntry, Payout
 from apps.billing.services import WalletError, request_payout
 from apps.core.models import Operator
-from apps.core.settlement import MAX_ATTEMPTS
+from apps.core.settlement import MAX_ATTEMPTS, MAX_CHANGE_ATTEMPTS
 
 from .factories import OperatorFactory, PppoeClientFactory, UserFactory
 
@@ -242,69 +246,235 @@ class TestTheFirstPayoutProvesIt:
         assert not (set(code) & set("O0I1S5"))
 
 
+def code_from_email() -> str:
+    """The 6-digit change code we just emailed."""
+    return re.search(r"\b(\d{6})\b", mail.outbox[-1].body).group(1)
+
+
+class TestChangingTheAccountNeedsAnEmailedCode:
+    """THE MOST DANGEROUS ACTION IN THE CONSOLE.
+
+    Swapping the payout destination is precisely what an attacker who got into an
+    ISP's console would do. So it takes a second factor they cannot reach from
+    inside: a code emailed to the OWNER'S LOGIN ADDRESS.
+    """
+
+    def _live_isp(self):
+        op = fresh_isp()
+        owner = UserFactory(
+            operator=op, is_staff=True, role=Role.TENANT_OWNER, email="owner@acme.co.ke"
+        )
+        c = APIClient()
+        c.force_authenticate(user=owner)
+        c.post(SET, PAYBILL, format="json")
+        op.refresh_from_db()
+        return op, c, owner
+
+    @staticmethod
+    def _reauth(c, owner):
+        """force_authenticate pins ONE user object across requests, so its cached
+        .operator goes stale the moment a test writes to the DB behind it. A real
+        request re-loads the user every time; this makes the test do the same."""
+        from apps.accounts.models import User
+
+        c.force_authenticate(user=User.objects.get(pk=owner.pk))
+
+    def test_first_time_setup_needs_NO_code(self):
+        """Plug and play. Only a CHANGE is dangerous."""
+        op = fresh_isp()
+        mail.outbox.clear()
+        resp = owner_of(op).post(SET, PAYBILL, format="json")
+        assert resp.status_code == 201
+        assert mail.outbox == []  # don't cry wolf on every signup
+
+    def test_a_change_without_a_code_is_REFUSED_and_emails_one(self):
+        op, c, _owner = self._live_isp()
+        mail.outbox.clear()
+
+        resp = c.post(SET, {**PAYBILL, "settlement_paybill": "999888"}, format="json")
+
+        assert resp.status_code == 400
+        assert resp.json()["code_required"] is True
+        # The account is UNTOUCHED.
+        op.refresh_from_db()
+        assert op.settlement_paybill == "555777"
+        # ...and a code is on its way to the owner.
+        assert len(mail.outbox) == 1
+        assert mail.outbox[0].to == ["owner@acme.co.ke"]
+        assert re.search(r"\b\d{6}\b", mail.outbox[0].body)
+
+    def test_the_code_goes_to_the_LOGIN_email_not_the_editable_contact_email(self):
+        """The hole this closes: contact_email is editable in Settings, so an attacker
+        would change it to their own address and then post themselves the code. The
+        login email is not reachable from inside the console at all."""
+        op, c, _owner = self._live_isp()
+        # The attacker points the contact address at themselves.
+        op.contact_email = "attacker@evil.com"
+        op.save()
+        mail.outbox.clear()
+
+        c.post(SET, {**PAYBILL, "settlement_paybill": "999888"}, format="json")
+
+        assert mail.outbox[0].to == ["owner@acme.co.ke"]  # the REAL owner
+        assert "attacker@evil.com" not in str(mail.outbox[0].to)
+
+    def test_the_right_code_locks_in_the_new_account(self):
+        op, c, _owner = self._live_isp()
+        mail.outbox.clear()
+        c.post(SET, {**PAYBILL, "settlement_paybill": "999888"}, format="json")  # sends code
+
+        resp = c.post(
+            SET,
+            {**PAYBILL, "settlement_paybill": "999888", "code": code_from_email()},
+            format="json",
+        )
+        assert resp.status_code == 201, resp.content
+
+        op.refresh_from_db()
+        assert op.settlement_paybill == "999888"
+        assert op.settlement_verified_at is None  # and confirmation is re-armed
+
+    def test_a_wrong_code_does_not_change_anything(self):
+        op, c, _owner = self._live_isp()
+        c.post(SET, {**PAYBILL, "settlement_paybill": "999888"}, format="json")
+
+        resp = c.post(
+            SET, {**PAYBILL, "settlement_paybill": "999888", "code": "000000"}, format="json"
+        )
+        assert resp.status_code == 400
+        op.refresh_from_db()
+        assert op.settlement_paybill == "555777"  # untouched
+
+    def test_the_code_cannot_be_brute_forced(self):
+        op, c, _owner = self._live_isp()
+        mail.outbox.clear()
+        c.post(SET, {**PAYBILL, "settlement_paybill": "999888"}, format="json")
+        good = code_from_email()
+
+        for _ in range(MAX_CHANGE_ATTEMPTS):
+            c.post(
+                SET, {**PAYBILL, "settlement_paybill": "999888", "code": "000000"}, format="json"
+            )
+
+        # Even the RIGHT code is now dead.
+        resp = c.post(
+            SET, {**PAYBILL, "settlement_paybill": "999888", "code": good}, format="json"
+        )
+        assert resp.status_code == 400
+        op.refresh_from_db()
+        assert op.settlement_paybill == "555777"
+
+    def test_an_expired_code_is_refused(self):
+        from apps.core.models import Operator as Op
+
+        op, c, _owner = self._live_isp()
+        mail.outbox.clear()
+        c.post(SET, {**PAYBILL, "settlement_paybill": "999888"}, format="json")
+        good = code_from_email()
+
+        Op.objects.filter(pk=op.pk).update(
+            change_code_expires_at=timezone.now() - timedelta(minutes=1)
+        )
+        self._reauth(c, _owner)
+        resp = c.post(
+            SET, {**PAYBILL, "settlement_paybill": "999888", "code": good}, format="json"
+        )
+        assert resp.status_code == 400
+        assert "expired" in resp.json()["detail"].lower()
+
+    def test_the_code_is_burned_after_use(self):
+        """It must not be replayable to swap the account a second time."""
+        op, c, _owner = self._live_isp()
+        mail.outbox.clear()
+        c.post(SET, {**PAYBILL, "settlement_paybill": "999888"}, format="json")
+        good = code_from_email()
+        c.post(SET, {**PAYBILL, "settlement_paybill": "999888", "code": good}, format="json")
+
+        # Reuse it to point somewhere else.
+        resp = c.post(
+            SET, {**PAYBILL, "settlement_paybill": "777666", "code": good}, format="json"
+        )
+        assert resp.status_code == 400
+        op.refresh_from_db()
+        assert op.settlement_paybill == "999888"  # not moved again
+
+    def test_the_code_is_never_stored_in_plaintext(self):
+        op, c, _owner = self._live_isp()
+        mail.outbox.clear()
+        c.post(SET, {**PAYBILL, "settlement_paybill": "999888"}, format="json")
+        op.refresh_from_db()
+        assert code_from_email() not in op.change_code_hash
+        assert op.change_code_hash  # it IS hashed, not blank
+
+    def test_resending_is_rate_limited(self):
+        op, c, _owner = self._live_isp()
+        c.post(SET, {**PAYBILL, "settlement_paybill": "999888"}, format="json")
+        resp = c.post(SET, {**PAYBILL, "settlement_paybill": "999888"}, format="json")
+        assert resp.status_code == 400
+        assert "wait" in resp.json()["detail"].lower()
+
+
 class TestAccountTakeover:
-    """The attack this actually defends: someone in an ISP's console swaps the payout
-    destination to their own and drains the wallet."""
+    """Even WITH the code, a changed account is still capped: the attacker gets one
+    payout, never the whole balance."""
 
     def _confirmed_isp(self):
         op = fresh_isp()
-        c = owner_of(op)
+        owner = UserFactory(
+            operator=op, is_staff=True, role=Role.TENANT_OWNER, email="owner@acme.co.ke"
+        )
+        c = APIClient()
+        c.force_authenticate(user=owner)
         c.post(SET, PAYBILL, format="json")
         op.refresh_from_db()
         fund(op, "50000")
-        payout = pay_out(op, op.users.first())
+        payout = pay_out(op, owner)
         c.post(CONFIRM, {"code": payout.confirmation_code}, format="json")
         op.refresh_from_db()
         assert op.settlement_verified_at is not None
-        return op, c
+        return op, c, owner
+
+    def _change_to(self, op, c, paybill):
+        mail.outbox.clear()
+        c.post(SET, {**PAYBILL, "settlement_paybill": paybill}, format="json")  # sends code
+        c.post(
+            SET, {**PAYBILL, "settlement_paybill": paybill, "code": code_from_email()},
+            format="json",
+        )
+        op.refresh_from_db()
 
     def test_changing_a_CONFIRMED_account_re_arms_confirmation(self):
-        """An attacker gets at most ONE payout to their new account — not a drain."""
-        op, c = self._confirmed_isp()
-
-        c.post(SET, {**PAYBILL, "settlement_paybill": "999888"}, format="json")
-        op.refresh_from_db()
+        op, c, owner = self._confirmed_isp()
+        self._change_to(op, c, "999888")
         assert op.settlement_verified_at is None  # must be proved again
 
-        user = op.users.first()
         first = request_payout(
-            operator=op, amount=Decimal("1000"), user=user,
+            operator=op, amount=Decimal("1000"), user=owner,
             method="paybill", destination={"phone": "254712345678"},
         )
         assert first.confirmation_code  # carries a code again
 
         from apps.billing.services import mark_payout_paid
 
-        mark_payout_paid(first, by=user, mpesa_reference="X")
+        mark_payout_paid(first, by=owner, mpesa_reference="X")
 
-        # ...and the drain stops here.
+        # ...and the drain stops here. One payout, not the balance.
         with pytest.raises(WalletError, match="Confirm your last payout"):
             request_payout(
-                operator=op, amount=Decimal("1000"), user=user,
+                operator=op, amount=Decimal("1000"), user=owner,
                 method="paybill", destination={"phone": "254712345678"},
             )
 
-    def test_changing_a_confirmed_account_EMAILS_the_owner(self):
-        """Reaches the real owner even if the attacker is the one in the console."""
-        op, c = self._confirmed_isp()
-        op.contact_email = "owner@acme.co.ke"
-        op.save()
-        mail.outbox.clear()
+    def test_a_completed_change_also_WARNS_the_owner(self):
+        """Belt and braces: even though the change needed a code, say it happened. If
+        a code ever leaks, this is how they find out."""
+        op, c, _ = self._confirmed_isp()
+        self._change_to(op, c, "999888")
 
-        c.post(SET, {**PAYBILL, "settlement_paybill": "999888"}, format="json")
-
-        assert len(mail.outbox) == 1
-        body = mail.outbox[0].body
-        assert "999888" in body  # the NEW destination
-        assert "555777" in body  # and what it replaced
-        assert "did not do this" in body.lower()  # the warning
-
-    def test_a_first_time_account_does_NOT_email_a_warning(self):
-        """Only a CHANGE is suspicious. Don't cry wolf on every signup."""
-        op = fresh_isp(contact_email="owner@acme.co.ke")
-        mail.outbox.clear()
-        owner_of(op).post(SET, PAYBILL, format="json")
-        assert mail.outbox == []
+        warning = mail.outbox[-1].body
+        assert "999888" in warning  # the NEW destination
+        assert "555777" in warning  # and what it replaced
+        assert "did not do this" in warning.lower()
 
 
 class TestDefenceInDepth:

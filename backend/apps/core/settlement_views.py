@@ -17,6 +17,7 @@ from .permissions import CanManageMoney, RequireTenant, TenantIsOperational
 from .schema import OBJECT_RESPONSE
 from .settlement import (
     MAX_ATTEMPTS,
+    ChangeCodeRequired,
     SettlementError,
     confirm_payout,
     payout_awaiting_confirmation,
@@ -38,6 +39,9 @@ class SettlementSerializer(serializers.Serializer):
     payout_bank_account_name = serializers.CharField(
         max_length=120, required=False, allow_blank=True
     )
+    #: Required only when CHANGING an existing account — emailed to the owner's login
+    #: address, which the console cannot reach. First-time setup needs none.
+    code = serializers.CharField(max_length=10, required=False, allow_blank=True)
 
 
 # NB the name must not collide with any OTHER serializer's component name — signup
@@ -54,6 +58,13 @@ class _Base(APIView):
     permission_classes = [IsAdminUser, RequireTenant, TenantIsOperational, CanManageMoney]
 
     def handle_exception(self, exc):
+        if isinstance(exc, ChangeCodeRequired):
+            # Not a failure — a step. The code is already on its way to the owner's
+            # inbox; the UI flips to asking for it.
+            return Response(
+                {"detail": str(exc), "code_required": True},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         if isinstance(exc, SettlementError):
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return super().handle_exception(exc)
@@ -68,6 +79,9 @@ def _state(op: Operator) -> dict:
         "confirmed": op.settlement_verified_at is not None,
         "confirmed_at": op.settlement_verified_at,
         "can_transact": op.can_transact,
+        # Changing an existing account takes a code emailed to the owner. Tell the UI
+        # up front, so it can warn them BEFORE they fill the form in.
+        "change_requires_code": op.has_settlement_account,
         # While this is set, payouts are BLOCKED until they read the code back.
         "awaiting_confirmation": (
             {

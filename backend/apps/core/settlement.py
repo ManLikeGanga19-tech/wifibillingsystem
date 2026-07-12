@@ -43,8 +43,18 @@ CODE_PREFIX = "WOS-"
 MAX_ATTEMPTS = 5
 
 
+#: Emailed to the owner before a payout account may be CHANGED.
+CHANGE_CODE_TTL_MINUTES = 15
+MAX_CHANGE_ATTEMPTS = 5
+CHANGE_RESEND_COOLDOWN_SECONDS = 60
+
+
 class SettlementError(Exception):
     """Something the ISP can fix; safe to show them."""
+
+
+class ChangeCodeRequired(SettlementError):
+    """Not an error so much as a step: we have just emailed them a code."""
 
 
 def new_confirmation_code() -> str:
@@ -52,15 +62,149 @@ def new_confirmation_code() -> str:
     return CODE_PREFIX + "".join(secrets.choice(_CODE_ALPHABET) for _ in range(4))
 
 
+def _owner_email(operator: Operator) -> str:
+    """The address a change code goes to.
+
+    The ISP OWNER'S LOGIN address — NOT operator.contact_email. contact_email is
+    editable from Settings, so an attacker sitting in the console would simply
+    change it to their own and then post themselves the code. The login email is not
+    reachable from the console at all, which is the entire point of using it as a
+    second factor.
+    """
+    from apps.accounts.models import Role
+
+    owner = (
+        operator.users.filter(role=Role.TENANT_OWNER)
+        .exclude(email="")
+        .order_by("id")
+        .first()
+    )
+    if owner:
+        return owner.email
+    return operator.contact_email or ""
+
+
+def _mask(email: str) -> str:
+    """Show enough to recognise, not enough to enumerate."""
+    if "@" not in email:
+        return "your registered email"
+    name, domain = email.split("@", 1)
+    head = name[:2] if len(name) > 2 else name[:1]
+    return f"{head}{'•' * 5}@{domain}"
+
+
+def request_change_code(operator: Operator, *, actor=None) -> str:
+    """Email a one-time code to the owner. Returns the masked address, so the UI can
+    say WHERE it went without leaking the address itself."""
+    from django.contrib.auth.hashers import make_password
+
+    to = _owner_email(operator)
+    if not to:
+        raise SettlementError(
+            "We have no email on file for your account. Contact support to change "
+            "your payout account."
+        )
+
+    if operator.change_code_sent_at:
+        elapsed = (timezone.now() - operator.change_code_sent_at).total_seconds()
+        if elapsed < CHANGE_RESEND_COOLDOWN_SECONDS:
+            wait = int(CHANGE_RESEND_COOLDOWN_SECONDS - elapsed)
+            raise SettlementError(f"Please wait {wait} seconds before asking for another code.")
+
+    code = "".join(secrets.choice("0123456789") for _ in range(6))
+    operator.change_code_hash = make_password(code)  # hashed: a leaked DB hands out nothing
+    operator.change_code_expires_at = timezone.now() + timedelta(minutes=CHANGE_CODE_TTL_MINUTES)
+    operator.change_code_sent_at = timezone.now()
+    operator.change_code_attempts = 0
+    operator.save(
+        update_fields=[
+            "change_code_hash",
+            "change_code_expires_at",
+            "change_code_sent_at",
+            "change_code_attempts",
+            "updated_at",
+        ]
+    )
+
+    _send_change_code(operator, to, code)
+    audit(
+        "settlement_change_code_sent",
+        operator=operator,
+        actor=actor,
+        target=operator,
+        sent_to=_mask(to),
+    )
+    return _mask(to)
+
+
+def _check_change_code(operator: Operator, submitted: str, *, actor=None) -> None:
+    from django.contrib.auth.hashers import check_password
+
+    if not operator.change_code_hash:
+        raise SettlementError("Request a new code — that one is no longer valid.")
+    if timezone.now() >= operator.change_code_expires_at:
+        raise SettlementError("That code has expired. Request a new one.")
+    if operator.change_code_attempts >= MAX_CHANGE_ATTEMPTS:
+        raise SettlementError("Too many incorrect codes. Request a new one.")
+
+    if not check_password((submitted or "").strip(), operator.change_code_hash):
+        operator.change_code_attempts += 1
+        operator.save(update_fields=["change_code_attempts", "updated_at"])
+        left = MAX_CHANGE_ATTEMPTS - operator.change_code_attempts
+        audit(
+            "settlement_change_code_failed",
+            operator=operator,
+            actor=actor,
+            target=operator,
+            attempts=operator.change_code_attempts,
+        )
+        if left <= 0:
+            raise SettlementError("Too many incorrect codes. Request a new one.")
+        raise SettlementError(f"That code is not right. {left} attempt(s) left.")
+
+    # Correct: burn it so it cannot be replayed.
+    operator.change_code_hash = ""
+    operator.change_code_expires_at = None
+    operator.change_code_attempts = 0
+    operator.save(
+        update_fields=[
+            "change_code_hash",
+            "change_code_expires_at",
+            "change_code_attempts",
+            "updated_at",
+        ]
+    )
+
+
 # ---- register (plug and play) ------------------------------------------------
 
 
-def set_settlement_account(operator: Operator, *, method: str, actor=None, **fields) -> Operator:
-    """Tell us where to pay you. Instant — this is what switches payments ON.
+def set_settlement_account(
+    operator: Operator, *, method: str, code: str = "", actor=None, **fields
+) -> Operator:
+    """Tell us where to pay you.
 
-    Changing an already-CONFIRMED account re-arms confirmation and warns the owner:
-    that swap is exactly what an attacker who got into the console would do.
+    FIRST TIME: instant. Type it in, payments switch on. Nothing to prove — the
+    paybill IS the KYC, and we will not spend money verifying accounts for ISPs who
+    may never trade.
+
+    CHANGING IT: needs a code emailed to the owner's LOGIN address. This is the
+    single most dangerous action in the console — swapping the payout destination is
+    exactly what an attacker who got in would do — so it takes a second factor they
+    cannot reach from inside. Raises ChangeCodeRequired (and sends the code) if they
+    have not supplied one.
     """
+    changing = operator.has_settlement_account
+    if changing:
+        if not code:
+            # Not a rejection — a step. Send the code and tell them where it went.
+            masked = request_change_code(operator, actor=actor)
+            raise ChangeCodeRequired(
+                f"Changing where we pay you needs a code. We've emailed one to "
+                f"{masked}. Enter it to lock in the new account."
+            )
+        _check_change_code(operator, code, actor=actor)
+
     was_confirmed = operator.settlement_verified_at is not None
     old_destination = operator.settlement_destination
 
@@ -248,9 +392,31 @@ def activate_operator(operator: Operator, *, actor=None, reason: str = "") -> in
 # ---- email -------------------------------------------------------------------
 
 
+def _send_change_code(operator: Operator, to: str, code: str) -> None:
+    """The second factor. It goes to an inbox the console cannot touch."""
+    try:
+        send_mail(
+            f"{code} — code to change your WIFI.OS payout account",
+            f"Hi,\n\n"
+            f"Someone is trying to change the account we pay {operator.name} into.\n\n"
+            f"Your code is:\n\n    {code}\n\n"
+            "It expires in 15 minutes.\n\n"
+            "IF THIS WASN'T YOU, do not share this code. Someone may have access to "
+            "your console — change your password immediately and contact us. Your "
+            "payout account has NOT been changed.\n\n"
+            "— WIFI.OS",
+            getattr(settings, "DEFAULT_FROM_EMAIL", "noreply@wifios.co.ke"),
+            [to],
+            fail_silently=False,
+        )
+    except Exception:
+        logger.exception("Could not send the payout-change code for %s", operator.slug)
+
+
 def _warn_destination_changed(operator: Operator, old: str) -> None:
-    """Reaches the real owner even if an attacker is the one sitting in the console."""
-    to = operator.contact_email
+    """Belt and braces: even though the change already required a code, tell them it
+    happened. If a code ever leaks, this is how they find out."""
+    to = _owner_email(operator)
     if not to:
         return
     try:

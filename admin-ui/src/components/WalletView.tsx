@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Wallet, ArrowDownToLine, Loader2 } from 'lucide-react';
 import { api, ApiLedgerEntry, ApiPayout, Settlement, WalletSummary } from '../api/client';
 import ConfirmPayout from './ConfirmPayout';
+import SettlementSetup from './SettlementSetup';
 import { Badge, Btn, Field, inputCls, Panel, RefreshBtn, TableShell, tdCls, toast, ViewHeader, fmtDateTime, fmtKsh } from './ui';
 
 const ENTRY_LABEL: Record<ApiLedgerEntry['entry_type'], { label: string; color: 'green' | 'red' | 'amber' | 'gray' | 'blue' }> = {
@@ -164,6 +165,12 @@ export default function WalletView() {
             {payouts.filter((p) => p.status === 'requested').length} withdrawal(s) awaiting payment by the platform.
           </p>
         )}
+      </Panel>
+
+      {/* Where the money actually goes. The go-live banner is gone once they're
+          live, so this is the only place a trading ISP can find — or change — it. */}
+      <Panel title="Payout account">
+        <SettlementSetup onWentLive={load} />
       </Panel>
 
       <TableShell
