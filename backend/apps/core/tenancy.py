@@ -115,5 +115,27 @@ def acting_tenant(request) -> Operator | None:
     return getattr(request, "tenant", None)
 
 
+def is_impersonating(request) -> bool:
+    """Is this request being made on somebody else's identity?
+
+    True only when platform staff are acting as a tenant that is NOT their own ISP.
+    Daniel running his own WISP through the platform login is not impersonation — that
+    is just him, in his own console.
+
+    This exists because impersonation was built for TROUBLESHOOTING, and troubleshooting
+    never requires moving money. Without this check a platform account (or anyone who
+    steals one) can open a grant, enrol their OWN authenticator, and withdraw an ISP's
+    balance — the second factor would be satisfied by the attacker's own phone, which
+    makes it worthless. See permissions.NotImpersonating.
+    """
+    user = getattr(request, "user", None)
+    if not (user and user.is_authenticated and user.is_platform_staff):
+        return False
+    acting = acting_tenant(request)
+    if acting is None:
+        return False
+    return acting.pk != user.operator_id
+
+
 # Backwards-compatible alias (older call sites).
 request_operator = acting_tenant

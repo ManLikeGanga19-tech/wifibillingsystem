@@ -87,6 +87,13 @@ class User(AbstractBaseUser, PermissionsMixin):
     is_staff = models.BooleanField(default=False)
     date_joined = models.DateTimeField(default=timezone.now)
 
+    #: When platform support last cleared this user's authenticator (lost phone, lost
+    #: recovery codes). Withdrawals are frozen for a cooling-off period afterwards —
+    #: see mfa.PAYOUT_FREEZE_HOURS. A reset is the one moment the second factor is
+    #: down, so it is exactly when a fraudulent reset would be cashed in; the freeze
+    #: buys the real owner time to see the email and shout.
+    mfa_reset_at = models.DateTimeField(null=True, blank=True)
+
     objects = UserManager()
 
     USERNAME_FIELD = "phone"

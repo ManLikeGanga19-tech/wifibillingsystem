@@ -14,11 +14,13 @@ Scope is deliberately narrow: money only. Losing a phone must cost an ISP their
 payouts, not their whole console — they still have a network to run while they recover.
 """
 
+from datetime import timedelta
 from decimal import Decimal
 
 import pyotp
 import pytest
 from django.core import mail
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.accounts import mfa
@@ -27,7 +29,7 @@ from apps.accounts.models import Role
 from apps.billing.models import LedgerEntry
 from apps.core.models import Operator
 
-from .factories import OperatorFactory, UserFactory
+from .factories import OperatorFactory, UserFactory, enrol_mfa, mfa_code
 
 pytestmark = pytest.mark.django_db
 
@@ -38,6 +40,7 @@ DISABLE = "/api/v1/auth/mfa/disable/"
 RECOVERY = "/api/v1/auth/mfa/recovery-codes/"
 WITHDRAW = "/api/v1/billing/payouts/withdraw/"
 SETTLEMENT = "/api/v1/operator/settlement/"
+RESET_MFA = "/api/v1/platform/reset-mfa/"
 
 PAYBILL = {"method": "paybill", "settlement_paybill": "555777", "settlement_name": "Acme Ltd"}
 
@@ -364,3 +367,174 @@ def test_require_demands_enrolment_rather_than_waving_them_through():
     owner = UserFactory(operator=op, is_staff=True, role=Role.TENANT_OWNER)
     with pytest.raises(MfaRequired):
         mfa.require(owner, "")
+
+
+class TestTheLostPhone:
+    """The last door out of a locked wallet — and, handled carelessly, a master key to
+    every ISP's money."""
+
+    def _platform_owner(self):
+        user = UserFactory(
+            operator=None, is_staff=True, role=Role.PLATFORM_OWNER, email="daniel@danamo.co.ke"
+        )
+        c = APIClient()
+        c.force_authenticate(user=user)
+        return user, c
+
+    def test_the_platform_owner_can_clear_a_lost_authenticator(self):
+        _, owner, oc = live_isp()
+        enrol(owner, oc)
+        _, pc = self._platform_owner()
+
+        resp = pc.post(
+            RESET_MFA, {"user_id": owner.pk, "reason": "Lost phone, ID verified by call"},
+            format="json",
+        )
+        assert resp.status_code == 200, resp.content
+        assert mfa.is_enrolled(owner) is False  # they can enrol a new phone
+
+    def test_a_reason_is_MANDATORY(self):
+        """"Who turned this off, and why" must be answerable months later, in front of
+        an ISP who lost money."""
+        _, owner, oc = live_isp()
+        enrol(owner, oc)
+        _, pc = self._platform_owner()
+        resp = pc.post(RESET_MFA, {"user_id": owner.pk, "reason": ""}, format="json")
+        assert resp.status_code == 400
+
+    def test_read_only_platform_SUPPORT_cannot_do_it(self):
+        """Support staff must not be able to switch off somebody's second factor."""
+        _, owner, oc = live_isp()
+        enrol(owner, oc)
+        support = UserFactory(operator=None, is_staff=True, role=Role.PLATFORM_SUPPORT)
+        c = APIClient()
+        c.force_authenticate(user=support)
+
+        resp = c.post(RESET_MFA, {"user_id": owner.pk, "reason": "lost phone"}, format="json")
+        assert resp.status_code == 403
+        assert mfa.is_enrolled(owner) is True
+
+    def test_the_ISP_owner_is_EMAILED(self):
+        """If they did not ask for this, that mail is the alarm."""
+        _, owner, oc = live_isp()
+        enrol(owner, oc)
+        _, pc = self._platform_owner()
+        mail.outbox.clear()
+
+        pc.post(RESET_MFA, {"user_id": owner.pk, "reason": "lost phone"}, format="json")
+
+        assert len(mail.outbox) == 1
+        assert mail.outbox[0].to == ["owner@acme.co.ke"]
+        body = mail.outbox[0].body
+        assert "did not ask for this" in body.lower()
+        assert "lost phone" in body  # the reason we were given, in their hands
+
+    def test_withdrawals_FREEZE_for_24h_after_a_reset(self):
+        """A reset is the one moment the second factor is down — exactly when a
+        fraudulent reset would be cashed in. The freeze buys the real owner time to
+        read the email and shout."""
+        _, owner, oc = live_isp()
+        enrol(owner, oc)
+        _, pc = self._platform_owner()
+        pc.post(RESET_MFA, {"user_id": owner.pk, "reason": "lost phone"}, format="json")
+
+        # They enrol a new phone straight away...
+        owner.refresh_from_db()
+        oc.force_authenticate(user=owner)
+        secret = enrol(owner, oc)
+
+        # ...and the money still waits.
+        resp = oc.post(
+            WITHDRAW,
+            {
+                "amount": "1000", "method": "mpesa", "phone": "0712345678",
+                "mfa_code": code_for(secret),
+            },
+            format="json",
+        )
+        assert resp.status_code == 403
+        assert "paused" in resp.json()["detail"].lower()
+
+    def test_the_freeze_lifts(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        _, owner, oc = live_isp()
+        _, pc = self._platform_owner()
+        pc.post(RESET_MFA, {"user_id": owner.pk, "reason": "lost phone"}, format="json")
+
+        owner.refresh_from_db()
+        owner.mfa_reset_at = timezone.now() - timedelta(hours=25)
+        owner.save()
+        oc.force_authenticate(user=owner)
+        secret = enrol(owner, oc)
+
+        resp = oc.post(
+            WITHDRAW,
+            {
+                "amount": "1000", "method": "mpesa", "phone": "0712345678",
+                "mfa_code": code_for(secret),
+            },
+            format="json",
+        )
+        assert resp.status_code == 201, resp.content
+
+
+class TestMoneyCannotMoveOnABorrowedIdentity:
+    """THE HOLE THE RESET FEATURE WOULD OTHERWISE OPEN.
+
+    Without this, platform staff (or anyone who steals a platform account) open an
+    impersonation grant, enrol their OWN authenticator, and withdraw an ISP's balance —
+    the second factor satisfied by the attacker's own phone. The MFA reset would then be
+    a master key to every wallet on the platform.
+
+    Impersonation exists to TROUBLESHOOT. Troubleshooting never requires moving money.
+    """
+
+    def _impersonating(self, op):
+        from apps.core.models import ImpersonationGrant
+
+        actor = UserFactory(operator=None, is_staff=True, role=Role.PLATFORM_OWNER)
+        ImpersonationGrant.objects.create(
+            actor=actor,
+            operator=op,
+            reason="debugging a payment",
+            expires_at=timezone.now() + timedelta(hours=1),
+        )
+        c = APIClient()
+        c.force_authenticate(user=actor)
+        c.credentials(HTTP_X_ACT_AS_TENANT=op.slug)
+        return actor, c
+
+    def test_an_impersonator_cannot_withdraw(self):
+        op, _, _ = live_isp()
+        actor, c = self._impersonating(op)
+        secret = enrol_mfa(actor)  # their OWN authenticator — must not help them
+
+        resp = c.post(
+            WITHDRAW,
+            {
+                "amount": "1000", "method": "mpesa", "phone": "0712345678",
+                "mfa_code": mfa_code(secret),
+            },
+            format="json",
+        )
+        assert resp.status_code == 403
+        assert "borrowed identity" in resp.json()["detail"].lower()
+
+    def test_an_impersonator_cannot_change_where_the_money_goes(self):
+        op, _, _ = live_isp()
+        _, c = self._impersonating(op)
+
+        resp = c.post(SETTLEMENT, {**PAYBILL, "settlement_paybill": "999888"}, format="json")
+        assert resp.status_code == 403
+        op.refresh_from_db()
+        assert op.settlement_paybill == "555777"
+
+    def test_an_impersonator_can_still_LOOK(self):
+        """The feature still has to work — support must be able to see the wallet they
+        are being asked about."""
+        op, _, _ = live_isp()
+        _, c = self._impersonating(op)
+        assert c.get("/api/v1/billing/wallet/").status_code == 200

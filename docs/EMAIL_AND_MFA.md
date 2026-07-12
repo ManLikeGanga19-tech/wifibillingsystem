@@ -87,3 +87,40 @@ inbox.
 
 Production is the only environment that gets real SMTP credentials, and they arrive as
 environment variables (`EMAIL_BACKEND`, `EMAIL_HOST`, …) — never in code.
+
+---
+
+## The lost phone (platform-side reset)
+
+`POST /api/v1/platform/reset-mfa/` — `{slug | user_id, reason}`.
+
+An ISP owner who loses both their phone and their recovery codes cannot reach their own
+money. That is the worst state this system can put somebody in, so there is a door — and
+because it is a human switching off somebody else's second factor, every safeguard on it
+is load-bearing:
+
+- **Platform OWNER only.** Support staff cannot clear a device.
+- **A reason is mandatory and audited.** "Who turned this off, and why" must be
+  answerable months later, in front of an ISP who lost money.
+- **The ISP owner is emailed**, with the reason we were given. If they did not ask for
+  it, that mail is the alarm.
+- **Withdrawals freeze for 24 hours** (`mfa.PAYOUT_FREEZE_HOURS`). A reset is the one
+  moment the second factor is down — precisely when a fraudulent reset would be cashed
+  in. The freeze buys the real owner a day to see the email and shout.
+- Identity is verified **off-system**, by a call to the number on file. An automated
+  "email me a reset link" would just be the email factor again, which is the exact
+  weakness TOTP was brought in to fix.
+
+### Why this is not a master key
+
+Because **money cannot move on a borrowed identity**. `core.permissions.CanManageMoney`
+refuses every write when `is_impersonating(request)` — platform staff acting as an ISP
+that is not their own.
+
+This closed a real hole. Impersonation was built for troubleshooting, but a platform
+account (or anyone who stole one) could open a grant, enrol **their own** authenticator,
+and withdraw the ISP's balance — the second factor satisfied by the attacker's phone,
+which makes it decoration. Adding a reset endpoint on top of that would have turned
+support into a master key to every wallet on the platform.
+
+Impersonators can still *look*. They just cannot spend.

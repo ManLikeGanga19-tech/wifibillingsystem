@@ -31,6 +31,7 @@ single-use recovery codes are issued at enrolment, shown exactly once, stored ha
 
 import logging
 import secrets
+from datetime import timedelta
 
 import pyotp
 from django.conf import settings
@@ -292,3 +293,76 @@ def require(user, code: str) -> None:
             "your wallet."
         )
     verify(user, code)
+
+
+# ---- the lost phone --------------------------------------------------------------
+
+#: After support clears a device, withdrawals are frozen this long. An ISP who genuinely
+#: lost their phone waits a day for their money; an attacker who talked support into a
+#: reset gets a day in which the real owner reads the email and stops them. That trade
+#: is worth making — the alternative is a support call that empties a wallet.
+PAYOUT_FREEZE_HOURS = 24
+
+
+def payout_freeze_until(user):
+    """When (if ever) this user's withdrawals unfreeze. None = not frozen."""
+    if not user.mfa_reset_at:
+        return None
+    until = user.mfa_reset_at + timedelta(hours=PAYOUT_FREEZE_HOURS)
+    return until if timezone.now() < until else None
+
+
+@transaction.atomic
+def reset_device(target, *, by, reason: str) -> None:
+    """Platform support clears a lost authenticator.
+
+    THE DANGEROUS ONE. This is a human being switching off somebody else's second
+    factor, so every safeguard here is load-bearing:
+
+      - PLATFORM OWNER only (enforced at the endpoint), never support staff.
+      - A REASON is mandatory and audited — "who turned this off, and why" must be
+        answerable months later, in front of an ISP who lost money.
+      - The ISP OWNER IS EMAILED. If they did not ask for this, that mail is the alarm.
+      - Withdrawals FREEZE for 24 hours. The reset does not hand anyone the money; it
+        only lets the real owner enrol a new phone.
+      - It does NOT let the platform withdraw. Money cannot move on an impersonated
+        session at all (see core.permissions.CanManageMoney), so support cannot reset a
+        device and then spend the balance themselves.
+    """
+    if not reason.strip():
+        raise MfaError("A reason is required to clear somebody's authenticator.")
+
+    MfaDevice.objects.filter(user=target).delete()  # cascades the recovery codes
+    target.mfa_reset_at = timezone.now()
+    target.save(update_fields=["mfa_reset_at"])
+
+    logger.warning(
+        "MFA reset for user %s by %s — %s", target.pk, getattr(by, "pk", None), reason
+    )
+    _warn_device_reset(target, reason)
+
+
+def _warn_device_reset(user, reason: str) -> None:
+    from django.core.mail import send_mail
+
+    if not user.email:
+        return
+    try:
+        send_mail(
+            "Your WIFI.OS authenticator was removed",
+            "Hi,\n\n"
+            "WIFI.OS support has removed the authenticator app from your account, so "
+            "you can set up a new one.\n\n"
+            f"Reason given: {reason}\n\n"
+            f"Withdrawals are paused for {PAYOUT_FREEZE_HOURS} hours while this "
+            "settles. Set up a new authenticator in your console — your money is safe "
+            "and nothing else has changed.\n\n"
+            "IF YOU DID NOT ASK FOR THIS, contact us immediately. Somebody may be "
+            "trying to reach your wallet.\n\n"
+            "— WIFI.OS",
+            getattr(settings, "DEFAULT_FROM_EMAIL", "noreply@wifios.co.ke"),
+            [user.email],
+            fail_silently=False,
+        )
+    except Exception:
+        logger.exception("Could not send the MFA-reset warning for %s", user.pk)

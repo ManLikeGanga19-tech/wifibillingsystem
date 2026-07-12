@@ -439,3 +439,83 @@ class PlatformOverviewView(APIView):
         )
 
 
+
+
+class ResetMfaSerializer(serializers.Serializer):
+    """Identify the person by id, or just name the ISP and let us find its owner —
+    which is what Platform Control actually has in its hand when the phone call comes
+    in ("hi, I'm from Acme Networks and I've lost my phone")."""
+
+    user_id = serializers.IntegerField(required=False)
+    slug = serializers.SlugField(required=False)
+    reason = serializers.CharField(max_length=200)
+
+    def validate(self, attrs):
+        if not attrs.get("user_id") and not attrs.get("slug"):
+            raise serializers.ValidationError("Give a user_id or an ISP slug.")
+        return attrs
+
+
+@extend_schema(request=ResetMfaSerializer, responses=OBJECT_RESPONSE,
+               summary="Clear an ISP owner's lost authenticator (platform owner only)")
+class ResetTenantMfaView(APIView):
+    """THE LOST PHONE. The last door out of a locked wallet — and, handled carelessly,
+    a master key to every ISP's money. So:
+
+      - PLATFORM OWNER only. Support staff cannot switch off somebody's second factor.
+      - A reason is mandatory, and it is audited. "Who turned this off, and why" has to
+        be answerable months later, in front of an ISP who lost money.
+      - The ISP owner is EMAILED. If they did not ask for it, that mail is the alarm.
+      - Withdrawals freeze for 24 hours afterwards.
+      - It does not let US spend anything: money cannot move on an impersonated session
+        at all (core.permissions.CanManageMoney), so nobody here can reset a device and
+        then drain the balance.
+
+    Deliberately a HUMAN step, gated behind an identity check we do off-system. An
+    automated "email me a reset link" would just be the email factor again, which is
+    the exact weakness TOTP was brought in to fix.
+    """
+
+    permission_classes = [IsPlatformOwner]
+
+    def post(self, request):
+        from apps.accounts import mfa
+
+        s = ResetMfaSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+
+        if s.validated_data.get("user_id"):
+            target = User.objects.filter(pk=s.validated_data["user_id"]).first()
+        else:
+            target = (
+                User.objects.filter(
+                    operator__slug=s.validated_data["slug"], role=Role.TENANT_OWNER
+                )
+                .order_by("id")
+                .first()
+            )
+        if target is None:
+            return Response({"detail": "No such user."}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            mfa.reset_device(target, by=request.user, reason=s.validated_data["reason"])
+        except mfa.MfaError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        audit(
+            "mfa_reset",
+            operator=target.operator,
+            actor=request.user,
+            target=target,
+            reason=s.validated_data["reason"],
+            target_email=target.email,
+        )
+        return Response(
+            {
+                "detail": (
+                    f"Authenticator cleared for {target.email or target.phone}. They have "
+                    "been emailed, and their withdrawals are frozen for 24 hours."
+                ),
+                "freeze_hours": mfa.PAYOUT_FREEZE_HOURS,
+            }
+        )

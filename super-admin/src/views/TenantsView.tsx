@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ArrowLeft, Ban, Check, Eye, Receipt } from 'lucide-react';
+import { ArrowLeft, Ban, Check, Eye, Receipt, SmartphoneNfc } from 'lucide-react';
 import { api, dt, ksh, num, type Tenant } from '../api/client';
 import {
   Badge,
@@ -36,6 +36,8 @@ export default function TenantsView({
 
 function TenantList({ onOpen }: { onOpen: (id: number) => void }) {
   const { data, error, reload } = useLoad(() => api.tenants.list(), []);
+  // Declared before the early returns — hooks cannot live behind a conditional.
+  const [resetting, setResetting] = useState<Tenant | null>(null);
   if (error) return <ErrorBox message={error} onRetry={reload} />;
   if (!data) return <Spinner />;
 
@@ -116,13 +118,101 @@ function TenantList({ onOpen }: { onOpen: (id: number) => void }) {
                       <Ban className="h-3.5 w-3.5" /> Suspend
                     </Btn>
                   )}
+                  {/* THE LOST PHONE. The only way back for an ISP owner who cannot
+                      produce a code — and the reason it is safe to offer at all is that
+                      money cannot move on an impersonated session, so clearing a device
+                      here does not let US spend anything. */}
+                  <Btn onClick={() => setResetting(t)}>
+                    <SmartphoneNfc className="h-3.5 w-3.5" /> Reset 2FA
+                  </Btn>
                 </div>
               </td>
             </tr>
           ))}
         </Table>
       )}
+
+      {resetting && (
+        <ResetMfaDialog
+          tenant={resetting}
+          onClose={() => setResetting(null)}
+          onDone={() => {
+            setResetting(null);
+            reload();
+          }}
+        />
+      )}
     </Panel>
+  );
+}
+
+/**
+ * Switching off somebody else's second factor. Never quiet, never casual:
+ * a reason is mandatory (it is audited, and we will be asked about it), the ISP owner
+ * is emailed, and their withdrawals freeze for 24 hours so a fraudulent reset cannot be
+ * cashed in before the real owner reads that email.
+ */
+function ResetMfaDialog({
+  tenant,
+  onClose,
+  onDone,
+}: {
+  tenant: Tenant;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    if (busy || reason.trim().length < 5) return;
+    setBusy(true);
+    try {
+      const r = await api.tenants.resetMfa(tenant.slug, reason.trim());
+      toast('green', r.detail);
+      onDone();
+    } catch {
+      toast('red', 'Could not reset their authenticator.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div
+        className="w-full max-w-md border p-5"
+        style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
+      >
+        <p className="text-sm font-bold">Reset 2FA for {tenant.name}</p>
+        <p className="mt-2 text-xs leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+          Verify who you are talking to FIRST — by a call to the number on file, not by
+          email. This clears their authenticator so they can enrol a new phone. They will be
+          emailed, their withdrawals freeze for 24 hours, and this is recorded against your
+          name.
+        </p>
+
+        <label className="mt-4 block">
+          <span className="text-[11px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+            Reason (audited)
+          </span>
+          <input
+            autoFocus
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="Lost phone — identity confirmed by call to 0712…"
+            className="mt-1 w-full"
+          />
+        </label>
+
+        <div className="mt-4 flex justify-end gap-2">
+          <Btn onClick={onClose}>Cancel</Btn>
+          <Btn variant="danger" onClick={submit} disabled={busy || reason.trim().length < 5}>
+            {busy ? 'Resetting…' : 'Reset their 2FA'}
+          </Btn>
+        </div>
+      </div>
+    </div>
   );
 }
 

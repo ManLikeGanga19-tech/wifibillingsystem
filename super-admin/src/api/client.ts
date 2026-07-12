@@ -264,6 +264,11 @@ export const api = {
     suspend: (id: number) => post<unknown>(`/platform/tenants/${id}/suspend/`),
     chargeSetup: (id: number) =>
       post<{ charged: boolean; detail: string }>(`/platform/tenants/${id}/charge-setup/`),
+    /** THE LOST PHONE. Clears an ISP owner's authenticator so they can enrol a new one.
+     *  Owner-only, audited, emails them, and freezes their withdrawals for 24h — this
+     *  is a human switching off somebody else's second factor, so it is never quiet. */
+    resetMfa: (slug: string, reason: string) =>
+      post<{ detail: string; freeze_hours: number }>('/platform/reset-mfa/', { slug, reason }),
   },
 
   audit: {

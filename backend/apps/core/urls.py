@@ -20,6 +20,7 @@ from .tenant_views import (
     PlatformOverviewView,
     PlatformReconciliationView,
     PlatformTenantViewSet,
+    ResetTenantMfaView,
     TenantSignupView,
 )
 from .views import DashboardStatsView, NavCountsView
@@ -48,6 +49,8 @@ urlpatterns = [
     path("tenants/signup/", TenantSignupView.as_view(), name="tenant-signup"),
     # Platform-wide (cross-tenant aggregates live ONLY here)
     path("platform/overview/", PlatformOverviewView.as_view(), name="platform-overview"),
+    # The lost phone: platform owner clears an ISP owner's authenticator, audited.
+    path("platform/reset-mfa/", ResetTenantMfaView.as_view(), name="platform-reset-mfa"),
     path(
         "platform/reconciliation/",
         PlatformReconciliationView.as_view(),

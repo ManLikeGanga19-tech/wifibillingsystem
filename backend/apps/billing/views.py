@@ -120,6 +120,24 @@ class MyPayoutsViewSet(TenantReadOnlyViewSet):
         # money through, so this is where the lock belongs.
         mfa.require(request.user, data.get("mfa_code", ""))
 
+        # And the cooling-off after support cleared a lost authenticator. A reset is
+        # the one moment the second factor is down — precisely when a fraudulent reset
+        # would be cashed in — so the money waits while the real owner reads the email.
+        frozen_until = mfa.payout_freeze_until(request.user)
+        if frozen_until:
+            return Response(
+                {
+                    "detail": (
+                        "Your authenticator was recently reset, so withdrawals are "
+                        "paused until "
+                        f"{timezone.localtime(frozen_until).strftime('%d %b, %H:%M')}. "
+                        "If you did not ask for that reset, contact us now."
+                    ),
+                    "frozen_until": frozen_until,
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         destination = {}
         if method == "mpesa":
             try:

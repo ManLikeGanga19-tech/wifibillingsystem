@@ -3,7 +3,7 @@ RequireTenant (+ role gate). Read-only roles cannot write anything, anywhere."""
 
 from rest_framework.permissions import SAFE_METHODS, BasePermission
 
-from .tenancy import acting_tenant
+from .tenancy import acting_tenant, is_impersonating
 
 
 class IsPlatformStaff(BasePermission):
@@ -104,7 +104,7 @@ class ReadOnlyForSupport(BasePermission):
 
 
 class CanManageMoney(BasePermission):
-    """Withdrawals: ISP owners only (a manager runs ops but can't move cash out)."""
+    """Withdrawals and payout destinations: the ISP OWNER, acting as themselves."""
 
     message = "Only the ISP owner can withdraw funds."
 
@@ -114,4 +114,20 @@ class CanManageMoney(BasePermission):
             return False
         if request.method in SAFE_METHODS:
             return True
+
+        # NEVER on a borrowed identity. Impersonation exists to TROUBLESHOOT, and
+        # troubleshooting never requires moving money.
+        #
+        # Without this, a platform account — or anyone who steals one — opens a grant,
+        # enrols their OWN authenticator, and withdraws the ISP's balance. The second
+        # factor would be satisfied by the attacker's own phone, which makes it
+        # decoration. This is also what keeps the platform-side MFA reset from being a
+        # master key: support can clear a lost device, but cannot then spend the money.
+        if is_impersonating(request):
+            self.message = (
+                "You are acting as another ISP. Money cannot move on a borrowed "
+                "identity — the ISP owner must do this themselves."
+            )
+            return False
+
         return user.can_manage_money
