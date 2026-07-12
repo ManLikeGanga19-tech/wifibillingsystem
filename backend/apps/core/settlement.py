@@ -1,27 +1,33 @@
-"""Settlement accounts and micro-transfer verification.
+"""Settlement accounts: plug-and-play in, confirmed on the way out.
 
-The ISP's paybill/bank is NOT a collection account — customers never pay it. It is
-where WE pay THEM, and it doubles as our KYC bar:
+The ISP's paybill/bank is where WE pay THEM. Customers never touch it.
 
-    To be issued a paybill (or a business bank account), Safaricom/the bank already
-    ran full KYC on that business. We inherit it for free. A shell company cannot
-    produce one.
+**Registering it is instant.** Type it in, payments switch on. We deliberately do
+NOT spend money proving accounts up front: most signups never trade a shilling, and
+paying a transfer fee to verify idle accounts is a straight loss on our least
+valuable users.
 
-But anyone can *type* "123456". So we prove control the way banks have for decades:
-send a few shillings carrying a random reference, and ask them to read it back off
-their own statement. Unfakeable without access to the account, automated, and it
-costs a rounding error against the money-laundering risk it retires.
+**The first payout proves it, for free.** The ISP gets their full money immediately;
+that payout carries a confirmation code; they read it back. Until they do, no SECOND
+payout leaves. So a wrong destination is capped at one payout, not an open drain.
 
-Verification is what flips an ISP live — money on, trial starts, held payments
-released. See docs/ONBOARDING_ARCHITECTURE.md §3b.
+**What this really defends is ACCOUNT TAKEOVER.** Verifying at signup would have done
+nothing about it — the account is already verified before an attacker changes it. The
+attack is: get into an ISP's console, quietly swap the payout destination, drain the
+wallet. So changing a confirmed account RE-ARMS the whole cycle and emails the owner.
+An attacker gets at most one payout, and the real owner gets told.
+
+Why the paybill is our KYC bar at all: to be issued one (or a business bank account),
+Safaricom/the bank already ran full identity checks on that business. We inherit them
+for free. A shell company cannot produce one.
 """
 
 import logging
 import secrets
 from datetime import timedelta
-from decimal import Decimal
 
 from django.conf import settings
+from django.core.mail import send_mail
 from django.db import transaction as db_transaction
 from django.utils import timezone
 
@@ -30,41 +36,34 @@ from .services import audit
 
 logger = logging.getLogger(__name__)
 
-#: Unambiguous alphabet — no O/0, I/1, S/5. The ISP has to read this off an SMS or
-#: a statement and type it back; every confusable character is a support ticket.
-_REF_ALPHABET = "ABCDEFGHJKLMNPQRTUVWXYZ2346789"
-REF_PREFIX = "WOS-"
-
-MAX_ATTEMPTS = 3
-#: A stale challenge is a weak challenge.
-CHALLENGE_TTL_HOURS = 72
-
-#: We send a small, RANDOM amount as well as the reference. The reference is the
-#: real proof; the amount is the fallback if it turns out a B2B recipient cannot see
-#: a reference we set (an open question with Safaricom — see the tariff RFI).
-MIN_AMOUNT = Decimal("5.00")
-MAX_AMOUNT = Decimal("19.00")
+#: Unambiguous alphabet — no O/0, I/1, S/5. The ISP reads this off an M-Pesa SMS or a
+#: bank statement and types it back; every confusable character is a support ticket.
+_CODE_ALPHABET = "ABCDEFGHJKLMNPQRTUVWXYZ2346789"
+CODE_PREFIX = "WOS-"
+MAX_ATTEMPTS = 5
 
 
 class SettlementError(Exception):
     """Something the ISP can fix; safe to show them."""
 
 
-def _new_ref() -> str:
-    return REF_PREFIX + "".join(secrets.choice(_REF_ALPHABET) for _ in range(4))
+def new_confirmation_code() -> str:
+    """Rides along on a real payout, so it costs us nothing to send."""
+    return CODE_PREFIX + "".join(secrets.choice(_CODE_ALPHABET) for _ in range(4))
 
 
-def _new_amount() -> Decimal:
-    return MIN_AMOUNT + Decimal(secrets.randbelow(int(MAX_AMOUNT - MIN_AMOUNT) + 1))
+# ---- register (plug and play) ------------------------------------------------
 
 
-# ---- 1. the ISP tells us where to pay them ----------------------------------
+def set_settlement_account(operator: Operator, *, method: str, actor=None, **fields) -> Operator:
+    """Tell us where to pay you. Instant — this is what switches payments ON.
 
+    Changing an already-CONFIRMED account re-arms confirmation and warns the owner:
+    that swap is exactly what an attacker who got into the console would do.
+    """
+    was_confirmed = operator.settlement_verified_at is not None
+    old_destination = operator.settlement_destination
 
-def set_settlement_account(operator: Operator, *, method: str, **fields) -> Operator:
-    """Record where we should settle. Changing it ALWAYS resets verification — a new
-    account is a new claim and has to be proved again, or an ISP could verify an
-    account they control and then swap in one they do not."""
     if method == Operator.Settlement.PAYBILL:
         paybill = (fields.get("settlement_paybill") or "").strip()
         if not paybill.isdigit():
@@ -88,120 +87,76 @@ def set_settlement_account(operator: Operator, *, method: str, **fields) -> Oper
         raise SettlementError("Choose a paybill or a bank account.")
 
     operator.settlement_method = method
-    # A new account is an unproven account.
+    # A new destination is an unconfirmed destination — always.
     operator.settlement_verified_at = None
-    operator.verification_ref = ""
-    operator.verification_amount = None
-    operator.verification_sent_at = None
     operator.verification_attempts = 0
     operator.save()
 
     audit(
         "settlement_account_set",
         operator=operator,
+        actor=actor,
         target=operator,
         method=method,
         destination=operator.settlement_destination,
+        replaced_confirmed_account=was_confirmed,
     )
+
+    if was_confirmed:
+        # The takeover tripwire. Free, and it reaches the real owner even if the
+        # attacker is sitting in the console.
+        _warn_destination_changed(operator, old_destination)
+
+    # Plug and play: having somewhere to be paid IS the bar. Go live.
+    if operator.status != Operator.Status.ACTIVE:
+        activate_operator(operator, actor=actor, reason="settlement account added")
+
     return operator
 
 
-# ---- 2. we send them a few shillings ----------------------------------------
+# ---- confirm (after the first payout lands) ----------------------------------
 
 
-def send_micro_transfer(operator: Operator) -> Operator:
-    """Send the proof-of-control payment. Returns the operator with a live challenge.
+def confirm_payout(operator: Operator, submitted: str, *, actor=None) -> bool:
+    """The ISP reads back the code that rode along with their first payout.
 
-    The plaintext reference is NOT returned to the caller: the whole point is that
-    only someone who can see the destination account's statement learns it.
+    That proves the money actually landed where they said it should, and unlocks
+    every payout after this one.
     """
-    if not operator.has_settlement_account:
-        raise SettlementError("Add a settlement account first.")
-    if operator.settlement_verified_at:
-        raise SettlementError("This account is already verified.")
+    from apps.billing.models import Payout
 
-    operator.verification_ref = _new_ref()
-    operator.verification_amount = _new_amount()
-    operator.verification_sent_at = timezone.now()
-    operator.verification_attempts = 0
-    operator.save(
-        update_fields=[
-            "verification_ref",
-            "verification_amount",
-            "verification_sent_at",
-            "verification_attempts",
-            "updated_at",
-        ]
-    )
-
-    _disburse(operator)
-
-    audit(
-        "settlement_verification_sent",
-        operator=operator,
-        target=operator,
-        destination=operator.settlement_destination,
-        amount=str(operator.verification_amount),
-        # The reference is recorded in the audit trail (support needs it to help a
-        # confused ISP) but is never returned over the API.
-        reference=operator.verification_ref,
-    )
-    return operator
-
-
-def _disburse(operator: Operator) -> None:
-    """Actually move the money.
-
-    Today this is a no-op stub: real payouts are executed manually and the I&M /
-    Daraja B2B rails are not wired yet (see docs/PRE_STAGING_CHECKLIST.md). It is
-    isolated behind this one function on purpose, so switching to the real rail is a
-    single change and never touches the verification logic.
-    """
-    logger.info(
-        "MICRO-TRANSFER: KSh %s ref=%s -> %s [%s]",
-        operator.verification_amount,
-        operator.verification_ref,
-        operator.settlement_destination,
-        "STUB — no real rail wired yet",
-    )
-
-
-# ---- 3. they read the reference back ----------------------------------------
-
-
-def verify_settlement(operator: Operator, submitted: str, *, actor=None) -> bool:
-    """The moment of truth. A correct reference proves they can see that account's
-    statement, which proves they control it.
-
-    On success the ISP goes LIVE (unless the platform has forced manual review).
-    """
     if operator.settlement_verified_at:
         return True  # idempotent
 
-    if not operator.verification_ref:
-        raise SettlementError("No verification is in progress. Request a new transfer.")
-
-    expired = timezone.now() - operator.verification_sent_at > timedelta(
-        hours=CHALLENGE_TTL_HOURS
+    pending = (
+        Payout.objects.filter(
+            operator=operator, status=Payout.Status.PAID, confirmed_at__isnull=True
+        )
+        .exclude(confirmation_code="")
+        .order_by("-processed_at")
+        .first()
     )
-    if expired:
-        raise SettlementError("That verification expired. Request a new transfer.")
+    if pending is None:
+        raise SettlementError(
+            "There's nothing to confirm yet. Withdraw once, then confirm the code "
+            "that arrives with it."
+        )
 
     if operator.verification_attempts >= MAX_ATTEMPTS:
         raise SettlementError(
-            "Too many incorrect attempts. Request a new transfer to try again."
+            "Too many incorrect codes. Contact support to unlock your payouts."
         )
 
     guess = (submitted or "").strip().upper().replace(" ", "")
-    if not guess.startswith(REF_PREFIX):
-        guess = REF_PREFIX + guess  # they typed just the code, not the prefix
+    if not guess.startswith(CODE_PREFIX):
+        guess = CODE_PREFIX + guess  # they typed just the code, not the prefix
 
-    if not secrets.compare_digest(guess, operator.verification_ref):
+    if not secrets.compare_digest(guess, pending.confirmation_code):
         operator.verification_attempts += 1
         operator.save(update_fields=["verification_attempts", "updated_at"])
         left = MAX_ATTEMPTS - operator.verification_attempts
         audit(
-            "settlement_verification_failed",
+            "settlement_confirmation_failed",
             operator=operator,
             actor=actor,
             target=operator,
@@ -209,47 +164,63 @@ def verify_settlement(operator: Operator, submitted: str, *, actor=None) -> bool
         )
         if left <= 0:
             raise SettlementError(
-                "Too many incorrect attempts. Request a new transfer to try again."
+                "Too many incorrect codes. Contact support to unlock your payouts."
             )
-        raise SettlementError(f"That reference doesn't match. {left} attempt(s) left.")
+        raise SettlementError(f"That code doesn't match. {left} attempt(s) left.")
 
-    operator.settlement_verified_at = timezone.now()
-    operator.save(update_fields=["settlement_verified_at", "updated_at"])
+    with db_transaction.atomic():
+        pending.confirmed_at = timezone.now()
+        pending.save(update_fields=["confirmed_at", "updated_at"])
+        operator.settlement_verified_at = timezone.now()
+        operator.verification_attempts = 0
+        operator.save(
+            update_fields=["settlement_verified_at", "verification_attempts", "updated_at"]
+        )
+
     audit(
-        "settlement_verified",
+        "settlement_confirmed",
         operator=operator,
         actor=actor,
         target=operator,
         destination=operator.settlement_destination,
+        payout=pending.id,
     )
-
-    if not getattr(settings, "SETTLEMENT_REQUIRES_MANUAL_REVIEW", False):
-        activate_operator(operator, actor=actor, reason="settlement verified")
-    else:
-        logger.info(
-            "%s verified settlement but manual review is forced — awaiting a human",
-            operator.slug,
-        )
+    logger.info("%s confirmed their payout destination", operator.slug)
     return True
 
 
-# ---- 4. go live -------------------------------------------------------------
+def payout_awaiting_confirmation(operator: Operator):
+    """A paid-out payout whose code has not been read back. While one exists, no
+    further payout may leave — that is what caps a wrong or hijacked destination at a
+    single payout instead of an unbounded drain."""
+    from apps.billing.models import Payout
+
+    if operator.settlement_verified_at:
+        return None
+    return (
+        Payout.objects.filter(
+            operator=operator, status=Payout.Status.PAID, confirmed_at__isnull=True
+        )
+        .exclude(confirmation_code="")
+        .order_by("-processed_at")
+        .first()
+    )
+
+
+# ---- go live -----------------------------------------------------------------
 
 
 @db_transaction.atomic
 def activate_operator(operator: Operator, *, actor=None, reason: str = "") -> int:
     """Flip the money gate ON. The single place an ISP becomes able to earn.
 
-    Returns the number of held customer payments released. Idempotent: activating an
-    already-active ISP releases nothing twice.
+    Returns the number of held customer payments released. Idempotent.
     """
     from apps.payments.c2b import release_held_payments
 
-    first_activation = operator.approved_at is None
-
-    operator.status = Operator.Status.ACTIVE
-    if first_activation:
+    if operator.approved_at is None:
         operator.approved_at = timezone.now()
+    operator.status = Operator.Status.ACTIVE
     # The free month starts when they can actually EARN — not when they filled in a
     # form. Only ever set once.
     if operator.trial_ends_at is None:
@@ -258,8 +229,8 @@ def activate_operator(operator: Operator, *, actor=None, reason: str = "") -> in
         update_fields=["status", "approved_at", "trial_ends_at", "updated_at"]
     )
 
-    # Everything their customers paid while we were verifying them is credited now.
-    # Nobody loses a shilling because WE made them wait.
+    # Everything their customers paid while they were still setting up is credited
+    # now. Nobody loses a shilling because WE made them wait.
     released = release_held_payments(operator)
 
     audit(
@@ -272,3 +243,31 @@ def activate_operator(operator: Operator, *, actor=None, reason: str = "") -> in
     )
     logger.info("%s is LIVE (%s); released %s held payment(s)", operator.slug, reason, released)
     return released
+
+
+# ---- email -------------------------------------------------------------------
+
+
+def _warn_destination_changed(operator: Operator, old: str) -> None:
+    """Reaches the real owner even if an attacker is the one sitting in the console."""
+    to = operator.contact_email
+    if not to:
+        return
+    try:
+        send_mail(
+            "Your WIFI.OS payout account was changed",
+            f"Hi,\n\n"
+            f"The account we pay {operator.name} into has just been changed.\n\n"
+            f"    Was:  {old or '(none)'}\n"
+            f"    Now:  {operator.settlement_destination}\n\n"
+            "If you did this, nothing more is needed — your next payout will carry a "
+            "code to confirm the new account.\n\n"
+            "IF YOU DID NOT DO THIS, someone may have access to your console. Change "
+            "your password immediately and contact us.\n\n"
+            "— WIFI.OS",
+            getattr(settings, "DEFAULT_FROM_EMAIL", "noreply@wifios.co.ke"),
+            [to],
+            fail_silently=False,
+        )
+    except Exception:
+        logger.exception("Could not warn %s that their payout account changed", operator.slug)

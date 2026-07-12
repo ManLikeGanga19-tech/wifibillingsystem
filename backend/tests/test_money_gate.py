@@ -299,15 +299,13 @@ class TestTheIspIsToldWhy:
         me = c.get("/api/v1/me/").json()
 
         assert me["operator"]["can_transact"] is False
+        # One thing stands between them and trading: somewhere to be paid. That IS
+        # the KYC bar — holding a paybill means Safaricom already vetted them.
         blockers = me["operator"]["go_live_blockers"]
-        assert [b["key"] for b in blockers] == [
-            "settlement_account",
-            "verify_ownership",
-            "go_live",
-        ]
+        assert [b["key"] for b in blockers] == ["settlement_account"]
         # It tells them what to DO, not just that they can't.
-        assert any(b["actionable"] for b in blockers)
-        assert not any(b["done"] for b in blockers)  # nothing done yet
+        assert blockers[0]["actionable"] is True
+        assert blockers[0]["done"] is False
 
     def test_a_live_isp_has_no_blockers(self):
         op = OperatorFactory(status=Operator.Status.ACTIVE)

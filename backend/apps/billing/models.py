@@ -100,6 +100,14 @@ class Payout(OperatorOwnedModel):
     # Reference of the actual transfer (M-Pesa code, or bank/Pesalink ref)
     mpesa_reference = models.CharField(max_length=40, blank=True)
     note = models.CharField(max_length=200, blank=True)
+
+    # The FIRST payout to an unconfirmed destination carries a code. The ISP reads it
+    # back off their own statement, which proves the money actually landed where they
+    # said it should — and costs us nothing, because it rides on money they asked for
+    # anyway. Until it is confirmed, no SECOND payout leaves: that caps a wrong (or
+    # hijacked) destination at one payout instead of an open drain.
+    confirmation_code = models.CharField(max_length=16, blank=True)
+    confirmed_at = models.DateTimeField(null=True, blank=True)
     # Estimated payout cost the platform bears (M-Pesa B2C band / bank transfer).
     platform_cost = models.DecimalField(max_digits=8, decimal_places=2, default=0)
 

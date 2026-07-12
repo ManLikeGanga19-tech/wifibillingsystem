@@ -1,40 +1,44 @@
-"""Settlement accounts and micro-transfer verification — the KYC bar.
+"""Settlement: plug-and-play in, confirmed on the way out.
 
-The ISP's paybill/bank is where WE pay THEM. It is not a collection account and
-customers never touch it. Its real job is KYC: to be issued a paybill or a business
-bank account, Safaricom/the bank already ran full identity checks on that business,
-so we inherit them for free. A shell company cannot produce one.
+Registering a payout account is INSTANT — we do not spend money proving accounts for
+ISPs who may never trade a shilling. The paybill itself is the KYC bar (Safaricom
+already vetted them to issue it), and we inherit that for free.
 
-But anyone can TYPE "123456". So we prove control the way banks do — send a few
-shillings carrying a random reference and ask them to read it back off their own
-statement. That is what these tests defend.
+The first payout does the proving, and it costs us nothing: the ISP gets their full
+money immediately, that payout carries a code, they read it back. Until they do, no
+SECOND payout leaves.
+
+What that really defends is ACCOUNT TAKEOVER — someone in an ISP's console swapping
+the payout destination and draining the wallet. Verifying at signup would not have
+touched it; the account is already verified before an attacker changes it. So
+changing a confirmed account re-arms the cycle and warns the real owner.
 """
 
-from datetime import timedelta
 from decimal import Decimal
 
 import pytest
-from django.utils import timezone
+from django.core import mail
 from rest_framework.test import APIClient
 
 from apps.accounts.models import Role
+from apps.billing.models import LedgerEntry, Payout
+from apps.billing.services import WalletError, request_payout
 from apps.core.models import Operator
-from apps.core.settlement import MAX_ATTEMPTS, REF_PREFIX
-from apps.payments.models import C2BPayment
+from apps.core.settlement import MAX_ATTEMPTS
 
 from .factories import OperatorFactory, PppoeClientFactory, UserFactory
 
 pytestmark = pytest.mark.django_db
 
 SET = "/api/v1/operator/settlement/"
-SEND = "/api/v1/operator/settlement/send/"
-VERIFY = "/api/v1/operator/settlement/verify/"
+CONFIRM = "/api/v1/operator/settlement/confirm/"
+WITHDRAW = "/api/v1/billing/payouts/withdraw/"
 
 PAYBILL = {"method": "paybill", "settlement_paybill": "555777", "settlement_name": "Acme Ltd"}
 
 
-def unverified_isp(**kw):
-    """A freshly signed-up ISP: pending, no settlement account."""
+def fresh_isp(**kw):
+    """A brand-new signup: pending, nowhere to be paid yet."""
     return OperatorFactory(
         status=Operator.Status.PENDING,
         settlement_method="",
@@ -51,230 +55,268 @@ def owner_of(operator, role=Role.TENANT_OWNER):
     return c
 
 
-def ref_of(operator) -> str:
-    operator.refresh_from_db()
-    return operator.verification_ref
+def fund(operator, amount="5000"):
+    LedgerEntry.objects.create(
+        operator=operator, entry_type=LedgerEntry.Type.SALE, amount=Decimal(amount)
+    )
 
 
-class TestSettingTheAccount:
-    def test_an_isp_registers_a_paybill(self):
-        op = unverified_isp()
+def pay_out(operator, user, amount="1000"):
+    """Request a withdrawal and mark it paid, as the platform would."""
+    from apps.billing.services import mark_payout_paid
+
+    p = request_payout(
+        operator=operator,
+        amount=Decimal(amount),
+        user=user,
+        method="paybill",
+        destination={"phone": "254712345678"},
+    )
+    return mark_payout_paid(p, by=user, mpesa_reference="REF123")
+
+
+class TestPlugAndPlay:
+    """No micro-transfer, no waiting, no cost to us for ISPs who never trade."""
+
+    def test_adding_an_account_switches_payments_ON_immediately(self):
+        op = fresh_isp()
+        assert op.can_transact is False
+
         resp = owner_of(op).post(SET, PAYBILL, format="json")
         assert resp.status_code == 201, resp.content
 
         op.refresh_from_db()
-        assert op.settlement_method == Operator.Settlement.PAYBILL
-        assert op.settlement_paybill == "555777"
-        assert op.has_settlement_account
-        assert not op.can_transact  # registering is not proving
-
-    def test_an_isp_registers_a_bank_account(self):
-        op = unverified_isp()
-        resp = owner_of(op).post(
-            SET,
-            {
-                "method": "bank",
-                "payout_bank_name": "I&M Bank",
-                "payout_bank_account_number": "0123456789",
-                "payout_bank_account_name": "Acme Ltd",
-            },
-            format="json",
-        )
-        assert resp.status_code == 201, resp.content
-        op.refresh_from_db()
-        assert op.has_settlement_account
-
-    def test_a_paybill_must_be_digits(self):
-        op = unverified_isp()
-        resp = owner_of(op).post(
-            SET, {**PAYBILL, "settlement_paybill": "not-a-paybill"}, format="json"
-        )
-        assert resp.status_code == 400
-
-    def test_changing_the_account_RESETS_verification(self):
-        """Otherwise an ISP could verify an account they control, then quietly swap
-        in one they don't — and we'd pay a stranger."""
-        op = unverified_isp()
-        c = owner_of(op)
-        c.post(SET, PAYBILL, format="json")
-        c.post(SEND)
-        c.post(VERIFY, {"reference": ref_of(op)}, format="json")
-        op.refresh_from_db()
-        assert op.settlement_verified_at is not None
-
-        c.post(SET, {**PAYBILL, "settlement_paybill": "999888"}, format="json")
-        op.refresh_from_db()
-        assert op.settlement_verified_at is None  # must be proved again
-        assert op.verification_ref == ""
-
-    def test_only_the_OWNER_may_set_it(self):
-        """Setting the destination IS withdrawing, one step removed."""
-        op = unverified_isp()
-        c = owner_of(op, role=Role.TENANT_SUPPORT)
-        assert c.post(SET, PAYBILL, format="json").status_code == 403
-
-
-class TestMicroTransfer:
-    def test_sending_mints_a_reference_and_an_amount(self):
-        op = unverified_isp()
-        c = owner_of(op)
-        c.post(SET, PAYBILL, format="json")
-
-        resp = c.post(SEND)
-        assert resp.status_code == 200, resp.content
-
-        op.refresh_from_db()
-        assert op.verification_ref.startswith(REF_PREFIX)
-        assert Decimal("5.00") <= op.verification_amount <= Decimal("19.00")
-        assert op.verification_sent_at
-
-    def test_the_reference_is_NEVER_returned_over_the_api(self):
-        """The entire proof is that only someone who can see the destination
-        account's statement learns it. Leaking it here would make the whole
-        mechanism theatre."""
-        op = unverified_isp()
-        c = owner_of(op)
-        c.post(SET, PAYBILL, format="json")
-        body = c.post(SEND).json()
-
-        assert ref_of(op) not in str(body)
-        # ...but the AMOUNT is shown, so they can find the row on their statement.
-        assert body["verification"]["amount"]
-
-    def test_the_state_endpoint_never_leaks_it_either(self):
-        op = unverified_isp()
-        c = owner_of(op)
-        c.post(SET, PAYBILL, format="json")
-        c.post(SEND)
-        assert ref_of(op) not in str(c.get(SET).json())
-
-    def test_you_cannot_send_without_an_account(self):
-        op = unverified_isp()
-        assert owner_of(op).post(SEND).status_code == 400
-
-    def test_the_reference_uses_an_unambiguous_alphabet(self):
-        """They read this off an SMS and type it back. Every O/0 or I/1 is a
-        support ticket."""
-        op = unverified_isp()
-        c = owner_of(op)
-        c.post(SET, PAYBILL, format="json")
-        c.post(SEND)
-        code = ref_of(op)[len(REF_PREFIX):]
-        assert not (set(code) & set("O0I1S5"))
-
-
-class TestVerification:
-    def _ready(self):
-        op = unverified_isp()
-        c = owner_of(op)
-        c.post(SET, PAYBILL, format="json")
-        c.post(SEND)
-        return op, c
-
-    def test_the_right_reference_switches_payments_ON(self):
-        op, c = self._ready()
-        assert op.can_transact is False
-
-        resp = c.post(VERIFY, {"reference": ref_of(op)}, format="json")
-        assert resp.status_code == 200, resp.content
-
-        op.refresh_from_db()
-        assert op.settlement_verified_at is not None
-        assert op.status == Operator.Status.ACTIVE  # auto-activated, no human needed
+        assert op.status == Operator.Status.ACTIVE  # live, no human, no transfer
         assert op.can_transact is True
-        assert op.trial_ends_at is not None  # the free month starts when they can EARN
+        assert op.trial_ends_at is not None  # the free month starts now
+        assert op.settlement_verified_at is None  # not yet CONFIRMED — that's fine
 
-    def test_it_is_accepted_without_the_prefix(self):
-        """They'll type just the code half the time. Don't punish them for it."""
-        op, c = self._ready()
-        bare = ref_of(op)[len(REF_PREFIX):]
-        assert c.post(VERIFY, {"reference": bare}, format="json").status_code == 200
-        op.refresh_from_db()
-        assert op.can_transact
-
-    def test_it_is_case_and_space_insensitive(self):
-        op, c = self._ready()
-        messy = f" {ref_of(op).lower()} "
-        assert c.post(VERIFY, {"reference": messy}, format="json").status_code == 200
-
-    def test_a_wrong_reference_is_counted(self):
-        op, c = self._ready()
-        resp = c.post(VERIFY, {"reference": "WOS-ZZZZ"}, format="json")
-        assert resp.status_code == 400
-        op.refresh_from_db()
-        assert op.verification_attempts == 1
-        assert op.settlement_verified_at is None
-
-    def test_it_cannot_be_brute_forced(self):
-        op, c = self._ready()
-        for _ in range(MAX_ATTEMPTS):
-            c.post(VERIFY, {"reference": "WOS-ZZZZ"}, format="json")
-
-        # Even the RIGHT reference no longer works — the challenge is spent.
-        resp = c.post(VERIFY, {"reference": ref_of(op)}, format="json")
-        assert resp.status_code == 400
-        assert "new transfer" in resp.json()["detail"].lower()
-        op.refresh_from_db()
-        assert op.can_transact is False
-
-    def test_a_stale_challenge_is_refused(self):
-        op, c = self._ready()
-        Operator.objects.filter(pk=op.pk).update(
-            verification_sent_at=timezone.now() - timedelta(days=5)
-        )
-        resp = c.post(VERIFY, {"reference": ref_of(op)}, format="json")
-        assert resp.status_code == 400
-        assert "expired" in resp.json()["detail"].lower()
-
-    def test_you_cannot_verify_before_anything_was_sent(self):
-        op = unverified_isp()
-        c = owner_of(op)
-        c.post(SET, PAYBILL, format="json")
-        assert c.post(VERIFY, {"reference": "WOS-ABCD"}, format="json").status_code == 400
-
-    def test_verifying_twice_is_harmless(self):
-        op, c = self._ready()
-        ref = ref_of(op)
-        assert c.post(VERIFY, {"reference": ref}, format="json").status_code == 200
-        assert c.post(VERIFY, {"reference": ref}, format="json").status_code == 200
-
-
-class TestVerificationReleasesHeldMoney:
-    def test_going_live_credits_everything_customers_paid_while_waiting(self):
-        op = unverified_isp()
+    def test_going_live_releases_money_held_while_they_set_up(self):
+        op = fresh_isp()
         client = PppoeClientFactory(operator=op, plan__price=Decimal("2000"))
-
         from apps.payments.c2b import process_c2b_confirmation
 
         process_c2b_confirmation(
-            {"TransID": "SET1", "TransAmount": "2000",
+            {"TransID": "S1", "TransAmount": "2000",
              "BillRefNumber": client.account_number, "MSISDN": "254712345678"}
         )
         from apps.billing.services import wallet_balance
 
         assert wallet_balance(op) == Decimal("0.00")
-        assert C2BPayment.objects.get(trans_id="SET1").status == C2BPayment.Status.HELD
 
+        owner_of(op).post(SET, PAYBILL, format="json")
+        assert wallet_balance(op) == Decimal("2000.00")  # nobody loses a shilling
+
+    def test_a_bank_account_works_too(self):
+        op = fresh_isp()
+        resp = owner_of(op).post(
+            SET,
+            {"method": "bank", "payout_bank_name": "I&M Bank",
+             "payout_bank_account_number": "0123456789",
+             "payout_bank_account_name": "Acme Ltd"},
+            format="json",
+        )
+        assert resp.status_code == 201
+        op.refresh_from_db()
+        assert op.can_transact is True
+
+    def test_a_paybill_must_be_digits(self):
+        op = fresh_isp()
+        resp = owner_of(op).post(
+            SET, {**PAYBILL, "settlement_paybill": "not-a-paybill"}, format="json"
+        )
+        assert resp.status_code == 400
+        op.refresh_from_db()
+        assert op.can_transact is False
+
+    def test_only_the_OWNER_may_set_it(self):
+        """Setting the destination IS withdrawing, one step removed."""
+        op = fresh_isp()
+        assert owner_of(op, role=Role.TENANT_SUPPORT).post(
+            SET, PAYBILL, format="json"
+        ).status_code == 403
+
+
+class TestTheFirstPayoutProvesIt:
+    def test_the_first_payout_is_paid_IN_FULL_and_carries_a_code(self):
+        """They get all their money at once — we don't hold any of it back."""
+        op = fresh_isp()
         c = owner_of(op)
         c.post(SET, PAYBILL, format="json")
-        c.post(SEND)
-        c.post(VERIFY, {"reference": ref_of(op)}, format="json")
+        op.refresh_from_db()
+        fund(op, "5000")
 
-        # Nobody loses a shilling because WE made them wait.
-        assert wallet_balance(op) == Decimal("2000.00")
-        assert C2BPayment.objects.get(trans_id="SET1").status == C2BPayment.Status.MATCHED
+        user = op.users.first()
+        payout = pay_out(op, user, "1000")
+
+        assert payout.amount == Decimal("1000.00")  # the FULL amount
+        assert payout.confirmation_code.startswith("WOS-")
+        assert payout.confirmed_at is None
+
+    def test_a_SECOND_payout_is_blocked_until_they_confirm(self):
+        """This is the cap: a wrong or hijacked destination costs ONE payout, not an
+        open drain."""
+        op = fresh_isp()
+        c = owner_of(op)
+        c.post(SET, PAYBILL, format="json")
+        op.refresh_from_db()
+        fund(op, "5000")
+        user = op.users.first()
+
+        pay_out(op, user, "1000")
+
+        with pytest.raises(WalletError, match="Confirm your last payout"):
+            request_payout(
+                operator=op, amount=Decimal("1000"), user=user,
+                method="paybill", destination={"phone": "254712345678"},
+            )
+
+    def test_confirming_the_code_unlocks_payouts_permanently(self):
+        op = fresh_isp()
+        c = owner_of(op)
+        c.post(SET, PAYBILL, format="json")
+        op.refresh_from_db()
+        fund(op, "5000")
+        user = op.users.first()
+        payout = pay_out(op, user, "1000")
+
+        resp = c.post(CONFIRM, {"code": payout.confirmation_code}, format="json")
+        assert resp.status_code == 200, resp.content
+
+        op.refresh_from_db()
+        assert op.settlement_verified_at is not None
+        payout.refresh_from_db()
+        assert payout.confirmed_at is not None
+
+        # ...and a second payout now goes straight through, with NO code attached.
+        second = request_payout(
+            operator=op, amount=Decimal("500"), user=user,
+            method="paybill", destination={"phone": "254712345678"},
+        )
+        assert second.confirmation_code == ""
+
+    def test_the_code_is_accepted_without_the_prefix(self):
+        op = fresh_isp()
+        c = owner_of(op)
+        c.post(SET, PAYBILL, format="json")
+        op.refresh_from_db()
+        fund(op)
+        payout = pay_out(op, op.users.first())
+
+        bare = payout.confirmation_code.removeprefix("WOS-")
+        assert c.post(CONFIRM, {"code": bare.lower()}, format="json").status_code == 200
+
+    def test_a_wrong_code_is_counted_and_capped(self):
+        op = fresh_isp()
+        c = owner_of(op)
+        c.post(SET, PAYBILL, format="json")
+        op.refresh_from_db()
+        fund(op)
+        payout = pay_out(op, op.users.first())
+
+        for _ in range(MAX_ATTEMPTS):
+            assert c.post(CONFIRM, {"code": "WOS-ZZZZ"}, format="json").status_code == 400
+
+        # Even the RIGHT code no longer works — they must talk to a human.
+        resp = c.post(CONFIRM, {"code": payout.confirmation_code}, format="json")
+        assert resp.status_code == 400
+        assert "support" in resp.json()["detail"].lower()
+
+    def test_there_is_nothing_to_confirm_before_a_payout(self):
+        op = fresh_isp()
+        c = owner_of(op)
+        c.post(SET, PAYBILL, format="json")
+        resp = c.post(CONFIRM, {"code": "WOS-ABCD"}, format="json")
+        assert resp.status_code == 400
+        assert "nothing to confirm" in resp.json()["detail"].lower()
+
+    def test_the_code_uses_an_unambiguous_alphabet(self):
+        """They read this off an M-Pesa SMS and type it back. Every O/0 or I/1 is a
+        support ticket."""
+        op = fresh_isp()
+        c = owner_of(op)
+        c.post(SET, PAYBILL, format="json")
+        op.refresh_from_db()
+        fund(op)
+        code = pay_out(op, op.users.first()).confirmation_code.removeprefix("WOS-")
+        assert not (set(code) & set("O0I1S5"))
+
+
+class TestAccountTakeover:
+    """The attack this actually defends: someone in an ISP's console swaps the payout
+    destination to their own and drains the wallet."""
+
+    def _confirmed_isp(self):
+        op = fresh_isp()
+        c = owner_of(op)
+        c.post(SET, PAYBILL, format="json")
+        op.refresh_from_db()
+        fund(op, "50000")
+        payout = pay_out(op, op.users.first())
+        c.post(CONFIRM, {"code": payout.confirmation_code}, format="json")
+        op.refresh_from_db()
+        assert op.settlement_verified_at is not None
+        return op, c
+
+    def test_changing_a_CONFIRMED_account_re_arms_confirmation(self):
+        """An attacker gets at most ONE payout to their new account — not a drain."""
+        op, c = self._confirmed_isp()
+
+        c.post(SET, {**PAYBILL, "settlement_paybill": "999888"}, format="json")
+        op.refresh_from_db()
+        assert op.settlement_verified_at is None  # must be proved again
+
+        user = op.users.first()
+        first = request_payout(
+            operator=op, amount=Decimal("1000"), user=user,
+            method="paybill", destination={"phone": "254712345678"},
+        )
+        assert first.confirmation_code  # carries a code again
+
+        from apps.billing.services import mark_payout_paid
+
+        mark_payout_paid(first, by=user, mpesa_reference="X")
+
+        # ...and the drain stops here.
+        with pytest.raises(WalletError, match="Confirm your last payout"):
+            request_payout(
+                operator=op, amount=Decimal("1000"), user=user,
+                method="paybill", destination={"phone": "254712345678"},
+            )
+
+    def test_changing_a_confirmed_account_EMAILS_the_owner(self):
+        """Reaches the real owner even if the attacker is the one in the console."""
+        op, c = self._confirmed_isp()
+        op.contact_email = "owner@acme.co.ke"
+        op.save()
+        mail.outbox.clear()
+
+        c.post(SET, {**PAYBILL, "settlement_paybill": "999888"}, format="json")
+
+        assert len(mail.outbox) == 1
+        body = mail.outbox[0].body
+        assert "999888" in body  # the NEW destination
+        assert "555777" in body  # and what it replaced
+        assert "did not do this" in body.lower()  # the warning
+
+    def test_a_first_time_account_does_NOT_email_a_warning(self):
+        """Only a CHANGE is suspicious. Don't cry wolf on every signup."""
+        op = fresh_isp(contact_email="owner@acme.co.ke")
+        mail.outbox.clear()
+        owner_of(op).post(SET, PAYBILL, format="json")
+        assert mail.outbox == []
 
 
 class TestDefenceInDepth:
-    def test_an_ACTIVE_isp_with_no_verified_settlement_still_cannot_transact(self):
-        """The gate must not hang on a single flag. If anyone ever flips status to
-        active by hand — in the admin, or straight in the database — money still
-        does not move for a business we have not proved out."""
+    def test_an_ACTIVE_isp_with_NO_account_still_cannot_transact(self):
+        """If anyone ever flips status=active by hand — in the admin, or straight in
+        the database — money still does not move for a business with nowhere to be
+        paid."""
         op = OperatorFactory(
             status=Operator.Status.ACTIVE,
-            settlement_verified_at=None,
             settlement_method="",
             settlement_paybill="",
+            settlement_verified_at=None,
         )
         assert op.status == Operator.Status.ACTIVE
         assert op.can_transact is False
@@ -284,48 +326,17 @@ class TestDefenceInDepth:
         op = OperatorFactory(
             status=Operator.Status.ACTIVE,
             is_platform_owned=True,
-            settlement_verified_at=None,
             settlement_method="",
+            settlement_paybill="",
         )
         assert op.can_transact is True
 
-    def test_manual_approval_alone_does_not_open_the_money_gate(self, settings):
-        """A platform admin can activate an ISP — but that is not the same as
-        proving who they are."""
-        op = unverified_isp()
-        admin = APIClient()
-        admin.force_authenticate(
-            user=UserFactory(
-                operator=None, is_staff=True, is_superuser=True, role=Role.PLATFORM_OWNER
-            )
-        )
-        resp = admin.post(f"/api/v1/platform/tenants/{op.id}/approve/")
-        assert resp.status_code == 200
-        assert resp.json()["status"] == "active"
-        assert resp.json()["can_transact"] is False  # still no verified settlement
-        assert resp.json()["settlement_verified"] is False
-
-
-class TestForcedManualReview:
-    def test_verification_does_not_auto_activate_when_review_is_forced(self, settings):
-        settings.SETTLEMENT_REQUIRES_MANUAL_REVIEW = True
-        op = unverified_isp()
-        c = owner_of(op)
-        c.post(SET, PAYBILL, format="json")
-        c.post(SEND)
-        c.post(VERIFY, {"reference": ref_of(op)}, format="json")
-
-        op.refresh_from_db()
-        assert op.settlement_verified_at is not None  # proved
-        assert op.status == Operator.Status.PENDING  # but a human must still say yes
-        assert op.can_transact is False
-
 
 class TestTheSuspendedNoticeBug:
-    """🔴 The page told a cut-off subscriber to pay the ISP'S OWN paybill. C2B
-    confirmations only ever arrive at DANAMO's shortcode — so anyone who followed
-    those instructions either paid the ISP directly (we never saw it, and they
-    STAYED CUT OFF despite having paid) or was shown no paybill at all."""
+    """🔴 The page told a cut-off subscriber to pay the ISP'S OWN shortcode. C2B
+    confirmations only ever arrive at DANAMO's paybill — so anyone who followed those
+    instructions either paid the ISP directly (we never saw it, and they STAYED CUT
+    OFF despite having paid) or was shown no paybill at all."""
 
     def test_it_shows_DANAMOS_paybill_and_the_routing_account_number(self, settings):
         settings.DARAJA_SHORTCODE = "4123456"
@@ -340,9 +351,7 @@ class TestTheSuspendedNoticeBug:
             f"&account={client.account_number}"
         ).json()
 
-        assert body["paybill"] == "4123456"  # OURS, not the ISP's
-        # The account number is the ONLY thing that routes the money to the right
-        # ISP and the right subscriber.
+        assert body["paybill"] == "4123456"  # OURS, never the ISP's
         assert body["client"]["account_number"] == client.account_number
         assert "ACCOUNT NUMBER" in body["how_to_pay"]
 
@@ -359,3 +368,9 @@ class TestTheSuspendedNoticeBug:
             f"&account={client.account_number}"
         ).json()
         assert body["paybill"] == "4123456"
+
+
+class TestPayoutDestination:
+    def test_a_paybill_payout_names_the_paybill(self):
+        p = Payout(method=Payout.Method.PAYBILL, paybill="555777", amount=Decimal("100"))
+        assert p.destination == "Paybill 555777"

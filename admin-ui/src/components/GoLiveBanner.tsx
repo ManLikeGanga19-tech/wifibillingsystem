@@ -94,7 +94,7 @@ export default function GoLiveBanner({
                       how a checklist becomes a chore. */}
                   {b.key === 'settlement_account' && (
                     <div className="mt-3 border border-[#141414]/15 bg-[#f0efec] p-3">
-                      <SettlementSetup onVerified={onWentLive} />
+                      <SettlementSetup onWentLive={onWentLive} />
                     </div>
                   )}
                 </div>

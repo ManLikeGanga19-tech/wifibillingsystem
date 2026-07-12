@@ -1,8 +1,9 @@
-"""The ISP's settlement account: tell us where to pay you, then prove you own it.
+"""The ISP's settlement account: tell us where to pay you (instant), then confirm
+the first payout actually landed there.
 
-This is the last thing standing between a new ISP and their first shilling, so the
-copy matters as much as the code — an ISP who does not understand why their
-customers pay US will not complete it.
+The copy matters as much as the code — an ISP who does not understand why their
+customers pay US will not finish this, and an ISP who is not told why we want the
+code will think it is bureaucracy.
 """
 
 from drf_spectacular.utils import extend_schema
@@ -17,9 +18,9 @@ from .schema import OBJECT_RESPONSE
 from .settlement import (
     MAX_ATTEMPTS,
     SettlementError,
-    send_micro_transfer,
+    confirm_payout,
+    payout_awaiting_confirmation,
     set_settlement_account,
-    verify_settlement,
 )
 from .tenancy import acting_tenant
 
@@ -39,11 +40,11 @@ class SettlementSerializer(serializers.Serializer):
     )
 
 
-# NB the name must not collide with any OTHER serializer's component name —
-# apps/signup has a VerifySerializer too, and spectacular would silently emit a
-# broken schema. See docs/ENGINEERING_NOTES.md #2.
-class SettlementVerifySerializer(serializers.Serializer):
-    reference = serializers.CharField(max_length=16)
+# NB the name must not collide with any OTHER serializer's component name — signup
+# has one too, and spectacular would silently emit a broken schema.
+# See docs/ENGINEERING_NOTES.md #2.
+class ConfirmPayoutSerializer(serializers.Serializer):
+    code = serializers.CharField(max_length=16)
 
 
 class _Base(APIView):
@@ -59,37 +60,37 @@ class _Base(APIView):
 
 
 def _state(op: Operator) -> dict:
-    """Never leaks the reference — the whole proof is that only someone who can see
-    the destination account's statement knows it."""
-    verifying = bool(op.verification_ref) and not op.settlement_verified_at
+    pending = payout_awaiting_confirmation(op)
     return {
         "method": op.settlement_method or None,
         "destination": op.settlement_destination or None,
         "has_account": op.has_settlement_account,
-        "verified": op.settlement_verified_at is not None,
-        "verified_at": op.settlement_verified_at,
+        "confirmed": op.settlement_verified_at is not None,
+        "confirmed_at": op.settlement_verified_at,
         "can_transact": op.can_transact,
-        "verification": {
-            "in_progress": verifying,
-            "sent_at": op.verification_sent_at if verifying else None,
-            # The AMOUNT is safe to show — it helps them find the row on their
-            # statement. The REFERENCE is the secret.
-            "amount": op.verification_amount if verifying else None,
-            "attempts_left": max(0, MAX_ATTEMPTS - op.verification_attempts)
-            if verifying
-            else None,
-        },
+        # While this is set, payouts are BLOCKED until they read the code back.
+        "awaiting_confirmation": (
+            {
+                "payout_id": pending.id,
+                "amount": pending.amount,
+                "sent_at": pending.processed_at,
+                "destination": pending.destination,
+                "attempts_left": max(0, MAX_ATTEMPTS - op.verification_attempts),
+            }
+            if pending
+            else None
+        ),
         # Said out loud, because every ISP asks.
         "explainer": (
             "Your customers always pay WIFI.OS, never you directly. We hold that "
             "money, attribute every shilling to you in a ledger you can see, absorb "
-            "the M-Pesa and bank charges, and settle to this account on request."
+            "the M-Pesa and bank charges, and settle it to this account on request."
         ),
     }
 
 
 @extend_schema(request=SettlementSerializer, responses=OBJECT_RESPONSE,
-               summary="Where should we pay you? (settlement account)")
+               summary="Where should we pay you? (instant — this switches payments on)")
 class SettlementView(_Base):
     def get(self, request):
         return Response(_state(acting_tenant(request)))
@@ -98,46 +99,38 @@ class SettlementView(_Base):
         s = SettlementSerializer(data=request.data)
         s.is_valid(raise_exception=True)
         op = acting_tenant(request)
-        set_settlement_account(op, **s.validated_data)
-        return Response(_state(op), status=status.HTTP_201_CREATED)
-
-
-@extend_schema(request=None, responses=OBJECT_RESPONSE,
-               summary="Send the proof-of-control micro-transfer")
-class SendVerificationView(_Base):
-    def post(self, request):
-        op = acting_tenant(request)
-        send_micro_transfer(op)
+        set_settlement_account(op, actor=request.user, **s.validated_data)
+        op.refresh_from_db()
         return Response(
             {
                 **_state(op),
                 "detail": (
-                    f"We've sent KSh {op.verification_amount} to "
-                    f"{op.settlement_destination}. Find it on your statement and type "
-                    "back the reference it carries."
+                    "Saved — your payments are ON and your free month has started. "
+                    "Your first withdrawal will carry a short code; read it back to "
+                    "unlock payouts permanently."
                 ),
-            }
+            },
+            status=status.HTTP_201_CREATED,
         )
 
 
-@extend_schema(request=SettlementVerifySerializer, responses=OBJECT_RESPONSE,
-               summary="Read the reference back — this is what switches payments on")
-class VerifySettlementView(_Base):
+@extend_schema(request=ConfirmPayoutSerializer, responses=OBJECT_RESPONSE,
+               summary="Confirm the code that arrived with your first payout")
+class ConfirmPayoutView(_Base):
+    """Proves the money actually landed where they said it should — and unlocks every
+    payout after this one."""
+
     def post(self, request):
-        s = SettlementVerifySerializer(data=request.data)
+        s = ConfirmPayoutSerializer(data=request.data)
         s.is_valid(raise_exception=True)
         op = acting_tenant(request)
 
-        verify_settlement(op, s.validated_data["reference"], actor=request.user)
+        confirm_payout(op, s.validated_data["code"], actor=request.user)
         op.refresh_from_db()
 
         return Response(
             {
                 **_state(op),
-                "detail": (
-                    "Verified — your payments are ON and your free month has started."
-                    if op.can_transact
-                    else "Verified. A platform review is required before you go live."
-                ),
+                "detail": "Confirmed. Your payout account is locked in — withdraw freely.",
             }
         )

@@ -14,11 +14,7 @@ from .governance_views import (
     StartImpersonationView,
 )
 from .health_views import PlatformHealthView
-from .settlement_views import (
-    SendVerificationView,
-    SettlementView,
-    VerifySettlementView,
-)
+from .settlement_views import ConfirmPayoutView, SettlementView
 from .tenant_views import (
     OperatorSettingsView,
     PlatformOverviewView,
@@ -40,18 +36,13 @@ urlpatterns = [
     path("stats/", DashboardStatsView.as_view(), name="dashboard-stats"),
     path("nav/", NavCountsView.as_view(), name="nav-counts"),
     path("operator/settings/", OperatorSettingsView.as_view(), name="operator-settings"),
-    # Settlement: where we pay the ISP, and the micro-transfer that proves they own
-    # it. Verifying is what switches their payments ON.
+    # Settlement: where we pay the ISP. Registering it is INSTANT and is what
+    # switches their payments on; the first payout then carries a code they confirm.
     path("operator/settlement/", SettlementView.as_view(), name="settlement"),
     path(
-        "operator/settlement/send/",
-        SendVerificationView.as_view(),
-        name="settlement-send",
-    ),
-    path(
-        "operator/settlement/verify/",
-        VerifySettlementView.as_view(),
-        name="settlement-verify",
+        "operator/settlement/confirm/",
+        ConfirmPayoutView.as_view(),
+        name="settlement-confirm",
     ),
     # Public
     path("tenants/signup/", TenantSignupView.as_view(), name="tenant-signup"),

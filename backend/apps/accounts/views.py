@@ -75,51 +75,26 @@ def _go_live_blockers(op) -> list[dict]:
                 "key": "suspended",
                 "label": "Account suspended",
                 "detail": "Contact the platform administrator.",
+                "done": False,
                 "actionable": False,
             }
         ]
-    # The real, live checklist — each step is either done, yours to do, or ours.
-    has_account = op.has_settlement_account
-    verifying = bool(op.verification_ref) and not op.settlement_verified_at
-    verified = op.settlement_verified_at is not None
-
+    # PENDING. One thing stands between them and trading: somewhere to be paid.
+    # That is the whole bar — because holding a paybill or a business bank account
+    # means Safaricom/the bank already ran KYC on them, and we inherit it for free.
     return [
         {
             "key": "settlement_account",
-            "label": "Add your settlement account",
+            "label": "Tell us where to pay you",
             "detail": (
-                "Tell us the M-Pesa paybill or bank account we should pay YOU into. "
-                "Your customers always pay WIFI.OS; we hold the money, attribute every "
-                "shilling to you, absorb the M-Pesa charges, and settle to this account."
-            ),
-            "done": has_account,
-            "actionable": not has_account,
-        },
-        {
-            "key": "verify_ownership",
-            "label": (
-                "Confirm the reference we sent you"
-                if verifying
-                else "Prove you own that account"
-            ),
-            "detail": (
-                "We've sent a few shillings to it. Find them on your statement and type "
-                "back the reference they carry — that proves the account is really yours."
-                if verifying
-                else "We'll send a few shillings carrying a reference. Read it back to us."
-            ),
-            "done": verified,
-            "actionable": has_account and not verified,
-        },
-        {
-            "key": "go_live",
-            "label": "Payments switch on",
-            "detail": (
-                "Verification is instant — no waiting for a human. Your free month "
-                "starts the moment you can actually earn."
+                "Add the M-Pesa paybill or bank account we should settle YOUR money "
+                "into. Payments switch on the moment you do — no waiting, no "
+                "documents. Your customers always pay WIFI.OS; we hold that money, "
+                "attribute every shilling to you, absorb the M-Pesa charges, and pay "
+                "it out to this account on request."
             ),
             "done": False,
-            "actionable": False,
+            "actionable": True,
         },
     ]
 

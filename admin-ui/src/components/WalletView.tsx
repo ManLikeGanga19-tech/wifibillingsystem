@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Wallet, ArrowDownToLine, Loader2 } from 'lucide-react';
-import { api, ApiLedgerEntry, ApiPayout, WalletSummary } from '../api/client';
+import { api, ApiLedgerEntry, ApiPayout, Settlement, WalletSummary } from '../api/client';
+import ConfirmPayout from './ConfirmPayout';
 import { Badge, Btn, Field, inputCls, Panel, RefreshBtn, TableShell, tdCls, toast, ViewHeader, fmtDateTime, fmtKsh } from './ui';
 
 const ENTRY_LABEL: Record<ApiLedgerEntry['entry_type'], { label: string; color: 'green' | 'red' | 'amber' | 'gray' | 'blue' }> = {
@@ -17,6 +18,7 @@ export default function WalletView() {
   const [summary, setSummary] = useState<WalletSummary | null>(null);
   const [ledger, setLedger] = useState<ApiLedgerEntry[] | null>(null);
   const [payouts, setPayouts] = useState<ApiPayout[]>([]);
+  const [settlement, setSettlement] = useState<Settlement | null>(null);
   const [error, setError] = useState('');
   const [amount, setAmount] = useState('');
   const [method, setMethod] = useState<'mpesa' | 'bank'>('mpesa');
@@ -26,14 +28,16 @@ export default function WalletView() {
 
   const load = useCallback(async () => {
     try {
-      const [s, l, p] = await Promise.all([
+      const [s, l, p, st] = await Promise.all([
         api.billing.wallet(),
         api.billing.ledger(),
         api.billing.payouts.list(),
+        api.settlement.get(),
       ]);
       setSummary(s);
       setLedger(l.results);
       setPayouts(p.results);
+      setSettlement(st);
       setError('');
     } catch {
       setError('Could not load your wallet.');
@@ -78,6 +82,11 @@ export default function WalletView() {
       >
         <RefreshBtn onClick={load} />
       </ViewHeader>
+
+      {/* Pinned above everything: their money is already out, and this is what
+          unlocks the next withdrawal. Blocking a payout without explaining it is
+          how a safety feature gets mistaken for a bug. */}
+      {settlement && <ConfirmPayout settlement={settlement} onConfirmed={load} />}
 
       {summary && (
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">

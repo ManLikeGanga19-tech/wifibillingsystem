@@ -292,16 +292,19 @@ export interface Settlement {
   method: 'paybill' | 'bank' | null;
   destination: string | null;
   has_account: boolean;
-  verified: boolean;
-  verified_at: string | null;
+  /** The first payout's code has been read back — payouts are unlocked for good. */
+  confirmed: boolean;
+  confirmed_at: string | null;
   can_transact: boolean;
-  verification: {
-    in_progress: boolean;
+  /** Set while a paid-out payout is still unconfirmed. While it is, NO further
+   *  payout leaves — that caps a wrong or hijacked destination at one payout. */
+  awaiting_confirmation: {
+    payout_id: number;
+    amount: string;
     sent_at: string | null;
-    /** Shown so they can find the row on their statement. The REFERENCE never is. */
-    amount: string | null;
-    attempts_left: number | null;
-  };
+    destination: string;
+    attempts_left: number;
+  } | null;
   explainer: string;
 }
 
@@ -619,23 +622,19 @@ export const api = {
       body: JSON.stringify({}),
     }),
 
-  /** Where WE pay THEM — and the micro-transfer that proves they own it.
-   *  Verifying is what switches their payments on. */
+  /** Where WE pay THEM. Registering is INSTANT — that's what switches payments on.
+   *  The first payout then carries a code they read back, which unlocks the rest. */
   settlement: {
     get: () => request<Settlement>('/operator/settlement/'),
     set: (body: Record<string, string>) =>
-      request<Settlement>('/operator/settlement/', {
+      request<Settlement & { detail: string }>('/operator/settlement/', {
         method: 'POST',
         body: JSON.stringify(body),
       }),
-    send: () =>
-      request<Settlement & { detail: string }>('/operator/settlement/send/', {
+    confirm: (code: string) =>
+      request<Settlement & { detail: string }>('/operator/settlement/confirm/', {
         method: 'POST',
-      }),
-    verify: (reference: string) =>
-      request<Settlement & { detail: string }>('/operator/settlement/verify/', {
-        method: 'POST',
-        body: JSON.stringify({ reference }),
+        body: JSON.stringify({ code }),
       }),
   },
 

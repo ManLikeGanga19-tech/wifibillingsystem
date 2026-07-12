@@ -146,11 +146,30 @@ def credit_sale(tx) -> None:
 def request_payout(*, operator, amount: Decimal, user, method="mpesa", destination=None) -> Payout:
     """Funds are debited (held) immediately so concurrent requests can't
     double-spend the balance. `destination` carries the method-specific details
-    (phone for M-Pesa; bank_name/account for bank)."""
+    (phone for M-Pesa; bank_name/account for bank).
+
+    THE ONE-PAYOUT CAP: if a previous payout is still awaiting confirmation, no
+    further payout may leave. The ISP gets their first withdrawal in full and at
+    once — but that payout carries a code, and until they read it back we do not
+    know the money actually landed where they said. Blocking here is what caps a
+    wrong (or hijacked) destination at a single payout instead of an open drain.
+    """
+    from apps.core.settlement import (
+        new_confirmation_code,
+        payout_awaiting_confirmation,
+    )
+
     destination = destination or {}
     amount = Decimal(amount).quantize(Decimal("0.01"))
     if amount < MINIMUM_PAYOUT:
         raise WalletError(f"Minimum withdrawal is KSh {MINIMUM_PAYOUT}.")
+
+    unconfirmed = payout_awaiting_confirmation(operator)
+    if unconfirmed is not None:
+        raise WalletError(
+            "Confirm your last payout first. We sent a code with it — read it back "
+            "from your statement and your payouts unlock permanently."
+        )
 
     fields = {"method": method}
     if method == Payout.Method.BANK:
@@ -179,6 +198,11 @@ def request_payout(*, operator, amount: Decimal, user, method="mpesa", destinati
             amount=amount,
             requested_by=user,
             platform_cost=payout_cost(amount, method),
+            # An unconfirmed destination gets a code riding along with the money.
+            # Free to send, and it proves the payout actually landed.
+            confirmation_code=(
+                "" if op_locked.settlement_verified_at else new_confirmation_code()
+            ),
             **fields,
         )
         LedgerEntry.objects.create(
