@@ -137,6 +137,39 @@ def retry_failed_provisions():
             activate_session.delay(session_id)
 
 
+#: How long before expiry we text "your time is almost up". Long enough to act on
+#: (find your phone, complete an STK push), short enough that they haven't wandered off.
+EXPIRY_WARN_MINUTES = 10
+
+
+@shared_task
+def warn_expiring_sessions():
+    """Text active customers a few minutes before their time runs out, so they can
+    renew instead of just dropping offline. Each session is warned exactly once —
+    guarded by expiry_warned_at, which activation resets on a fresh window."""
+    from datetime import timedelta
+
+    from apps.notifications.services import notify_expiring
+
+    from .models import Session
+
+    now = timezone.now()
+    soon = now + timedelta(minutes=EXPIRY_WARN_MINUTES)
+    due = Session.objects.filter(
+        status=Session.Status.ACTIVE,
+        expires_at__gt=now,
+        expires_at__lte=soon,
+        expiry_warned_at__isnull=True,
+    ).select_related("operator", "plan", "subscriber")
+    for session in due:
+        # Claim it first (filtered UPDATE), so two overlapping beats can't double-text.
+        claimed = Session.objects.filter(pk=session.pk, expiry_warned_at__isnull=True).update(
+            expiry_warned_at=now
+        )
+        if claimed:
+            notify_expiring(session)
+
+
 @shared_task
 def expire_sessions():
     """Beat task (every minute): cut off sessions past expires_at. The status flip

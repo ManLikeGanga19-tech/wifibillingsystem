@@ -277,6 +277,9 @@ class OperatorSettingsSerializer(serializers.ModelSerializer):
             "contact_phone",
             "contact_email",
             "commission_rate",
+            # Text this ISP's customers payment receipts + expiry warnings. Drives
+            # renewals, but costs money per SMS, so it's theirs to switch off.
+            "notify_customers_sms",
             # Saved payout destinations (pre-fill the wallet withdraw form)
             "payout_phone",
             "payout_bank_name",

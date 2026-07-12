@@ -150,6 +150,9 @@ class Session(OperatorOwnedModel):
     ip_address = models.GenericIPAddressField(null=True, blank=True)
     data_used_mb = models.PositiveIntegerField(default=0)
     provision_error = models.CharField(max_length=255, blank=True)
+    # When we sent the "expiring soon" SMS, so the beat task warns each session exactly
+    # once instead of every time it runs.
+    expiry_warned_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-created_at"]

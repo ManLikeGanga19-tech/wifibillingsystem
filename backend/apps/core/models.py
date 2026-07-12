@@ -27,6 +27,10 @@ class Operator(TimeStampedModel):
         max_length=10, choices=Status.choices, default=Status.PENDING, db_index=True
     )
     is_active = models.BooleanField(default=True)  # hard kill-switch, distinct from status
+    # Send transactional SMS (payment receipts, expiry warnings) to THIS ISP's
+    # customers. On by default — it directly drives hotspot renewals — but SMS costs
+    # money, so an ISP can switch it off.
+    notify_customers_sms = models.BooleanField(default=True)
     approved_at = models.DateTimeField(null=True, blank=True)
 
     # Contact (the ISP owner)

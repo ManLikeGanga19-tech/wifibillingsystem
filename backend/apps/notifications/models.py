@@ -49,8 +49,21 @@ class Message(OperatorOwnedModel):
         SENT = "sent", "Sent"
         FAILED = "failed", "Failed"
 
+    class Category(models.TextChoices):
+        # What the message IS — so reporting can separate "we sent 4,000 marketing
+        # blasts" from "we sent 4,000 payment receipts", and so a per-category opt-out
+        # is possible later.
+        CAMPAIGN = "campaign", "Marketing campaign"
+        PAYMENT = "payment", "Payment confirmation"
+        EXPIRY = "expiry", "Expiry warning"
+        PPPOE = "pppoe", "PPPoE notice"
+        OTHER = "other", "Other"
+
     campaign = models.ForeignKey(
         Campaign, null=True, blank=True, on_delete=models.CASCADE, related_name="messages"
+    )
+    category = models.CharField(
+        max_length=12, choices=Category.choices, default=Category.CAMPAIGN, db_index=True
     )
     to_phone = models.CharField(max_length=12, blank=True, db_index=True)
     to_email = models.EmailField(blank=True)

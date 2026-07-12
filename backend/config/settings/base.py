@@ -193,6 +193,12 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.provisioning.tasks.expire_sessions",
         "schedule": 60.0,
     },
+    # Text customers a few minutes before their WiFi runs out, so they renew instead
+    # of silently dropping offline.
+    "warn-expiring-sessions": {
+        "task": "apps.provisioning.tasks.warn_expiring_sessions",
+        "schedule": 60.0,
+    },
     # Reconnect paid customers whose provisioning failed while a router was briefly
     # down. Runs often, because a hotspot customer paid seconds ago and is waiting.
     "retry-failed-provisions": {

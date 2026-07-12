@@ -1,3 +1,4 @@
+import logging
 import secrets
 
 from django.utils import timezone
@@ -6,6 +7,8 @@ from apps.core.services import audit
 
 from .adapters import get_adapter
 from .models import Router, Session
+
+logger = logging.getLogger(__name__)
 
 
 def _hotspot_password() -> str:
@@ -152,11 +155,12 @@ def reprovision_transaction(tx, *, actor=None, compensate: bool = True):
 def activate(session: Session) -> None:
     """Push credentials to the router. Raises on failure so Celery retries."""
     if session.status == Session.Status.ACTIVE:
-        return
+        return  # already on — and the early return also means we notify exactly once
     result = get_adapter(session.router).activate_user(session)
     session.status = Session.Status.ACTIVE
     session.provision_error = ""
-    session.save(update_fields=["status", "provision_error", "updated_at"])
+    session.expiry_warned_at = None  # a fresh/renewed window hasn't been warned yet
+    session.save(update_fields=["status", "provision_error", "expiry_warned_at", "updated_at"])
     audit(
         "session_activated",
         operator=session.operator,
@@ -164,6 +168,14 @@ def activate(session: Session) -> None:
         router=session.router.name,
         message=result.message,
     )
+    # "You're online" — the receipt. Best-effort: a failed SMS must never fail the
+    # activation the customer already paid for.
+    try:
+        from apps.notifications.services import notify_online
+
+        notify_online(session)
+    except Exception:
+        logger.exception("Could not queue the online-confirmation SMS for session %s", session.pk)
 
 
 def suspend(session: Session, new_status: str | None = None) -> None:
