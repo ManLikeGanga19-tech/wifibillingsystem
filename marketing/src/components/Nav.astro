@@ -1,0 +1,54 @@
+---
+interface Props {
+  hideCta?: boolean;
+}
+const { hideCta = false } = Astro.props;
+
+const links = [
+  { href: '/#how', label: 'How it works' },
+  { href: '/#product', label: 'Product' },
+  { href: '/pricing', label: 'Pricing' },
+  { href: '/#faq', label: 'FAQ' },
+];
+---
+
+<header class="sticky top-0 z-40 border-b border-ink bg-paper/95 backdrop-blur">
+  <nav class="mx-auto flex max-w-6xl items-center gap-4 px-4 py-3 sm:px-6">
+    <a href="/" class="flex items-center gap-2 font-mono text-sm font-black uppercase tracking-tight">
+      <span class="grid h-6 w-6 place-items-center border border-ink bg-ink text-[10px] text-paper">W</span>
+      WIFI<span class="text-money">.OS</span>
+    </a>
+
+    <div class="ml-auto hidden items-center gap-5 md:flex">
+      {
+        links.map((l) => (
+          <a
+            href={l.href}
+            class="font-mono text-[11px] font-bold uppercase tracking-wide text-ink/70 transition hover:text-ink"
+          >
+            {l.label}
+          </a>
+        ))
+      }
+    </div>
+
+    <div class="ml-auto flex items-center gap-2 md:ml-0">
+      <a
+        href="http://localhost:4600"
+        class="border border-ink bg-card px-3 py-2 font-mono text-[11px] font-bold uppercase transition hover:bg-hover"
+      >
+        Sign in
+      </a>
+      {
+        !hideCta && (
+          <a
+            href="/signup"
+            class="border border-money bg-money px-3 py-2 font-mono text-[11px] font-bold uppercase text-white transition hover:opacity-85"
+          >
+            Get started
+          </a>
+        )
+      }
+    </div>
+  </nav>
+</header>

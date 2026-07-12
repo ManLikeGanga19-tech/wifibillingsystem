@@ -1,0 +1,99 @@
+---
+/**
+ * Renders one slot from the media manifest.
+ *
+ * If the file exists in public/media/, you get the screenshot or the looping clip.
+ * If it does not, you get a placeholder printing the capture brief — NOT a broken
+ * image, and not a silently empty box. That means the site is deployable at any
+ * moment, and the gap between "what marketing promises" and "what has been shot" is
+ * visible to whoever looks at the page instead of hiding in someone's head.
+ *
+ * The existence check runs at BUILD time (Node, in this frontmatter). Nothing about
+ * it reaches the browser.
+ */
+import fs from 'node:fs';
+import path from 'node:path';
+import type { MediaSlot } from '../lib/media';
+
+interface Props {
+  /** NOT named `slot` — that is a reserved attribute in Astro (named slots), and it
+   *  silently collides with the component's own props. */
+  media: MediaSlot;
+  /** The hero shot should load eagerly; everything below the fold should not. */
+  eager?: boolean;
+  class?: string;
+}
+
+const { media: slot, eager = false, class: className = '' } = Astro.props;
+
+const publicDir = path.join(process.cwd(), 'public', 'media');
+const has = (file?: string) => (file ? fs.existsSync(path.join(publicDir, file)) : false);
+
+const hasMedia = has(slot.file);
+const hasPoster = has(slot.poster);
+const src = `/media/${slot.file}`;
+const poster = slot.poster ? `/media/${slot.poster}` : undefined;
+---
+
+<figure class={`m-0 ${className}`}>
+  <div
+    class="relative border border-ink bg-card overflow-hidden"
+    style={`aspect-ratio: ${slot.aspect}`}
+  >
+    {
+      hasMedia && slot.kind === 'shot' && (
+        <img
+          src={src}
+          alt={slot.caption}
+          loading={eager ? 'eager' : 'lazy'}
+          decoding="async"
+          class="h-full w-full object-cover object-top"
+        />
+      )
+    }
+
+    {
+      hasMedia && slot.kind === 'clip' && (
+        // Muted + inline + loop: it behaves like a moving screenshot, so it may
+        // autoplay. `preload=metadata` keeps it off the critical path — this page
+        // gets opened on a phone, on mobile data, by someone deciding whether to
+        // trust us.
+        <video
+          src={src}
+          poster={hasPoster ? poster : undefined}
+          autoplay
+          muted
+          loop
+          playsinline
+          preload="metadata"
+          aria-label={slot.caption}
+          class="h-full w-full object-cover object-top"
+        />
+      )
+    }
+
+    {
+      !hasMedia && (
+        <div class="absolute inset-0 flex flex-col justify-center gap-2 p-5 sm:p-8">
+          {/* A hatched frame reads as "deliberately empty", where a grey box reads
+              as "broken". */}
+          <div
+            class="absolute inset-0 opacity-[0.06]"
+            style="background-image: repeating-linear-gradient(45deg, #141414 0, #141414 1px, transparent 0, transparent 10px)"
+          />
+          <p class="relative text-[10px] font-mono font-bold uppercase tracking-widest text-ink/50">
+            {slot.kind === 'clip' ? 'Screen recording' : 'Screenshot'} · awaiting capture
+          </p>
+          <p class="relative font-mono text-xs sm:text-sm font-bold">
+            public/media/{slot.file}
+          </p>
+          <p class="relative max-w-prose text-xs sm:text-sm leading-relaxed text-ink/70">
+            {slot.brief}
+          </p>
+        </div>
+      )
+    }
+  </div>
+
+  <figcaption class="mt-2 font-mono text-[11px] text-ink/60">{slot.caption}</figcaption>
+</figure>

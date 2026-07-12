@@ -1,0 +1,56 @@
+---
+import SignupWizard from '../components/SignupWizard';
+import Base from '../layouts/Base.astro';
+
+/**
+ * The wizard is `client:load`, not `client:visible`: it is the only thing on the page
+ * and the first thing they need. Making it wait for an intersection observer would
+ * mean a visible blank box on the one screen we cannot afford to look broken.
+ */
+
+const reassurance = [
+  { t: 'First month free', d: 'Build everything before you pay anything.' },
+  { t: 'No card', d: 'We do not ask for one, now or at the end of the trial.' },
+  { t: 'No sales call', d: 'You will be trading today, not after a meeting.' },
+  { t: 'Leave whenever', d: 'Your clients and history are yours to export.' },
+];
+---
+
+<Base
+  title="Create your ISP account — WIFI.OS"
+  description="Five steps to your own ISP console on WIFI.OS. First month free, no card, no sales call."
+  hideCta
+>
+  <section>
+    <div class="mx-auto grid max-w-5xl gap-10 px-4 py-10 sm:px-6 sm:py-14 lg:grid-cols-[1fr_1.1fr]">
+      <div class="lg:pt-6">
+        <h1 class="font-serif text-3xl leading-tight font-bold sm:text-4xl">
+          Two minutes to your own ISP console.
+        </h1>
+        <p class="mt-4 text-sm leading-relaxed text-ink/70">
+          You will pick your address — <span class="font-mono font-bold">yourname.wifios.co.ke</span>
+          — verify your email, and set a password. That is the whole thing.
+        </p>
+
+        <dl class="mt-8 grid gap-px border border-ink bg-ink/15 sm:grid-cols-2">
+          {
+            reassurance.map((r) => (
+              <div class="bg-card p-4">
+                <dt class="font-mono text-[11px] font-bold uppercase">{r.t}</dt>
+                <dd class="mt-1 text-xs leading-relaxed text-ink/65">{r.d}</dd>
+              </div>
+            ))
+          }
+        </dl>
+
+        <p class="mt-6 font-mono text-[10px] leading-relaxed text-ink/50">
+          Already have an account?{' '}
+          <a href="http://localhost:4600" class="font-bold underline">Sign in</a> with your
+          phone or email.
+        </p>
+      </div>
+
+      <SignupWizard client:load />
+    </div>
+  </section>
+</Base>

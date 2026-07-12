@@ -1,0 +1,134 @@
+---
+import Legal from '../layouts/Legal.astro';
+
+/** TOS_VERSION in backend/apps/signup/models.py must match `version` below — that is
+ *  the string recorded against every ISP who accepts, so it is what we would produce
+ *  in a dispute. */
+---
+
+<Legal
+  title="Terms of Service"
+  description="The terms under which Danamo Tech Ltd provides the WIFI.OS billing platform to internet service providers in Kenya."
+  version="2026-07-01"
+  updated="1 July 2026"
+>
+  <p>
+    These terms govern your use of WIFI.OS, a billing and provisioning platform operated by
+    <b>Danamo Tech Ltd</b> ("we", "us"), a company registered in Kenya. "You" means the
+    internet service provider that holds a WIFI.OS account.
+  </p>
+
+  <h2>1. What we provide</h2>
+  <p>
+    We provide software that lets you sell internet access, provision your routers, collect
+    payments from your customers, and account for that money. We are a software and payment
+    aggregation service. We are not an internet service provider, and we do not supply
+    bandwidth, hardware, or a licence to operate one.
+  </p>
+
+  <h2>2. Collection of your customers' payments</h2>
+  <p>This is the most important clause in this document, so it is written plainly.</p>
+  <ul>
+    <li>
+      Payments made by your customers are collected into a Danamo Tech M-Pesa paybill
+      account, not into your own account.
+    </li>
+    <li>
+      Each payment is attributed to your ISP in a ledger at the moment it is received. That
+      ledger is visible to you at all times.
+    </li>
+    <li>
+      Money attributed to you is <b>held on your behalf</b>. It remains yours. We do not
+      lend it, invest it, or use it for our own purposes.
+    </li>
+    <li>
+      You may withdraw your available balance to the settlement account you have registered
+      with us, at any time, subject to the minimum payout amount shown in your console.
+    </li>
+    <li>
+      We deduct our fees (clause 3) as visible entries in that ledger, never as silent
+      deductions from a payout.
+    </li>
+  </ul>
+
+  <h2>3. Our fees</h2>
+  <p>
+    Our fees are published at wifios.co.ke/pricing and shown in your console. As at this
+    version: a flat monthly platform fee, a percentage of hotspot sales, and a graduated
+    monthly fee per <b>active</b> PPPoE client. Suspended clients are not billed. Your first
+    month is free. Any assisted-onboarding fee is optional and will not be charged without
+    your agreement.
+  </p>
+  <p>
+    We absorb M-Pesa and bank transaction charges on collections and payouts. We may change
+    our fees, but we will give you at least 30 days' notice before a change takes effect,
+    and you may close your account within that period without penalty.
+  </p>
+
+  <h2>4. Your settlement account</h2>
+  <p>
+    You are responsible for the accuracy of the paybill or bank account you register with
+    us. We pay where you tell us to pay. Changing that destination requires a verification
+    code sent to your registered email address, and your first payout to a new destination
+    carries a confirmation code which you must read back to us before further payouts are
+    released. These controls exist to protect you, and you agree not to circumvent them.
+  </p>
+
+  <h2>5. Your responsibilities</h2>
+  <ul>
+    <li>Hold every licence and authorisation required to operate as an ISP in Kenya.</li>
+    <li>Keep your account credentials secure. You are responsible for actions taken with them.</li>
+    <li>Deal fairly with your own customers, and honour the plans you sell them.</li>
+    <li>
+      Do not use the platform to break the law, to defraud anyone, or to attack the network
+      or systems of others.
+    </li>
+  </ul>
+
+  <h2>6. Your customers' data</h2>
+  <p>
+    Data about your customers belongs to you. We process it on your behalf in order to run
+    the service, under our Privacy Policy and the Data Protection Act, 2019. We do not sell
+    it, and we do not use it to market to your customers.
+  </p>
+
+  <h2>7. Availability</h2>
+  <p>
+    We work hard to keep the platform running, but we do not promise it will never be
+    unavailable. Where the platform is unreachable, your routers continue to enforce the
+    sessions your customers have already paid for.
+  </p>
+
+  <h2>8. Suspension</h2>
+  <p>
+    We may suspend an account that is being used unlawfully or fraudulently, or that puts
+    the platform or other ISPs at risk. Where we suspend an account, money already
+    attributed to that ISP remains theirs and remains withdrawable, save where it is itself
+    the proceeds of fraud.
+  </p>
+
+  <h2>9. Ending the agreement</h2>
+  <p>
+    You may close your account at any time. On closure you may export your clients, plans
+    and payment history, and withdraw your remaining balance. We will not hold your data
+    hostage to keep your business.
+  </p>
+
+  <h2>10. Liability</h2>
+  <p>
+    We are liable to you for money we have collected on your behalf and failed to account
+    for. Beyond that, and to the extent the law allows, our total liability to you in any
+    12-month period is limited to the fees you paid us in that period. We are not liable for
+    your lost profits or for the acts of third parties, including Safaricom and your
+    upstream providers.
+  </p>
+
+  <h2>11. Law</h2>
+  <p>
+    These terms are governed by the laws of Kenya, and the courts of Kenya have exclusive
+    jurisdiction.
+  </p>
+
+  <h2>12. Contact</h2>
+  <p>Danamo Tech Ltd, Nairobi, Kenya — hello@wifios.co.ke</p>
+</Legal>

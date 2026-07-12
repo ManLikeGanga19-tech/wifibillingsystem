@@ -92,9 +92,10 @@ CSRF_TRUSTED_ORIGINS = [
     o
     for o in os.environ.get(
         "CSRF_TRUSTED_ORIGINS",
-        # dev: the three SPAs + the API itself
+        # dev: the consoles (4600 ISP, 4700 portal, 4800 platform), the marketing
+        # site (4900), and the API itself
         "http://localhost:4600,http://localhost:4700,http://localhost:4800,"
-        "http://localhost:8000,http://127.0.0.1:8000",
+        "http://localhost:4900,http://localhost:8000,http://127.0.0.1:8000",
     ).split(",")
     if o.strip()
 ]

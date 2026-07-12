@@ -1,0 +1,188 @@
+---
+import PricingCalculator from '../components/PricingCalculator';
+import Base from '../layouts/Base.astro';
+
+/**
+ * Pricing is a trust page, not a sales page. A WISP operator has been burned by a
+ * "contact us for a quote" before. So: the actual numbers, the thing most competitors
+ * hide (transaction charges), and the one honest caveat — the setup fee is opt-in and
+ * you will never be surprised by it.
+ */
+
+const included = [
+  'Unlimited hotspot customers',
+  'Unlimited routers and sites',
+  'M-Pesa STK Push + paybill (C2B)',
+  'Vouchers and printed batches',
+  'Automatic suspension and restoration',
+  'Full ledger and payment history',
+  'Payouts to your paybill or bank',
+  'Your own subdomain and captive portal',
+  'Email support',
+];
+
+const tiers = [
+  { range: 'First 500 active clients', rate: 'KES 40', per: 'per client / month' },
+  { range: 'Next 1,500 (501 – 2,000)', rate: 'KES 35', per: 'per client / month' },
+  { range: 'Everything above 2,000', rate: 'KES 30', per: 'per client / month' },
+];
+---
+
+<Base
+  title="Pricing — WIFI.OS"
+  description="KES 500/month, 3% of hotspot sales, and a graduated per-client PPPoE fee from KES 40 down to KES 30. First month free. M-Pesa charges absorbed."
+>
+  <section class="border-b border-ink">
+    <div class="mx-auto max-w-6xl px-4 py-12 sm:px-6 sm:py-16">
+      <p class="font-mono text-[10px] font-bold uppercase tracking-widest text-ink/50">Pricing</p>
+      <h1 class="mt-2 max-w-3xl font-serif text-4xl leading-tight font-bold sm:text-5xl">
+        You only pay us when your customers pay you.
+      </h1>
+      <p class="mt-4 max-w-2xl text-base leading-relaxed text-ink/75">
+        No card to sign up. No setup fee unless you ask us to do the setup for you. Your
+        first month is free — build your plans, enrol your routers, import your clients,
+        and pay nothing until you are actually trading.
+      </p>
+    </div>
+  </section>
+
+  <!-- THE THREE NUMBERS -->
+  <section class="border-b border-ink bg-card">
+    <div class="mx-auto max-w-6xl px-4 py-14 sm:px-6">
+      <div class="grid gap-px border border-ink bg-ink/15 md:grid-cols-3">
+        <div class="bg-card p-6">
+          <p class="font-mono text-[10px] font-bold uppercase tracking-widest text-ink/50">
+            The subdomain
+          </p>
+          <p class="mt-2 font-mono text-3xl font-black">KES 500</p>
+          <p class="font-mono text-xs text-ink/60">per month, flat</p>
+          <p class="mt-3 text-sm leading-relaxed text-ink/70">
+            Your console, your captive portal, your address. Waived for your first month.
+          </p>
+        </div>
+
+        <div class="bg-card p-6">
+          <p class="font-mono text-[10px] font-bold uppercase tracking-widest text-ink/50">
+            Hotspot
+          </p>
+          <p class="mt-2 font-mono text-3xl font-black text-money">3%</p>
+          <p class="font-mono text-xs text-ink/60">of what you actually sell</p>
+          <p class="mt-3 text-sm leading-relaxed text-ink/70">
+            A quiet month costs you almost nothing. We earn when you earn — that is the
+            whole deal.
+          </p>
+        </div>
+
+        <div class="bg-card p-6">
+          <p class="font-mono text-[10px] font-bold uppercase tracking-widest text-ink/50">
+            PPPoE
+          </p>
+          <p class="mt-2 font-mono text-3xl font-black">KES 40 → 30</p>
+          <p class="font-mono text-xs text-ink/60">per ACTIVE client, per month</p>
+          <p class="mt-3 text-sm leading-relaxed text-ink/70">
+            Graduated, so it falls as you grow. Suspended clients are not billed — you
+            pay for the ones who are paying you.
+          </p>
+        </div>
+      </div>
+
+      <!-- THE TIER TABLE -->
+      <div class="mt-8 border border-ink bg-card">
+        <div class="border-b border-ink bg-ink px-5 py-3">
+          <p class="font-mono text-[10px] font-bold uppercase tracking-widest text-paper/60">
+            How the PPPoE rate falls
+          </p>
+        </div>
+        <div class="divide-y divide-ink/15">
+          {
+            tiers.map((t) => (
+              <div class="flex items-center justify-between gap-4 px-5 py-3.5">
+                <p class="font-mono text-xs uppercase">{t.range}</p>
+                <p class="shrink-0 text-right">
+                  <span class="font-mono text-sm font-black">{t.rate}</span>
+                  <span class="ml-2 font-mono text-[10px] text-ink/50">{t.per}</span>
+                </p>
+              </div>
+            ))
+          }
+        </div>
+        <p class="border-t border-ink/15 px-5 py-3 font-mono text-[10px] leading-relaxed text-ink/55">
+          Graduated like tax brackets — you always pay the lower rate on your first
+          clients. A 5,000-client ISP blends to about KES 32.50 each.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- CALCULATOR -->
+  <section class="border-b border-ink">
+    <div class="mx-auto max-w-6xl px-4 py-14 sm:px-6">
+      <h2 class="font-serif text-3xl font-bold sm:text-4xl">Work out your bill</h2>
+      <p class="mt-2 max-w-2xl text-sm leading-relaxed text-ink/70">
+        Move the sliders. No form, no email address, no “our team will be in touch”.
+      </p>
+      <div class="mt-7">
+        <PricingCalculator client:visible />
+      </div>
+    </div>
+  </section>
+
+  <!-- INCLUDED + THE CHARGES NOBODY MENTIONS -->
+  <section class="border-b border-ink bg-card">
+    <div class="mx-auto grid max-w-6xl gap-10 px-4 py-14 sm:px-6 lg:grid-cols-2">
+      <div>
+        <h2 class="font-serif text-3xl font-bold">Included, at every size</h2>
+        <ul class="mt-5 grid gap-2.5 sm:grid-cols-2">
+          {
+            included.map((item) => (
+              <li class="flex items-start gap-2 text-sm text-ink/80">
+                <span class="mt-1.5 h-1.5 w-1.5 shrink-0 bg-money" />
+                {item}
+              </li>
+            ))
+          }
+        </ul>
+      </div>
+
+      <div class="border border-ink bg-ink p-6 text-paper">
+        <p class="font-mono text-[10px] font-bold uppercase tracking-widest text-paper/50">
+          The charge nobody else mentions
+        </p>
+        <h3 class="mt-2 font-serif text-2xl font-bold">We absorb the M-Pesa fees.</h3>
+        <p class="mt-3 text-sm leading-relaxed text-paper/80">
+          Every collection and every payout costs somebody a transaction charge. Most
+          billing systems quietly leave that with you, so the rate you were quoted is not
+          the rate you pay.
+        </p>
+        <p class="mt-3 text-sm leading-relaxed text-paper/80">
+          Ours is the rate you pay. The M-Pesa and bank charges come out of our margin,
+          not your ledger — one number, and it is the number on this page.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- SETUP FEE, SAID PLAINLY -->
+  <section class="border-b border-ink">
+    <div class="mx-auto max-w-3xl px-4 py-14 text-center sm:px-6">
+      <h2 class="font-serif text-2xl font-bold sm:text-3xl">And if you want us to do it for you</h2>
+      <p class="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-ink/70">
+        Assisted onboarding — we configure your routers, migrate your existing clients and
+        train your team — is a one-time <b>KES 10,000</b>. It is entirely optional, you
+        will be asked before it is ever charged, and most ISPs never take it.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <div class="mx-auto max-w-6xl px-4 py-16 text-center sm:px-6">
+      <h2 class="font-serif text-3xl font-bold sm:text-4xl">Your first month is free.</h2>
+      <a
+        href="/signup"
+        class="mt-6 inline-flex items-center gap-2 border border-money bg-money px-6 py-3.5 font-mono text-xs font-bold uppercase text-white transition hover:opacity-85"
+      >
+        Create your ISP account
+      </a>
+    </div>
+  </section>
+</Base>

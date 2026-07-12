@@ -1,0 +1,301 @@
+---
+import Media from '../components/Media.astro';
+import Base from '../layouts/Base.astro';
+import { MEDIA } from '../lib/media';
+
+/**
+ * The homepage sells to ONE person: a Kenyan WISP operator with a few hundred
+ * customers, a MikroTik, and a WhatsApp group full of "network is down". They do not
+ * want a platform. They want their money collected without them chasing it.
+ *
+ * So: proof before poetry. Screenshots high, adjectives low, and the awkward
+ * question — "why does my customers' money go to YOUR paybill?" — answered in plain
+ * words on the page rather than left for them to imagine an answer to.
+ */
+
+const features = [
+  {
+    title: 'Hotspot billing on M-Pesa',
+    body: 'Customer picks a bundle, gets an STK prompt, and is online before the receipt lands. No vouchers to print, no cash to count — though vouchers still work when you want them.',
+  },
+  {
+    title: 'PPPoE that bills itself',
+    body: 'Monthly clients invoiced on their own anniversary, paid by paybill account number, suspended and restored automatically. Each client pays a number that can only be theirs.',
+  },
+  {
+    title: 'Your MikroTiks, controlled',
+    body: 'Enrol a router by pasting one script. We provision users, cut off expired ones, and keep the router honest even if our server is unreachable.',
+  },
+  {
+    title: 'A ledger, not a guess',
+    body: 'Every shilling is attributed to a client, a plan and a router the moment it lands. Commission is shown as a line, not buried in a rate.',
+  },
+  {
+    title: 'Payouts you control',
+    body: 'Withdraw to your paybill or bank whenever you like. Changing where we pay you takes a code sent to your email — because that is the one thing an intruder would change.',
+  },
+  {
+    title: 'Built for load-shedding',
+    body: 'Sessions expire on the router itself, so a customer who paid stays online — and one who did not stays off — even when the internet to our servers is out.',
+  },
+];
+
+const faqs = [
+  {
+    q: 'Why does my customers’ money land in WIFI.OS’s account first?',
+    a: 'Because that is what makes the ledger trustworthy. Every payment hits one paybill and is attributed to your ISP the moment it arrives — matched to a client, a plan and a router. You see it instantly, and you withdraw it to your own paybill or bank whenever you want. If money went straight to you, nobody could tell you which of your clients had actually paid, which is exactly the problem you are trying to solve.',
+  },
+  {
+    q: 'What stops you from holding my money?',
+    a: 'Your balance is yours and withdrawable on demand. We take our commission as a visible ledger line, not a silent deduction — you can reconcile every shilling against your own M-Pesa statement. We also absorb the M-Pesa and bank transaction charges rather than passing them to you.',
+  },
+  {
+    q: 'How long until I can take a payment?',
+    a: 'Minutes. Sign up, tell us where to pay you, and payments switch on. There is no sales call, no onboarding fee, and no document to email anybody.',
+  },
+  {
+    q: 'Do I need to buy new routers?',
+    a: 'No. If it runs RouterOS v7, it works. Enrolling one is a single script you paste into the terminal.',
+  },
+  {
+    q: 'What happens when my internet goes down?',
+    a: 'Customers who have paid stay online. We set the time limit on the router itself as well as tracking it on our side, so the router keeps enforcing what a customer bought even when it cannot reach us.',
+  },
+  {
+    q: 'Can I move away later?',
+    a: 'Yes. Your clients, plans and payment history are yours, and you can export them. We would rather earn the next month than trap you into it.',
+  },
+];
+
+const steps = [
+  { n: '01', t: 'Sign up', d: 'Five short steps. You pick your address: yourname.wifios.co.ke.' },
+  { n: '02', t: 'Add your paybill', d: 'Tell us where to settle your money. Payments switch on immediately.' },
+  { n: '03', t: 'Enrol your router', d: 'Paste one script into your MikroTik. It appears in your console.' },
+  { n: '04', t: 'Sell', d: 'Customers pay by M-Pesa and are provisioned automatically, day and night.' },
+];
+---
+
+<Base
+  title="WIFI.OS — Billing and M-Pesa payments for Kenyan ISPs"
+  description="Hotspot and PPPoE billing for Kenyan WISPs. Customers pay by M-Pesa and get online automatically. Every shilling attributed. Your first month is free."
+>
+  <!-- HERO -->
+  <section class="border-b border-ink">
+    <div class="mx-auto grid max-w-6xl gap-10 px-4 py-12 sm:px-6 sm:py-16 lg:grid-cols-2 lg:items-center">
+      <div>
+        <p
+          class="inline-flex items-center gap-2 border border-ink bg-card px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-widest"
+        >
+          <span class="h-1.5 w-1.5 bg-money"></span>
+          Built in Nairobi, for Kenyan ISPs
+        </p>
+
+        <h1 class="mt-5 font-serif text-4xl leading-[1.05] font-bold sm:text-5xl lg:text-6xl">
+          Your customers pay.<br />
+          They get online.<br />
+          <span class="text-money">You don’t lift a finger.</span>
+        </h1>
+
+        <p class="mt-5 max-w-lg text-base leading-relaxed text-ink/75">
+          WIFI.OS is billing, provisioning and M-Pesa collection for hotspot and PPPoE
+          internet providers. Bundles sell themselves at 2am. Monthly clients invoice
+          themselves. Every shilling lands attributed to the client who paid it.
+        </p>
+
+        <div class="mt-7 flex flex-wrap items-center gap-3">
+          <a
+            href="/signup"
+            class="inline-flex items-center gap-2 border border-money bg-money px-5 py-3 font-mono text-xs font-bold uppercase text-white transition hover:opacity-85"
+          >
+            Start free — no card
+          </a>
+          <a
+            href="#how"
+            class="inline-flex items-center gap-2 border border-ink bg-card px-5 py-3 font-mono text-xs font-bold uppercase transition hover:bg-hover"
+          >
+            See how it works
+          </a>
+        </div>
+
+        <p class="mt-4 font-mono text-[11px] text-ink/55">
+          First month free · KES 500/month after · 3% of hotspot sales · No card, no sales call
+        </p>
+      </div>
+
+      <Media media={MEDIA.hero} eager />
+    </div>
+  </section>
+
+  <!-- TRUST STRIP -->
+  <section class="overflow-hidden border-b border-ink bg-ink py-2.5">
+    <div class="marquee flex w-max gap-8 whitespace-nowrap font-mono text-[10px] font-bold uppercase tracking-widest text-paper/70">
+      {
+        Array.from({ length: 2 }).map(() => (
+          <>
+            <span>M-Pesa STK Push</span><span class="text-money">✦</span>
+            <span>C2B Paybill</span><span class="text-money">✦</span>
+            <span>MikroTik RouterOS v7</span><span class="text-money">✦</span>
+            <span>PPPoE + Hotspot</span><span class="text-money">✦</span>
+            <span>Automatic suspension</span><span class="text-money">✦</span>
+            <span>Vouchers</span><span class="text-money">✦</span>
+            <span>Full ledger</span><span class="text-money">✦</span>
+            <span>Payouts on demand</span><span class="text-money">✦</span>
+          </>
+        ))
+      }
+    </div>
+  </section>
+
+  <!-- THE ONE-LOOP DEMO -->
+  <section id="product" class="border-b border-ink">
+    <div class="mx-auto max-w-6xl px-4 py-14 sm:px-6">
+      <div class="max-w-2xl">
+        <p class="font-mono text-[10px] font-bold uppercase tracking-widest text-ink/50">
+          The whole product, in one loop
+        </p>
+        <h2 class="mt-2 font-serif text-3xl font-bold sm:text-4xl">
+          A stranger walks in, pays 50 bob, and is watching YouTube.
+        </h2>
+        <p class="mt-3 text-sm leading-relaxed text-ink/70">
+          No one printed a voucher. No one was woken up. The router was told, the money
+          was banked, and the session ends by itself when the time is up.
+        </p>
+      </div>
+
+      <div class="mt-8">
+        <Media media={MEDIA.payments} />
+      </div>
+
+      <div class="mt-10 grid gap-6 md:grid-cols-2">
+        <Media media={MEDIA.wallet} />
+        <Media media={MEDIA.pppoe} />
+      </div>
+    </div>
+  </section>
+
+  <!-- FEATURES -->
+  <section class="border-b border-ink bg-card">
+    <div class="mx-auto max-w-6xl px-4 py-14 sm:px-6">
+      <h2 class="font-serif text-3xl font-bold sm:text-4xl">Everything a WISP actually needs</h2>
+      <p class="mt-2 max-w-2xl text-sm leading-relaxed text-ink/70">
+        Not a platform with a hundred modules you will never open. The things you do every
+        day, done properly.
+      </p>
+
+      <div class="mt-8 grid gap-px border border-ink bg-ink/15 sm:grid-cols-2 lg:grid-cols-3">
+        {
+          features.map((f) => (
+            <div class="bg-card p-5 transition hover:bg-hover">
+              <h3 class="font-mono text-xs font-bold uppercase tracking-wide">{f.title}</h3>
+              <p class="mt-2 text-sm leading-relaxed text-ink/70">{f.body}</p>
+            </div>
+          ))
+        }
+      </div>
+
+      <div class="mt-10">
+        <Media media={MEDIA.routers} />
+      </div>
+    </div>
+  </section>
+
+  <!-- HOW IT WORKS -->
+  <section id="how" class="border-b border-ink">
+    <div class="mx-auto max-w-6xl px-4 py-14 sm:px-6">
+      <h2 class="font-serif text-3xl font-bold sm:text-4xl">Live today, not next quarter</h2>
+
+      <div class="mt-8 grid gap-px border border-ink bg-ink/15 md:grid-cols-4">
+        {
+          steps.map((s) => (
+            <div class="bg-paper p-5">
+              <p class="font-mono text-2xl font-black text-money">{s.n}</p>
+              <h3 class="mt-2 font-mono text-xs font-bold uppercase">{s.t}</h3>
+              <p class="mt-1.5 text-sm leading-relaxed text-ink/70">{s.d}</p>
+            </div>
+          ))
+        }
+      </div>
+
+      <div class="mt-10">
+        <Media media={MEDIA.onboarding} />
+      </div>
+    </div>
+  </section>
+
+  <!-- THE MONEY, SAID OUT LOUD -->
+  <section class="border-b border-ink bg-ink text-paper">
+    <div class="mx-auto grid max-w-6xl gap-8 px-4 py-14 sm:px-6 lg:grid-cols-2">
+      <div>
+        <p class="font-mono text-[10px] font-bold uppercase tracking-widest text-paper/50">
+          The awkward question, answered
+        </p>
+        <h2 class="mt-2 font-serif text-3xl font-bold sm:text-4xl">
+          Where your customers’ money actually goes.
+        </h2>
+      </div>
+      <div class="space-y-4 text-sm leading-relaxed text-paper/80">
+        <p>
+          Your customers always pay <b class="text-paper">WIFI.OS</b>, never you directly.
+          Every payment lands on one paybill and is attributed to your ISP the instant it
+          arrives — matched to a client, a plan and a router.
+        </p>
+        <p>
+          We hold it in a ledger you can see, take our commission as a visible line rather
+          than a silent deduction, absorb the M-Pesa and bank charges, and settle it to
+          your own paybill or bank whenever you ask.
+        </p>
+        <p>
+          We do it this way because it is the only way to answer “<i>which of my clients
+          has actually paid?</i>” with a number instead of a shrug. That question is the
+          reason you are reading this page.
+        </p>
+        <a
+          href="/pricing"
+          class="inline-flex items-center gap-2 border border-paper px-4 py-2.5 font-mono text-[11px] font-bold uppercase transition hover:bg-paper hover:text-ink"
+        >
+          See exactly what we charge
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section id="faq" class="border-b border-ink bg-card">
+    <div class="mx-auto max-w-3xl px-4 py-14 sm:px-6">
+      <h2 class="font-serif text-3xl font-bold sm:text-4xl">Questions we actually get asked</h2>
+      <div class="mt-7 divide-y divide-ink/15 border-y border-ink/15">
+        {
+          faqs.map((f) => (
+            <details class="group py-4">
+              <summary class="flex cursor-pointer list-none items-start justify-between gap-4 font-mono text-xs font-bold uppercase tracking-wide">
+                {f.q}
+                <span class="shrink-0 text-money transition group-open:rotate-45">+</span>
+              </summary>
+              <p class="mt-3 text-sm leading-relaxed text-ink/75">{f.a}</p>
+            </details>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section>
+    <div class="mx-auto max-w-6xl px-4 py-16 text-center sm:px-6">
+      <h2 class="font-serif text-3xl font-bold sm:text-4xl lg:text-5xl">
+        Stop chasing payments. Start counting them.
+      </h2>
+      <p class="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-ink/70">
+        Your first month is free, and you can build everything — routers, plans, clients —
+        before you take a single shilling.
+      </p>
+      <a
+        href="/signup"
+        class="mt-7 inline-flex items-center gap-2 border border-money bg-money px-6 py-3.5 font-mono text-xs font-bold uppercase text-white transition hover:opacity-85"
+      >
+        Create your ISP account
+      </a>
+      <p class="mt-3 font-mono text-[11px] text-ink/50">Takes about two minutes.</p>
+    </div>
+  </section>
+</Base>

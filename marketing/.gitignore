@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.astro/
+.env
+.env.production
+
+# NOTE: public/media/ IS committed. The screenshots and clips are the marketing site's
+# proof, and keeping them in the repo means a deploy is just a build — no object store,
+# no signed URLs, no second place for them to go missing. Keep clips under ~3 MB (see
+# docs/MARKETING_MEDIA.md); if the total ever gets uncomfortable, move them to a CDN
+# then, not pre-emptively.

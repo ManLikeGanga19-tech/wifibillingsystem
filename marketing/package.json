@@ -1,0 +1,28 @@
+{
+  "name": "wifios-marketing",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev --port 4900",
+    "build": "astro build",
+    "preview": "astro preview --port 4900",
+    "lint": "astro check --minimumSeverity error"
+  },
+  "dependencies": {
+    "@astrojs/check": "^0.9.4",
+    "@astrojs/react": "^4.2.0",
+    "@tailwindcss/vite": "^4.1.14",
+    "astro": "^5.2.5",
+    "lucide-react": "^0.546.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tailwindcss": "^4.1.14",
+    "typescript": "~5.8.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0"
+  }
+}

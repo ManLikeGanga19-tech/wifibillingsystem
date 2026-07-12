@@ -1,0 +1,51 @@
+---
+import Base from '../layouts/Base.astro';
+
+interface Props {
+  title: string;
+  description: string;
+  updated: string;
+  version: string;
+}
+
+const { title, description, updated, version } = Astro.props;
+---
+
+<Base title={`${title} — WIFI.OS`} description={description}>
+  <section class="border-b border-ink">
+    <div class="mx-auto max-w-3xl px-4 py-10 sm:px-6 sm:py-14">
+      <p class="font-mono text-[10px] font-bold uppercase tracking-widest text-ink/50">Legal</p>
+      <h1 class="mt-2 font-serif text-3xl font-bold sm:text-4xl">{title}</h1>
+      <p class="mt-2 font-mono text-[11px] text-ink/55">
+        Version {version} · Last updated {updated}
+      </p>
+
+      <!--
+        DELIBERATE, AND IT STAYS UNTIL A LAWYER REMOVES IT.
+
+        This document is a good-faith draft written by engineers. It describes what the
+        system ACTUALLY does — which is the hard part, and which a lawyer cannot invent
+        for us — but it has not been reviewed by one. Publishing unreviewed legal text
+        that reads as final is how a company ends up bound by terms nobody checked.
+      -->
+      <div class="mt-6 border border-[#B26B00] bg-[#FFF8EC] p-3.5">
+        <p class="font-mono text-[10px] font-bold uppercase tracking-widest text-[#B26B00]">
+          Draft — pending legal review
+        </p>
+        <p class="mt-1.5 text-xs leading-relaxed text-ink/75">
+          This document accurately describes how the system works today, but it has not yet
+          been reviewed by an advocate. It must be reviewed before WIFI.OS is offered to the
+          public.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <article
+      class="mx-auto max-w-3xl px-4 py-12 text-sm leading-relaxed text-ink/80 sm:px-6 [&_h2]:mt-9 [&_h2]:font-mono [&_h2]:text-xs [&_h2]:font-bold [&_h2]:uppercase [&_h2]:tracking-widest [&_h2]:text-ink [&_li]:mt-1.5 [&_p]:mt-3 [&_ul]:mt-3 [&_ul]:list-disc [&_ul]:pl-5"
+    >
+      <slot />
+    </article>
+  </section>
+</Base>

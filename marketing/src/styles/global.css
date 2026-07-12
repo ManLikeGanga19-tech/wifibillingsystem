@@ -1,0 +1,79 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&family=Playfair+Display:ital,wght@0,600;0,700;1,600;1,700&display=swap');
+@import 'tailwindcss';
+
+/**
+ * The SAME design system as the ISP console, the captive portal and Platform Control.
+ * Deliberately, not lazily: an ISP who signs up here lands in a console that looks
+ * like the page that sold it to them. A marketing site with its own visual language
+ * is a promise the product then breaks on day one.
+ *
+ * Brutalist: paper background, hard 1px ink borders, no shadows, no rounded corners,
+ * mono for anything a machine produced (numbers, codes, slugs) and Inter for anything
+ * a human wrote.
+ */
+@theme {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-serif: 'Playfair Display', Georgia, Cambria, 'Times New Roman', serif;
+
+  --color-paper: #e4e3e0;
+  --color-ink: #141414;
+  --color-card: #ffffff;
+  --color-hover: #f0efec;
+  --color-money: #228b22;
+  --color-warn: #b26b00;
+  --color-danger: #b22222;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Respect the user. Every animation here is decoration, and decoration is never
+   worth making somebody ill. */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Keyboard users must be able to see where they are. */
+:focus-visible {
+  outline: 2px solid var(--color-ink);
+  outline-offset: 2px;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(20, 20, 20, 0.25);
+}
+
+/* The one flourish: a slow ticker for the trust strip. */
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+.marquee {
+  animation: marquee 40s linear infinite;
+}
