@@ -2,6 +2,7 @@ import { Settings } from 'lucide-react';
 import { ViewHeader } from './ui';
 import BrandingPanel from './settings/BrandingPanel';
 import CommsPanel from './settings/CommsPanel';
+import DomainPanel from './settings/DomainPanel';
 import EmailPanel from './settings/EmailPanel';
 import ProfilePanel from './settings/ProfilePanel';
 import Placeholder from './settings/Placeholder';
@@ -39,7 +40,7 @@ const NAV: Group[] = [
     title: 'General',
     items: [
       { id: 'branding', label: 'Branding', sub: 'Identity, logo, colours' },
-      { id: 'domain', label: 'Domain', sub: 'Tenant URL & DNS' },
+      { id: 'domain', label: 'Domain', sub: 'Your subdomain & routers' },
     ],
   },
   {
@@ -168,9 +169,7 @@ export default function SettingsView({
           )}
           {active === 'profile' && <ProfilePanel onOpenWallet={onOpenWallet} />}
 
-          {active === 'domain' && (
-            <Placeholder title="Domain" blurb="Your tenant URL and, later, custom domains with DNS setup." />
-          )}
+          {active === 'domain' && <DomainPanel />}
           {active === 'pppoe' && (
             <Placeholder title="PPPoE" blurb="Fair-use policy, suspension rules and payment reminders for fixed-line subscribers." />
           )}

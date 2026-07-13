@@ -42,6 +42,14 @@ class Router(OperatorOwnedModel):
     last_seen_at = models.DateTimeField(null=True, blank=True)
     is_active = models.BooleanField(default=True)
 
+    # Which captive-portal address this router is actually sending customers to, and when
+    # we last confirmed it. After a subdomain change these say, per router, whether the
+    # new address really landed — an offline router keeps redirecting to the old one, and
+    # the ISP deserves to SEE that rather than assume it worked.
+    portal_url = models.CharField(max_length=200, blank=True, default="")
+    portal_synced_at = models.DateTimeField(null=True, blank=True)
+    portal_sync_error = models.CharField(max_length=255, blank=True, default="")
+
     # Self-onboarding
     enrollment_token = models.CharField(
         max_length=64, unique=True, default=_enrollment_token, editable=False

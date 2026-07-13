@@ -23,6 +23,13 @@ class Operator(TimeStampedModel):
 
     name = models.CharField(max_length=120)
     slug = models.SlugField(unique=True)
+
+    # The address they used to be at. A slug change is a migration, not an edit: routers
+    # have to re-sync and customers keep bookmarks, so the OLD subdomain keeps resolving
+    # for a grace window (core.domains.GRACE_DAYS) rather than black-holing anyone the
+    # moment the ISP hits save.
+    previous_slug = models.SlugField(blank=True, default="", db_index=True)
+    slug_changed_at = models.DateTimeField(null=True, blank=True)
     status = models.CharField(
         max_length=10, choices=Status.choices, default=Status.PENDING, db_index=True
     )

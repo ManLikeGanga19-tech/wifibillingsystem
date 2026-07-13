@@ -545,6 +545,43 @@ export interface ProvidersResponse {
   note?: string;
 }
 
+/** A router, and whether it is actually sending customers to the ISP's CURRENT address.
+ *  An offline router keeps redirecting to the old one — which is exactly the thing the
+ *  ISP needs to see rather than assume. */
+export interface DomainRouter {
+  id: number;
+  name: string;
+  online: boolean;
+  portal_url: string;
+  synced_at: string | null;
+  error: string;
+  on_current_domain: boolean;
+}
+
+export interface DomainState {
+  slug: string;
+  domain: string;
+  url: string;
+  base_domain: string;
+  /** Where routers actually send phones. Differs from `url` only in dev/staging. */
+  portal_url: string;
+  previous_slug: string;
+  /** Non-empty only while the old address still resolves. */
+  previous_url: string;
+  grace_ends: string | null;
+  grace_days: number;
+  routers: DomainRouter[];
+  routers_queued?: number;
+}
+
+export interface DomainCheck {
+  slug: string;
+  available: boolean;
+  current: boolean;
+  url: string;
+  reason: string;
+}
+
 export interface EmailSettings {
   email_mode: 'platform' | 'own';
   smtp_host: string;
@@ -820,6 +857,18 @@ export const api = {
     },
     deleteLogo: () =>
       request<{ logo: string }>('/operator/branding/logo/', { method: 'DELETE' }),
+  },
+
+  domain: {
+    get: () => request<DomainState>('/operator/domain/'),
+    check: (slug: string) =>
+      request<DomainCheck>(`/operator/domain/check/?slug=${encodeURIComponent(slug)}`),
+    /** Moves the ISP AND re-pushes the captive portal to every router. */
+    change: (slug: string) =>
+      request<DomainState>('/operator/domain/change/', {
+        method: 'POST',
+        body: JSON.stringify({ slug }),
+      }),
   },
 
   messaging: {

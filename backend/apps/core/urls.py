@@ -8,6 +8,7 @@ from .analytics_views import (
     TenantPnlView,
 )
 from .branding_views import BrandingLogoView, BrandingView, PublicBrandingView
+from .domain_views import ChangeDomainView, DomainCheckView, DomainView
 from .governance_views import (
     AuditLogViewSet,
     EndImpersonationView,
@@ -41,6 +42,11 @@ urlpatterns = [
     # Branding: how the ISP's business looks to its customers.
     path("operator/branding/", BrandingView.as_view(), name="operator-branding"),
     path("operator/branding/logo/", BrandingLogoView.as_view(), name="operator-branding-logo"),
+    # Domain: the address customers reach this ISP at. Changing it re-pushes the captive
+    # portal to their routers — see domain_views.
+    path("operator/domain/", DomainView.as_view(), name="operator-domain"),
+    path("operator/domain/check/", DomainCheckView.as_view(), name="operator-domain-check"),
+    path("operator/domain/change/", ChangeDomainView.as_view(), name="operator-domain-change"),
     # Public: the captive portal reads branding to theme itself.
     path("branding/", PublicBrandingView.as_view(), name="public-branding"),
     # Settlement: where we pay the ISP. Registering it is INSTANT and is what

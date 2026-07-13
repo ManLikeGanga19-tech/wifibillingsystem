@@ -26,8 +26,13 @@ def _platform_base_url() -> str:
     return settings.DARAJA_CALLBACK_BASE_URL.rstrip("/")
 
 
-def _portal_base_url() -> str:
-    return getattr(settings, "PORTAL_BASE_URL", _platform_base_url())
+def _portal_base_url(router: Router) -> str:
+    """The captive portal THIS router should redirect to — its own ISP's address, not a
+    shared one. That is what makes the portal wear the ISP's domain, and it is why a
+    subdomain change has to re-push every router (see provisioning.portal_sync)."""
+    from apps.core.domains import portal_url_for
+
+    return portal_url_for(router.operator)
 
 
 def generate_setup_script(router: Router) -> str:
@@ -35,7 +40,7 @@ def generate_setup_script(router: Router) -> str:
     ports + wlan form the hotspot bridge."""
     api_password = secrets.token_hex(12)
     platform = _platform_base_url()
-    portal = _portal_base_url()
+    portal = _portal_base_url(router)
     token = router.enrollment_token
     login_redirect = (
         f"{portal}/?mac=$(mac-esc)&ip=$(ip)"

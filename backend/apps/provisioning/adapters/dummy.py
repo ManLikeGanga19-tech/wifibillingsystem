@@ -56,3 +56,16 @@ class DummyAdapter(ProvisioningAdapter):
 
     def get_active_pppoe(self) -> list[ActiveSession]:
         return []
+
+    # -- Captive portal ---------------------------------------------------
+    #: Tests set this to make a router refuse the new address, so the "one router did not
+    #: get the memo" path is exercised rather than assumed.
+    portal_fails: bool = False
+
+    def push_portal(self, portal_url: str) -> ProvisionResult:
+        DummyAdapter.calls.append(("push_portal", portal_url))
+        if DummyAdapter.portal_fails:
+            from .base import ProvisioningError
+
+            raise ProvisioningError("dummy router refused the portal push")
+        return ProvisionResult(ok=True, message=f"dummy portal -> {portal_url}")

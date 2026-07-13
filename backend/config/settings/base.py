@@ -248,6 +248,16 @@ DARAJA_CALLBACK_BASE_URL = os.getenv("DARAJA_CALLBACK_BASE_URL", "https://exampl
 # Shared secret embedded in the callback path so random POSTs 404
 DARAJA_CALLBACK_TOKEN = os.getenv("DARAJA_CALLBACK_TOKEN", "dev-callback-token")
 
+# The domain every ISP gets a subdomain of: acme.wifios.co.ke. This is the address a
+# customer's phone is sent to by the captive portal, so it is baked into the hotspot
+# login page on every router — see provisioning.onboarding and core.domains.
+TENANT_BASE_DOMAIN = os.getenv("TENANT_BASE_DOMAIN", "wifios.co.ke")
+
+# Dev/staging escape hatch: when set, routers redirect HERE instead of the tenant's real
+# subdomain (which does not resolve from a laptop or an ngrok tunnel). Unset in
+# production, where each ISP's portal genuinely lives on their own subdomain.
+PORTAL_BASE_URL = os.getenv("PORTAL_BASE_URL", "")
+
 # Fernet key for encrypting router/operator secrets at rest. Never in code —
 # set via env (.env locally, secret manager in prod). Encryption features raise
 # a clear error if it's missing; blank values pass through untouched.

@@ -261,3 +261,53 @@ class MikroTikRestAdapter(ProvisioningAdapter):
             total_memory=_to_int(res.get("total-memory")),
             active_users=active,
         )
+
+    # -- Captive portal ----------------------------------------------------
+    def push_portal(self, portal_url: str) -> ProvisionResult:
+        """Repoint this router's captive portal at `portal_url`.
+
+        Two things have to move together, and the ORDER matters:
+
+          1. The walled garden must allow the new host FIRST. It is what lets an unpaid
+             customer's phone reach the portal at all — flip the redirect before opening
+             the gate and every customer hits a blocked page.
+          2. Then the login page, whose redirect is what actually sends them there.
+
+        The old walled-garden entry is left in place: it costs nothing, and removing it
+        while other routers or in-flight phones still point at the old address would break
+        exactly the people this grace period exists to protect. The next full re-onboard
+        cleans it up.
+        """
+        host = portal_url.replace("https://", "").replace("http://", "").split("/")[0]
+        redirect = (
+            f"{portal_url.rstrip('/')}/?mac=$(mac-esc)&ip=$(ip)"
+            f"&login=$(link-login-only-esc)&orig=$(link-orig-esc)&router={self.router.id}"
+        )
+        login_html = (
+            '<html><head><meta http-equiv="refresh" content="0; url='
+            f'{redirect}"></head><body>Loading payment page...</body></html>'
+        )
+        try:
+            with self._client() as client:
+                # 1. Gate open for the new host (idempotent — skip if already allowed).
+                existing = client.get("/ip/hotspot/walled-garden", params={"dst-host": host})
+                existing.raise_for_status()
+                if not existing.json():
+                    client.put(
+                        "/ip/hotspot/walled-garden",
+                        json={"dst-host": host, "action": "allow", "comment": "wifi.os portal"},
+                    ).raise_for_status()
+
+                # 2. Rewrite the login page.
+                files = client.get("/file", params={"name": "hotspot/login.html"})
+                files.raise_for_status()
+                for existing_file in files.json():
+                    client.delete(f"/file/{existing_file['.id']}").raise_for_status()
+                client.put(
+                    "/file",
+                    json={"name": "hotspot/login.html", "contents": login_html},
+                ).raise_for_status()
+
+                return ProvisionResult(ok=True, message=f"portal -> {host}")
+        except httpx.HTTPError as exc:
+            raise ProvisioningError(f"push_portal failed on {self.router}: {exc}") from exc

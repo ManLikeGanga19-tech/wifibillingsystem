@@ -63,6 +63,26 @@ def _slug_from_host(host: str) -> str | None:
     return candidate
 
 
+def _operator_for_slug(slug: str) -> Operator | None:
+    """The tenant at this subdomain — including one who has RECENTLY MOVED.
+
+    An ISP who changes their subdomain still has routers redirecting to the old one and
+    customers holding old links. Resolving the previous slug during its grace window is
+    what makes a rename safe instead of an outage; past the window it stops, so a name
+    can eventually be reused.
+    """
+    operator = Operator.objects.filter(slug=slug, is_active=True).first()
+    if operator is not None:
+        return operator
+
+    from .domains import GRACE_DAYS
+
+    cutoff = timezone.now() - timezone.timedelta(days=GRACE_DAYS)
+    return Operator.objects.filter(
+        previous_slug=slug, slug_changed_at__gte=cutoff, is_active=True
+    ).first()
+
+
 class TenantMiddleware(MiddlewareMixin):
     """Attaches `request.tenant` (Operator or None) resolved from Host/header."""
 
@@ -70,9 +90,7 @@ class TenantMiddleware(MiddlewareMixin):
         slug = _slug_from_host(request.get_host())
         if slug is None and settings.DEBUG:
             slug = request.headers.get("X-Tenant-Slug") or None
-        request.tenant = (
-            Operator.objects.filter(slug=slug, is_active=True).first() if slug else None
-        )
+        request.tenant = _operator_for_slug(slug) if slug else None
 
 
 def acting_tenant(request) -> Operator | None:

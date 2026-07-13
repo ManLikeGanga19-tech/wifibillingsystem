@@ -91,3 +91,13 @@ class ProvisioningAdapter(ABC):
 
     def get_active_pppoe(self) -> list[ActiveSession]:
         return []
+
+    # -- Captive portal ----------------------------------------------------
+    def push_portal(self, portal_url: str) -> ProvisionResult:
+        """Point this router's captive portal at `portal_url`.
+
+        Called when an ISP changes their subdomain: the redirect baked into the router's
+        hotspot login page still names the OLD address, so until this lands their
+        customers are being sent somewhere the ISP no longer answers.
+        """
+        return ProvisionResult(ok=True, message="noop")
