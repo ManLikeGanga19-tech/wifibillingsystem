@@ -91,5 +91,74 @@ services:
     <<: *backend
     command: celery -A config beat -l info
 
+  # ---- frontends -------------------------------------------------------------------
+  #
+  # All four SPAs run in Docker too, so `docker compose up` gives a fully working dev
+  # system with nothing to start by hand. Each mounts its source for live reload, but
+  # keeps its node_modules in a NAMED VOLUME — the host's node_modules is built for
+  # Windows and its esbuild/rollup binaries won't run in a Linux container, so it must
+  # not shadow the container's own install. `npm install` on start is a fast no-op once
+  # the volume is populated.
+  #
+  # They reach Django at http://api:8000 (the compose network), not localhost — see the
+  # API_PROXY_TARGET the Vite/Astro configs read.
+  admin-ui:
+    image: node:22-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm run dev"
+    environment:
+      API_PROXY_TARGET: http://api:8000
+    volumes:
+      - ./admin-ui:/app
+      - admin_ui_modules:/app/node_modules
+    ports:
+      - "4600:4600"
+    depends_on: [api]
+
+  portal:
+    image: node:22-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm run dev"
+    environment:
+      API_PROXY_TARGET: http://api:8000
+    volumes:
+      - ./portal:/app
+      - portal_modules:/app/node_modules
+    ports:
+      - "4700:4700"
+    depends_on: [api]
+
+  super-admin:
+    image: node:22-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm run dev"
+    environment:
+      API_PROXY_TARGET: http://api:8000
+    volumes:
+      - ./super-admin:/app
+      - super_admin_modules:/app/node_modules
+    ports:
+      - "4800:4800"
+    depends_on: [api]
+
+  marketing:
+    image: node:22-alpine
+    working_dir: /app
+    # Astro needs --host to be reachable from outside the container; API_ORIGIN is the
+    # signup proxy target (read by astro.config.mjs).
+    command: sh -c "npm install && npm run dev -- --host"
+    environment:
+      API_ORIGIN: http://api:8000
+    volumes:
+      - ./marketing:/app
+      - marketing_modules:/app/node_modules
+    ports:
+      - "4900:4900"
+    depends_on: [api]
+
 volumes:
   pgdata:
+  admin_ui_modules:
+  portal_modules:
+  super_admin_modules:
+  marketing_modules:

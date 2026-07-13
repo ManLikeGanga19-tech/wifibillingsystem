@@ -17,9 +17,10 @@ export default defineConfig(() => {
       hmr: process.env.DISABLE_HMR !== 'true',
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
-      // Dev-only: forward API calls to the Docker backend (no CORS setup needed)
+      host: true, // reachable from outside the container when dockerised
+      // localhost:8000 on the host, http://api:8000 inside Docker (compose service name)
       proxy: {
-        '/api': 'http://localhost:8000',
+        '/api': process.env.API_PROXY_TARGET ?? 'http://localhost:8000',
       },
     },
   };
