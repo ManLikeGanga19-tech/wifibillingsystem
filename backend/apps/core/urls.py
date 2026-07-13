@@ -7,6 +7,7 @@ from .analytics_views import (
     PlatformTimeseriesView,
     TenantPnlView,
 )
+from .branding_views import BrandingLogoView, BrandingView, PublicBrandingView
 from .governance_views import (
     AuditLogViewSet,
     EndImpersonationView,
@@ -37,6 +38,11 @@ urlpatterns = [
     path("stats/", DashboardStatsView.as_view(), name="dashboard-stats"),
     path("nav/", NavCountsView.as_view(), name="nav-counts"),
     path("operator/settings/", OperatorSettingsView.as_view(), name="operator-settings"),
+    # Branding: how the ISP's business looks to its customers.
+    path("operator/branding/", BrandingView.as_view(), name="operator-branding"),
+    path("operator/branding/logo/", BrandingLogoView.as_view(), name="operator-branding-logo"),
+    # Public: the captive portal reads branding to theme itself.
+    path("branding/", PublicBrandingView.as_view(), name="public-branding"),
     # Settlement: where we pay the ISP. Registering it is INSTANT and is what
     # switches their payments on; the first payout then carries a code they confirm.
     path("operator/settlement/", SettlementView.as_view(), name="settlement"),

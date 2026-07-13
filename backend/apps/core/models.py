@@ -267,6 +267,54 @@ class Operator(TimeStampedModel):
         return on_date <= self.trial_ends_at
 
 
+class Branding(models.Model):
+    """How an ISP's business looks to ITS customers: the name, logo and colours on the
+    captive portal, receipts and SMS. This is the first thing that makes WIFI.OS feel
+    like *their* product rather than ours.
+
+    One row per operator, created on demand with sensible defaults so the portal always
+    has something to render — an ISP who never opens this page still looks fine, just
+    generic.
+    """
+
+    operator = models.OneToOneField(
+        Operator, on_delete=models.CASCADE, related_name="branding"
+    )
+    # The customer-facing name. Blank falls back to Operator.name — so we never show an
+    # empty header, and an ISP who wants a trading name different from their legal name
+    # can set one.
+    display_name = models.CharField(max_length=80, blank=True)
+    tagline = models.CharField(max_length=120, blank=True)
+
+    # The logo is stored as a validated data URI (see branding.py): a small,
+    # Pillow-checked, re-encoded PNG. Deliberately NOT an uploaded file — the production
+    # containers run a read-only filesystem with no object storage, and a brand logo is
+    # small enough that inlining it keeps the whole portal self-contained and served in
+    # one API call. If large assets are ever needed, they move to object storage then.
+    logo = models.TextField(blank=True)
+
+    # Hex colours the captive portal themes itself with. Defaults are the WIFI.OS
+    # brutalist palette, so an unbranded portal still looks intentional.
+    primary_color = models.CharField(max_length=7, default="#141414")
+    accent_color = models.CharField(max_length=7, default="#228B22")
+
+    # Shown to customers who need help — "call your provider" becomes a real number.
+    support_phone = models.CharField(max_length=20, blank=True)
+    support_email = models.EmailField(blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "core_branding"
+
+    def __str__(self):
+        return f"Branding for {self.operator.slug}"
+
+    @property
+    def name_for_customers(self) -> str:
+        return self.display_name or self.operator.name
+
 
 class OperatorOwnedModel(TimeStampedModel):
     operator = models.ForeignKey(
