@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   Wifi,
   TrendingUp,
+  BarChart3,
   Activity,
   Users,
   LifeBuoy,
@@ -51,6 +52,7 @@ import PppoeInvoicesView from './components/PppoeInvoicesView';
 import NetworkView from './components/NetworkView';
 import SettingsView from './components/SettingsView';
 import WalletView from './components/WalletView';
+import ReportsView from './components/ReportsView';
 
 // ---- navigation model -------------------------------------------------------
 
@@ -71,6 +73,7 @@ type TabId =
   | 'equipment'
   | 'settings'
   | 'wallet'
+  | 'reports'
   | 'pppoe_clients'
   | 'pppoe_plans'
   | 'pppoe_invoices'
@@ -108,6 +111,7 @@ const NAV_GROUPS: { title: string | null; items: NavItem[] }[] = [
     items: [
       { id: 'packages', label: 'Hotspot Plans', icon: Gauge, badge: 'packages' },
       { id: 'payments', label: 'Payments', icon: Receipt },
+      { id: 'reports', label: 'Reports', icon: BarChart3 },
       { id: 'vouchers', label: 'Vouchers', icon: TicketIcon, badge: 'vouchers' },
       { id: 'wallet', label: 'Wallet', icon: Wallet },
       { id: 'expenses', label: 'Expenses', icon: Receipt },
@@ -561,6 +565,7 @@ export default function App() {
             {activeTab === 'equipment' && <EquipmentView />}
             {activeTab === 'settings' && <SettingsView onOpenWallet={() => setActiveTab('wallet')} />}
             {activeTab === 'wallet' && <WalletView />}
+            {activeTab === 'reports' && <ReportsView />}
             {activeTab === 'pppoe_clients' && <PppoeClientsView />}
             {activeTab === 'pppoe_plans' && <PppoePlansView />}
             {activeTab === 'pppoe_invoices' && <PppoeInvoicesView />}

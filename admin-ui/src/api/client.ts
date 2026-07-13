@@ -369,6 +369,18 @@ export interface WalletSummary {
   commission_rate: string | number;
 }
 
+export interface RevenueReport {
+  from: string;
+  to: string;
+  total: number;
+  hotspot_total: number;
+  pppoe_total: number;
+  hotspot_count: number;
+  pppoe_count: number;
+  by_plan: { plan: string; revenue: number; count: number }[];
+  daily: { day: string; revenue: number }[];
+}
+
 export interface ApiLedgerEntry {
   id: number;
   entry_type: 'sale' | 'commission' | 'base_fee' | 'pppoe_fee' | 'setup_fee' | 'payout' | 'adjustment';
@@ -715,6 +727,14 @@ export const api = {
       withdraw: (data: WithdrawPayload) =>
         request<ApiPayout>('/billing/payouts/withdraw/', { method: 'POST', body: JSON.stringify(data) }),
     },
+  },
+
+  reports: {
+    revenue: (from: string, to: string) =>
+      request<RevenueReport>(`/billing/reports/revenue/?from=${from}&to=${to}`),
+    /** Cookie-authenticated same-origin download URL — used as an <a href>. */
+    csvUrl: (kind: 'transactions' | 'pppoe-payments' | 'ledger', from: string, to: string) =>
+      `${BASE}/api/v1/billing/reports/${kind}.csv?from=${from}&to=${to}`,
   },
 
   platform: {
