@@ -1,5 +1,4 @@
-"""Communications settings: the gateway an ISP's messages leave on, and the credits that
-pay for the managed one.
+"""Communications settings: the gateway an ISP's messages leave on.
 
 The security shape of this file, stated plainly:
 
@@ -8,8 +7,6 @@ The security shape of this file, stated plainly:
     anyone who steals it sends on the ISP's account at the ISP's cost.
   * A blank secret on write means "leave it alone", so the console can save a form
     without asking an ISP to re-type a key it is not allowed to show them.
-  * Buying credits is money leaving a wallet, so it carries the same second factor and
-    the same audit line as a payout.
 """
 
 from drf_spectacular.utils import extend_schema
@@ -18,15 +15,12 @@ from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.accounts import mfa
-from apps.accounts.mfa import MfaError, MfaRequired
-from apps.billing.services import WalletError, wallet_balance
 from apps.core.permissions import CanManageMoney, RequireTenant, TenantIsOperational
 from apps.core.schema import OBJECT_RESPONSE
 from apps.core.services import audit
 from apps.core.tenancy import acting_tenant
 
-from . import catalog, credits
+from . import catalog
 from .models import (
     GATEWAY_MODE_CHOICES,
     Channel,
@@ -99,7 +93,11 @@ class ProvidersView(APIView):
             "providers": _cards(operator, channel, config),
         }
         if channel == Channel.SMS:
-            body["credits"] = _credit_summary(operator)
+            # The balance lives on the platform account now (billing.platform_account):
+            # SMS is paid for by topping US up, not out of money we hold for them.
+            from apps.billing.topup_views import _summary
+
+            body["account"] = _summary(operator)
         else:
             body["note"] = catalog.WHATSAPP_NOTE
         return Response(body)
@@ -240,73 +238,6 @@ class DisconnectProviderView(APIView):
         )
         return Response({"providers": _cards(operator, channel, config),
                          "active": config.active_provider(channel)})
-
-
-# --- credits ---------------------------------------------------------------------------
-
-
-def _credit_summary(operator) -> dict:
-    balance = credits.balance(operator)
-    return {
-        "balance": balance,
-        "low": balance <= credits.LOW_BALANCE,
-        "wallet_balance": str(wallet_balance(operator)),
-        "bundles": [
-            {
-                "id": b.id,
-                "credits": b.credits,
-                "price": str(b.price),
-                "per_sms": str(b.per_sms),
-            }
-            for b in credits.BUNDLES
-        ],
-    }
-
-
-class BuyCreditsSerializer(serializers.Serializer):
-    bundle = serializers.CharField()
-    mfa_code = serializers.CharField(required=False, allow_blank=True)
-
-
-class BuyCreditsView(APIView):
-    """Top up SMS credits from the ISP's wallet."""
-
-    permission_classes = [IsAdminUser, RequireTenant, TenantIsOperational, CanManageMoney]
-
-    def handle_exception(self, exc):
-        if isinstance(exc, MfaRequired):
-            # A DEMAND, not a failure — the console shows the code box rather than a red
-            # error, exactly as it does for a payout.
-            return Response(
-                {"detail": str(exc), "mfa_required": True, "enrolled": mfa.is_enrolled(
-                    self.request.user)},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-        if isinstance(exc, MfaError):
-            return Response({"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN)
-        return super().handle_exception(exc)
-
-    @extend_schema(
-        request=BuyCreditsSerializer, responses=OBJECT_RESPONSE,
-        summary="Buy SMS credits with wallet money",
-    )
-    def post(self, request):
-        s = BuyCreditsSerializer(data=request.data)
-        s.is_valid(raise_exception=True)
-
-        # The second factor, at the door where money moves — the same lock as a payout.
-        # Wallet money buying credits is still the ISP's money leaving their balance.
-        mfa.require(request.user, s.validated_data.get("mfa_code", ""))
-
-        operator = acting_tenant(request)
-        try:
-            credits.purchase(
-                operator=operator, bundle_id=s.validated_data["bundle"], user=request.user
-            )
-        except WalletError as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-
-        return Response(_credit_summary(operator))
 
 
 # --- test send -------------------------------------------------------------------------

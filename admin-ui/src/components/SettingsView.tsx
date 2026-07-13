@@ -54,7 +54,7 @@ const NAV: Group[] = [
     title: 'Billing & messaging',
     items: [
       { id: 'payments', label: 'Payments', sub: 'Payout account & credentials' },
-      { id: 'sms', label: 'SMS', sub: 'Providers & credits', under: 'Communications' },
+      { id: 'sms', label: 'SMS', sub: 'Providers & balance', under: 'Communications' },
       { id: 'email', label: 'Email', sub: 'SMTP gateway' },
       { id: 'whatsapp', label: 'WhatsApp', sub: 'WhatsApp providers' },
       { id: 'templates', label: 'Message templates', sub: 'Receipts, expiry & reminders' },

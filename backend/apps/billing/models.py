@@ -154,3 +154,127 @@ class Payout(OperatorOwnedModel):
         if self.method == self.Method.PAYBILL:
             return f"Paybill {self.paybill}"
         return self.phone
+
+
+class PlatformLedgerEntry(OperatorOwnedModel):
+    """The ISP's account WITH US. Not to be confused with the wallet above.
+
+    Two different relationships, and keeping them apart is the point:
+
+      * LedgerEntry (the wallet)  — money we HOLD FOR the ISP. They withdraw it.
+      * PlatformLedgerEntry       — money the ISP OWES US, or has prepaid to us.
+
+    Denominated in KES and signed, and the balance is the SUM — never a stored counter,
+    for the same reason as the wallet: a counter decremented twice on a retry silently
+    robs somebody, and no one can prove it afterwards.
+
+    A NEGATIVE balance is normal: this is postpaid. Fees accrue as they happen and are
+    invoiced monthly; the ISP settles by STK push, which credits it back toward zero.
+    """
+
+    class Reason(models.TextChoices):
+        TOPUP = "topup", "Top-up (STK)"
+        GRANT = "grant", "Granted by the platform"
+        SMS = "sms", "SMS sent"
+        COMMISSION = "commission", "Commission on a direct-settled sale"
+        BASE_FEE = "base_fee", "Monthly platform fee"
+        PPPOE_FEE = "pppoe_fee", "PPPoE per-user fee"
+        REFUND = "refund", "Refund"
+        ADJUSTMENT = "adjustment", "Manual adjustment"
+
+    #: Signed KES. Credits (top-ups, grants) positive; charges (SMS, fees) negative.
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    reason = models.CharField(max_length=12, choices=Reason.choices, db_index=True)
+
+    #: The SMS this charge paid for. Unique, so a retried Celery task cannot bill the ISP
+    #: twice for one message.
+    message = models.ForeignKey(
+        "notifications.Message",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="platform_charges",
+    )
+    topup = models.ForeignKey(
+        "billing.TopUp",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="ledger_entries",
+    )
+    #: "YYYY-MM" for periodic fees — the uniqueness guard against double-charging a month.
+    period = models.CharField(max_length=7, blank=True)
+    memo = models.CharField(max_length=200, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["operator", "created_at"])]
+        constraints = [
+            # One charge per message, however many times the send task retries.
+            models.UniqueConstraint(
+                fields=["message"],
+                condition=models.Q(message__isnull=False),
+                name="platform_one_charge_per_message",
+            ),
+            # One credit per top-up, however many times Safaricom replays the callback.
+            models.UniqueConstraint(
+                fields=["topup"],
+                condition=models.Q(topup__isnull=False),
+                name="platform_one_credit_per_topup",
+            ),
+            # One periodic fee per operator per month per type.
+            models.UniqueConstraint(
+                fields=["operator", "reason", "period"],
+                condition=~models.Q(period=""),
+                name="platform_unique_periodic_fee",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.operator.slug} {self.reason} {self.amount:+}"
+
+
+class TopUp(OperatorOwnedModel):
+    """An ISP paying US, by STK push to Danamo's paybill.
+
+    This is the ISP's own money coming to us — it is NOT a subscriber payment and must
+    never be confused with one (a subscriber payment credits the ISP; this debits them).
+    Hence its own model and its own callback URL, rather than riding on Transaction.
+    """
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Awaiting the customer's PIN"
+        SUCCESS = "success", "Paid"
+        FAILED = "failed", "Failed or cancelled"
+        TIMEOUT = "timeout", "No response from M-Pesa"
+
+    #: What they paid.
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    #: What we credit — may EXCEED `amount`: the volume bundles give bonus credit, which
+    #: is how a per-SMS discount is expressed in a shilling-denominated balance.
+    credit = models.DecimalField(max_digits=10, decimal_places=2)
+    bundle = models.CharField(max_length=20, blank=True)
+
+    phone = models.CharField(max_length=12)
+    # NULL until Daraja answers with one. Nullable rather than blank because Postgres
+    # permits many NULLs in a unique index but only ONE empty string — two ISPs starting a
+    # top-up at the same instant would otherwise collide on "".
+    checkout_request_id = models.CharField(
+        max_length=64, unique=True, null=True, blank=True, default=None
+    )
+    merchant_request_id = models.CharField(max_length=64, blank=True)
+    status = models.CharField(
+        max_length=10, choices=Status.choices, default=Status.PENDING, db_index=True
+    )
+    mpesa_receipt = models.CharField(max_length=32, blank=True)
+    result_desc = models.CharField(max_length=200, blank=True)
+    #: Stored verbatim BEFORE parsing — the record of what Safaricom actually said.
+    raw_callback = models.JSONField(null=True, blank=True)
+    callback_received_at = models.DateTimeField(null=True, blank=True)
+    reconcile_attempts = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.operator.slug} top-up KSh {self.amount} [{self.status}]"

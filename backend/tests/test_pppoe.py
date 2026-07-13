@@ -44,11 +44,29 @@ def staff(operator):
 
 class TestAccountNumber:
     def test_globally_unique_across_operators(self):
+        """Account numbers must not collide across ISPs — they all share Danamo's paybill,
+        so a duplicate would credit the wrong ISP's customer.
+
+        The numbers are SAVED as we go, which is what production does and what makes the
+        guarantee real: generate_account_number dedupes against the database, so a number
+        only counts as taken once a Client holds it. (Generating 40 numbers without saving
+        any and demanding they differ was testing luck, not the code — a 5-digit tail
+        collides about 0.4% of the time, which is a red build every ~250 runs.)
+        """
         op_a = OperatorFactory(slug="isp-a")
         op_b = OperatorFactory(slug="isp-b")
-        nums = {generate_account_number(op_a) for _ in range(20)}
-        nums |= {generate_account_number(op_b) for _ in range(20)}
-        assert len(nums) == 40  # no collisions
+        nums = set()
+        for operator in (op_a, op_b):
+            plan = ServicePlanFactory(operator=operator)
+            router = RouterFactory(operator=operator)
+            for _ in range(20):
+                client = create_client(
+                    operator=operator, plan=plan, router=router, full_name="X"
+                )
+                nums.add(client.account_number)
+
+        assert len(nums) == 40  # no collisions, and the DB agrees
+        assert Client.objects.count() == 40
 
     def test_prefix_from_slug(self):
         op = OperatorFactory(slug="homelink")

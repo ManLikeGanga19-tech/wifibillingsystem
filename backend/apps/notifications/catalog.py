@@ -9,8 +9,8 @@ One provider is active per channel at a time. An ISP may keep credentials for se
 and switch between them; only the active one sends.
 
 A NOTE ON THE MANAGED GATEWAY: `wifios` runs on OUR account and OUR key. The ISP never
-sees a credential because there is nothing of theirs to see — they buy SMS credits and we
-meter them. That is the entire point of "managed": zero setup.
+sees a credential because there is nothing of theirs to see — they top up a balance with us
+and we meter it. That is the entire point of "managed": zero setup.
 
 WhatsApp has no managed option. We hold no Meta business identity on an ISP's behalf, so
 offering one would be a lie; every WhatsApp provider here is bring-your-own.
@@ -35,7 +35,7 @@ class Provider:
     #: Shown under the name on the card — where this provider is a sensible choice.
     region: str
     fields: list[Field] = field(default_factory=list)
-    #: True only for the WIFI.OS gateway: no credentials, billed in credits.
+    #: True only for the WIFI.OS gateway: no credentials, billed against their balance.
     managed: bool = False
     #: What the ISP is told before they commit to it.
     note: str = ""
@@ -50,8 +50,8 @@ SMS_PROVIDERS: list[Provider] = [
         region="Kenya · managed by us",
         managed=True,
         note=(
-            "Nothing to set up. Messages go out on our gateway and are paid for with SMS "
-            "credits you top up from your wallet."
+            "Nothing to set up. Messages go out on our gateway and are paid for from your "
+            "WIFI.OS balance, which you top up by M-Pesa."
         ),
     ),
     Provider(

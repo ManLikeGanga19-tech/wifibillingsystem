@@ -5,6 +5,7 @@ import logging
 import secrets
 from decimal import Decimal
 
+from django.db import IntegrityError
 from django.db import transaction as db_transaction
 from django.utils import timezone
 
@@ -20,20 +21,41 @@ def _pppoe_password() -> str:
     return secrets.token_urlsafe(9)
 
 
+#: Account numbers are a random tail checked against the database. That check and the
+#: INSERT are not atomic, so two clients signing up at the same instant can both pass it
+#: and then collide on the unique column. Rare — but "rare" here means a real customer
+#: getting a 500 in front of an installer, so we simply try again with a fresh number.
+ACCOUNT_NUMBER_ATTEMPTS = 5
+
+
 def create_client(*, operator, plan: ServicePlan, router, created_by=None, **fields) -> Client:
     """Create a broadband client with a globally-unique account number and PPPoE
     credentials. Provisioning to the router happens separately (provision_client)."""
     username = fields.pop("pppoe_username", "") or f"{operator.slug}-{secrets.token_hex(3)}"
-    client = Client.objects.create(
-        operator=operator,
-        plan=plan,
-        router=router,
-        account_number=generate_account_number(operator),
-        pppoe_username=username,
-        pppoe_password=fields.pop("pppoe_password", "") or _pppoe_password(),
-        created_by=created_by,
-        **fields,
-    )
+    password = fields.pop("pppoe_password", "") or _pppoe_password()
+
+    for attempt in range(ACCOUNT_NUMBER_ATTEMPTS):
+        try:
+            with db_transaction.atomic():
+                client = Client.objects.create(
+                    operator=operator,
+                    plan=plan,
+                    router=router,
+                    account_number=generate_account_number(operator),
+                    pppoe_username=username,
+                    pppoe_password=password,
+                    created_by=created_by,
+                    **fields,
+                )
+            break
+        except IntegrityError:
+            # Lost the race for that number. Any OTHER integrity error (a duplicate PPPoE
+            # username, say) is a real fault and must not be retried into oblivion.
+            if not Client.objects.filter(pppoe_username=username).exists():
+                if attempt == ACCOUNT_NUMBER_ATTEMPTS - 1:
+                    raise
+                continue
+            raise
     audit("pppoe_client_created", operator=operator, actor=created_by, target=client)
     return client
 

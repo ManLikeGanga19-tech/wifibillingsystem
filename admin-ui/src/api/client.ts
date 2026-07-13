@@ -523,16 +523,49 @@ export interface ProviderCard {
 
 export interface CreditBundle {
   id: string;
-  credits: number;
+  /** What they pay by STK. */
   price: string;
+  /** What we credit — larger than `price` on the bigger bundles. The volume discount is
+   *  expressed as bonus credit, because the balance is in shillings and an SMS has one
+   *  price. */
+  credit: string;
+  bonus: string;
+  sms: number;
   per_sms: string;
 }
 
-export interface CreditSummary {
-  balance: number;
+/** The ISP's account WITH US — what they owe, or have prepaid. NOT the wallet (which is
+ *  money we hold FOR them). It may be NEGATIVE: this is postpaid. */
+export interface PlatformAccount {
+  balance: string;
+  /** The same number in messages, because "KSh 640" does not tell an ISP whether tonight's
+   *  reminders will go out. */
+  sms_remaining: number;
+  sms_price: string;
   low: boolean;
-  wallet_balance: string;
+  can_send_sms: boolean;
+  low_balance_threshold: string;
+  alert_phones: string[];
   bundles: CreditBundle[];
+  min_topup: string;
+}
+
+export interface TopUpStarted {
+  id: number;
+  amount: string;
+  credit: string;
+  status: string;
+  detail: string;
+}
+
+export interface TopUpStatus {
+  id: number;
+  status: 'pending' | 'success' | 'failed' | 'timeout';
+  amount: string;
+  credit: string;
+  mpesa_receipt: string;
+  result_desc: string;
+  account: PlatformAccount;
 }
 
 export interface ProvidersResponse {
@@ -540,7 +573,7 @@ export interface ProvidersResponse {
   active: string;
   providers: ProviderCard[];
   /** SMS only. */
-  credits?: CreditSummary;
+  account?: PlatformAccount;
   /** WhatsApp only. */
   note?: string;
 }
@@ -859,6 +892,28 @@ export const api = {
       request<{ logo: string }>('/operator/branding/logo/', { method: 'DELETE' }),
   },
 
+  account: {
+    /** The ISP's balance with us, and the bundles they can buy. */
+    get: () => request<PlatformAccount>('/billing/account/'),
+
+    /** Start an STK push so the ISP can pay US. No TOTP: money is coming IN, from their
+     *  own phone, and Safaricom already demands their M-Pesa PIN. */
+    topUp: (params: { phone: string; bundle?: string; amount?: string }) =>
+      request<TopUpStarted>('/billing/topup/', {
+        method: 'POST',
+        body: JSON.stringify(params),
+      }),
+
+    /** Polled while they enter their PIN. */
+    topUpStatus: (id: number) => request<TopUpStatus>(`/billing/topup/${id}/`),
+
+    alerts: (data: { low_balance_threshold?: string; alert_phones?: string[] }) =>
+      request<PlatformAccount>('/billing/account/alerts/', {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      }),
+  },
+
   domain: {
     get: () => request<DomainState>('/operator/domain/'),
     check: (slug: string) =>
@@ -900,13 +955,6 @@ export const api = {
         `/notifications/settings/${channel}/${providerId}/disconnect/`,
         { method: 'DELETE' }
       ),
-
-    /** Top up SMS credits from the wallet. Money moving = second factor, like a payout. */
-    buyCredits: (bundle: string, mfaCode: string) =>
-      request<CreditSummary>('/notifications/settings/credits/buy/', {
-        method: 'POST',
-        body: JSON.stringify({ bundle, mfa_code: mfaCode }),
-      }),
 
     email: {
       get: () => request<EmailSettings>('/notifications/settings/email/'),

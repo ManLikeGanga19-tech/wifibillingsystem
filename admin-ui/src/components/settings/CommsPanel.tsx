@@ -1,20 +1,20 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
-import { AlertTriangle, Check, Loader2, Lock, Send, Zap } from 'lucide-react';
+import { AlertTriangle, Check, Loader2, Lock, Send } from 'lucide-react';
 import {
   api,
   ApiError,
-  CreditSummary,
   ProviderCard,
   ProvidersResponse,
 } from '../../api/client';
 import { Btn, Field, inputCls, Panel, toast } from '../ui';
+import BalanceCard from './BalanceCard';
 
 /**
  * Communications — pick the gateway your messages leave on.
  *
  * A grid of providers, one live at a time. The WIFI.OS card is different in kind: it runs
- * on our account, so there is no credential to paste — the ISP buys SMS credits and we
- * meter them. Everything else is bring-your-own: their account, their sender ID, their
+ * on our account, so there is no credential to paste — the ISP tops up a balance with us
+ * and we meter it. Everything else is bring-your-own: their account, their sender ID, their
  * rate, their bill.
  *
  * Credentials are one-way. The server never sends a saved key back — it only says one is
@@ -73,7 +73,7 @@ export default function CommsPanel({ channel }: { channel: ChannelId }) {
           : 'An optional, richer channel for receipts and reminders. Pick a provider and add its credentials — only one is active at a time.'}
       </p>
 
-      {channel === 'sms' && data.credits && <CreditsCard credits={data.credits} onBought={load} />}
+      {channel === 'sms' && data.account && <BalanceCard account={data.account} onChanged={load} />}
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {data.providers.map((p) => (
@@ -304,99 +304,5 @@ function ConfigureModal({
         </div>
       </div>
     </div>
-  );
-}
-
-/** The managed gateway is prepaid. This is the balance, and the way to top it up. */
-function CreditsCard({ credits, onBought }: { credits: CreditSummary; onBought: () => void }) {
-  const [buying, setBuying] = useState<string | null>(null);
-  const [mfaFor, setMfaFor] = useState<string | null>(null);
-  const [code, setCode] = useState('');
-
-  const buy = async (bundleId: string, mfaCode: string) => {
-    setBuying(bundleId);
-    try {
-      await api.messaging.buyCredits(bundleId, mfaCode);
-      toast('success', 'Credits added.');
-      setMfaFor(null);
-      setCode('');
-      onBought();
-    } catch (e) {
-      const err = e as ApiError;
-      const body = err.body as { mfa_required?: boolean } | null;
-      if (body?.mfa_required) {
-        // Not a failure — a demand. Show the code box rather than a red error.
-        setMfaFor(bundleId);
-      } else {
-        toast('error', err instanceof ApiError ? err.message : 'Could not buy credits.');
-      }
-    } finally {
-      setBuying(null);
-    }
-  };
-
-  return (
-    <Panel title="SMS credits">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <p className="font-mono text-3xl font-black tabular-nums">
-            {credits.balance.toLocaleString()}
-          </p>
-          <p className="text-xs text-[#141414]/55">
-            SMS left on the WIFI.OS gateway · wallet KSh{' '}
-            {Number(credits.wallet_balance).toLocaleString()}
-          </p>
-        </div>
-        {credits.low && (
-          <p className="flex items-center gap-1.5 border border-[#B22222]/40 bg-[#B22222]/5 px-2 py-1 text-xs text-[#B22222]">
-            <AlertTriangle className="h-3.5 w-3.5" />
-            Running low — top up before receipts start failing.
-          </p>
-        )}
-      </div>
-
-      <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-        {credits.bundles.map((b) => (
-          <div key={b.id} className="border border-[#141414]/20 bg-white p-3">
-            <p className="font-mono text-lg font-black tabular-nums">
-              {b.credits.toLocaleString()}
-            </p>
-            <p className="text-[11px] text-[#141414]/50">
-              KSh {Number(b.price).toLocaleString()} · {b.per_sms}/SMS
-            </p>
-            {mfaFor === b.id ? (
-              <div className="mt-2 space-y-1.5">
-                <input
-                  className={inputCls}
-                  value={code}
-                  onChange={(e) => setCode(e.target.value)}
-                  placeholder="6-digit code"
-                  inputMode="numeric"
-                  autoFocus
-                />
-                <div className="flex gap-1.5">
-                  <Btn onClick={() => buy(b.id, code)} disabled={buying === b.id || !code}>
-                    {buying === b.id ? '…' : 'Confirm'}
-                  </Btn>
-                  <Btn onClick={() => setMfaFor(null)} variant="outline">
-                    Cancel
-                  </Btn>
-                </div>
-              </div>
-            ) : (
-              <div className="mt-2">
-                <Btn onClick={() => buy(b.id, '')} variant="outline" disabled={buying === b.id}>
-                  <Zap className="h-3.5 w-3.5" /> Buy
-                </Btn>
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-      <p className="mt-3 text-[11px] leading-relaxed text-[#141414]/45">
-        Credits are paid for from your wallet, and buying them asks for your authenticator
-        code — the same lock as a withdrawal, because it is your money moving.
-      </p>
-    </Panel>
   );
 }

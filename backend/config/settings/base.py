@@ -175,6 +175,17 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.signup.tasks.sweep_expired_signups",
         "schedule": crontab(minute=15, hour=3),
     },
+    # An ISP watching a top-up spinner has already paid. Callbacks get dropped, so chase
+    # them fast — this is the same lesson that fixed the hotspot payment bug.
+    "reconcile-pending-topups": {
+        "task": "apps.billing.tasks.reconcile_pending_topups",
+        "schedule": 30.0,
+    },
+    # Warn before the SMS balance hits zero, not after the receipts have stopped.
+    "warn-low-platform-balance": {
+        "task": "apps.notifications.tasks.warn_low_platform_balance",
+        "schedule": crontab(minute=0),  # hourly; the task itself warns once per fall
+    },
     "charge-monthly-base-fees": {
         "task": "apps.billing.tasks.charge_monthly_base_fees",
         "schedule": crontab(minute=30, hour=0, day_of_month=1),

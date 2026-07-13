@@ -61,9 +61,23 @@ def plan_payload(name):
 class TestPortalIsAnonymous:
     """A WiFi customer is never a logged-in staff user."""
 
-    def test_stk_push_works_even_when_a_staff_cookie_is_present(self):
+    def test_stk_push_works_even_when_a_staff_cookie_is_present(self, monkeypatch):
         """THE BUG DANIEL HIT. The console's cookie leaks to the portal (same host,
-        different port). The portal must ignore it entirely, not 403 the customer."""
+        different port). The portal must ignore it entirely, not 403 the customer.
+
+        Daraja is stubbed out. This test is about AUTH, and letting it reach the real
+        Safaricom sandbox made it the one test in the suite that could fail because a
+        network blipped — a red build that says nothing about our code is worse than no
+        test at all.
+        """
+        from apps.payments import services as payment_services
+        from apps.payments.daraja import DarajaError
+
+        def no_network(*args, **kwargs):
+            raise DarajaError("stubbed — no network in tests")
+
+        monkeypatch.setattr(payment_services.DarajaClient, "stk_push", no_network)
+
         op = OperatorFactory()
         router = RouterFactory(operator=op)
         plan = PlanFactory(operator=op, price=20)

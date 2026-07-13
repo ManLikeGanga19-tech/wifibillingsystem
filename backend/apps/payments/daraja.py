@@ -77,8 +77,22 @@ class DarajaClient:
         return data
 
     # -- API --------------------------------------------------------------
-    def stk_push(self, phone: str, amount: int, account_reference: str, description: str) -> dict:
+    def stk_push(
+        self,
+        phone: str,
+        amount: int,
+        account_reference: str,
+        description: str,
+        callback_path: str = "",
+    ) -> dict:
+        """`callback_path` lets a caller route the result somewhere other than the
+        subscriber-payment callback. An ISP topping up their own platform account is money
+        flowing the OPPOSITE way (they pay us), and landing it in the subscriber handler
+        would credit an ISP for a payment no customer made."""
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        path = callback_path or (
+            f"/api/v1/payments/callback/{settings.DARAJA_CALLBACK_TOKEN}/"
+        )
         payload = {
             "BusinessShortCode": self.shortcode,
             "Password": self._password(timestamp),
@@ -88,10 +102,7 @@ class DarajaClient:
             "PartyA": phone,
             "PartyB": self.shortcode,
             "PhoneNumber": phone,
-            "CallBackURL": (
-                f"{settings.DARAJA_CALLBACK_BASE_URL.rstrip('/')}"
-                f"/api/v1/payments/callback/{settings.DARAJA_CALLBACK_TOKEN}/"
-            ),
+            "CallBackURL": f"{settings.DARAJA_CALLBACK_BASE_URL.rstrip('/')}{path}",
             "AccountReference": account_reference[:12] or "WIFI",
             "TransactionDesc": description[:13] or "Wifi access",
         }

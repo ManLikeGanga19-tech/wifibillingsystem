@@ -15,9 +15,12 @@ def grant(apps, schema_editor):
     Operator = apps.get_model("core", "Operator")
     SmsCreditEntry = apps.get_model("notifications", "SmsCreditEntry")
 
-    # Import the value rather than hard-coding it, so the grant and the constant cannot
-    # drift apart.
-    from apps.notifications.credits import WELCOME_CREDITS
+    # Frozen at the value this migration was written with. A migration must NEVER import
+    # live app code: `notifications.credits` has since been deleted (credits became KES on
+    # the platform account), and importing it would make this historical migration
+    # un-runnable on a fresh database — which is how a project loses the ability to rebuild
+    # itself from scratch.
+    WELCOME_CREDITS = 250
 
     already = set(SmsCreditEntry.objects.values_list("operator_id", flat=True))
     SmsCreditEntry.objects.bulk_create(

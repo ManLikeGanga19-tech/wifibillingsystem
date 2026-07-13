@@ -1,4 +1,5 @@
 import json
+from decimal import Decimal
 
 from django.conf import settings
 from django.db import models
@@ -38,8 +39,8 @@ class MessagingSettings(models.Model):
     several configured and switch between them without re-typing keys.
 
     SMS defaults to the managed WIFI.OS gateway: it works on day one with nothing to set
-    up, and is paid for in credits. WhatsApp defaults to nothing at all, because we hold
-    no Meta business identity on an ISP's behalf and a channel that silently never sends
+    up, and is paid for from the ISP's balance with us. WhatsApp defaults to nothing at all,
+    because we hold no Meta identity on their behalf, and a channel that silently never sends
     is worse than one that is honestly off.
 
     Email keeps a simpler shape (our mailer, or the ISP's own SMTP) because there is no
@@ -69,6 +70,20 @@ class MessagingSettings(models.Model):
     smtp_use_tls = models.BooleanField(default=True)
     from_email = models.EmailField(blank=True)
     from_name = models.CharField(max_length=80, blank=True)
+
+    # --- Low-balance alerts ----------------------------------------------------------
+    # The managed gateway is prepaid, so a balance that quietly hits zero means receipts
+    # stop and the ISP finds out from a customer. We warn them first, on the number(s)
+    # they choose — and that warning is deliberately NOT billed against the balance it is
+    # warning about (see tasks.send_message).
+    low_balance_threshold = models.DecimalField(
+        max_digits=10, decimal_places=2, default=Decimal("200.00")
+    )
+    #: Normalised MSISDNs. A list, because the owner and the person who actually tops up
+    #: are often not the same human.
+    alert_phones = models.JSONField(default=list, blank=True)
+    #: When we last warned, so we nag once per fall rather than every hour.
+    low_balance_alerted_at = models.DateTimeField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -143,48 +158,6 @@ class ProviderCredential(models.Model):
         self.secrets = json.dumps(data)
 
 
-class SmsCreditEntry(OperatorOwnedModel):
-    """SMS credits, as a signed ledger — never a stored balance.
-
-    Same discipline as the wallet (billing.LedgerEntry): the balance is the SUM of what
-    happened, so it cannot drift away from its own history. A stored counter that got
-    decremented twice on a retry would silently rob an ISP of SMS they paid for, and
-    nobody would ever be able to prove it.
-    """
-
-    class Reason(models.TextChoices):
-        PURCHASE = "purchase", "Credits bought"
-        SEND = "send", "Message sent"
-        REFUND = "refund", "Refund"
-        GRANT = "grant", "Granted by the platform"
-
-    #: Signed: bought is positive, sent is negative.
-    credits = models.IntegerField()
-    reason = models.CharField(max_length=10, choices=Reason.choices, db_index=True)
-    #: The KES this cost, for a purchase. Zero for a send.
-    amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-    message = models.ForeignKey(
-        "notifications.Message", null=True, blank=True, on_delete=models.SET_NULL,
-        related_name="credit_entries",
-    )
-    memo = models.CharField(max_length=200, blank=True)
-
-    class Meta:
-        ordering = ["-created_at"]
-        indexes = [models.Index(fields=["operator", "created_at"])]
-        constraints = [
-            # A send debits exactly once per message, however many times the task retries.
-            models.UniqueConstraint(
-                fields=["message"],
-                condition=models.Q(message__isnull=False),
-                name="one_credit_debit_per_message",
-            )
-        ]
-
-    def __str__(self):
-        return f"{self.operator.slug} {self.reason} {self.credits:+d}"
-
-
 class Campaign(OperatorOwnedModel):
     """A bulk send: one message body fanned out to an audience of clients."""
 
@@ -232,7 +205,15 @@ class Message(OperatorOwnedModel):
         PAYMENT = "payment", "Payment confirmation"
         EXPIRY = "expiry", "Expiry warning"
         PPPOE = "pppoe", "PPPoE notice"
+        # A message from US to the ISP (e.g. "your balance is low"). Never billed to them:
+        # charging for the warning that they cannot afford to send messages would be both
+        # absurd and self-defeating — the one message that must always get through is the
+        # one telling them to top up.
+        ALERT = "alert", "Platform alert to the ISP"
         OTHER = "other", "Other"
+
+    #: Categories WE pay for, because they exist to serve us, not the ISP's customers.
+    NON_BILLABLE = {"alert"}
 
     campaign = models.ForeignKey(
         Campaign, null=True, blank=True, on_delete=models.CASCADE, related_name="messages"

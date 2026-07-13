@@ -1,29 +1,19 @@
-"""Communications: the gateway registry, the credits that pay for the managed one, and
-the secrets that must never leak.
+"""Communications: the gateway registry, and the secrets that must never leak.
 
 The things worth breaking a build over:
   * messages leave on the gateway the ISP actually chose — a message sent on the wrong
     account is billed to the wrong party;
   * a credential, once saved, is never readable back through the API — a bulk-SMS key is
-    money, and a leaked one is spent at the ISP's cost;
-  * credits are never charged twice for one message, and never spent below zero.
-"""
+    money, and a leaked one is spent at the ISP's cost.
 
-from decimal import Decimal
+The BALANCE that pays for the managed gateway is tested in test_platform_account.py.
+"""
 
 import pytest
 from rest_framework.test import APIClient
 
 from apps.accounts.models import Role
-from apps.billing.models import LedgerEntry
-from apps.billing.services import WalletError
-from apps.notifications import credits
-from apps.notifications.models import (
-    Channel,
-    MessagingSettings,
-    ProviderCredential,
-    SmsCreditEntry,
-)
+from apps.notifications.models import Channel, MessagingSettings, ProviderCredential
 from apps.notifications.providers import (
     AfricasTalkingSMS,
     ProviderError,
@@ -38,7 +28,6 @@ pytestmark = pytest.mark.django_db
 
 SMS_URL = "/api/v1/notifications/settings/sms/"
 WA_URL = "/api/v1/notifications/settings/whatsapp/"
-BUY_URL = "/api/v1/notifications/settings/credits/buy/"
 
 
 def owner(operator):
@@ -49,27 +38,7 @@ def owner(operator):
     return c
 
 
-def fund_wallet(operator, amount="10000.00"):
-    LedgerEntry.objects.create(
-        operator=operator, entry_type=LedgerEntry.Type.SALE, amount=Decimal(amount)
-    )
-
-
-def spend_welcome_credits(operator):
-    """Every operator is born with WELCOME_CREDITS (see signals). Tests about an EMPTY
-    balance have to actually empty it."""
-    SmsCreditEntry.objects.filter(operator=operator).delete()
-
-
 # --- which gateway sends ----------------------------------------------------------------
-
-
-def test_a_new_isp_starts_with_credits_so_the_first_receipt_sends():
-    """The managed gateway promises it works on day one. A zero balance would make that
-    a lie — the first customer would pay and hear nothing back."""
-    operator = OperatorFactory(slug="isp-newborn")
-
-    assert credits.balance(operator) == credits.WELCOME_CREDITS
 
 
 def test_sms_defaults_to_the_managed_wifios_gateway(settings):
@@ -247,97 +216,3 @@ def test_disconnecting_sms_falls_back_to_the_managed_gateway():
     assert resp.status_code == 200
     assert MessagingSettings.objects.get(operator=operator).sms_provider == "wifios"
     assert not ProviderCredential.objects.filter(operator=operator).exists()
-
-
-# --- credits ------------------------------------------------------------------------------
-
-
-def test_buying_credits_moves_money_out_of_the_wallet():
-    operator = OperatorFactory(slug="isp-buy")
-    fund_wallet(operator, "10000.00")
-    bundle = credits.bundle("growth")  # 5,000 SMS for KES 3,750
-
-    credits.purchase(operator=operator, bundle_id="growth", user=None)
-
-    assert credits.balance(operator) == credits.WELCOME_CREDITS + bundle.credits
-    debit = LedgerEntry.objects.get(operator=operator, entry_type=LedgerEntry.Type.SMS_CREDITS)
-    assert debit.amount == -bundle.price
-
-
-def test_you_cannot_buy_credits_you_cannot_afford():
-    """No overdraft: the ISP is never handed SMS they have not paid for."""
-    operator = OperatorFactory(slug="isp-broke")
-    fund_wallet(operator, "100.00")
-
-    with pytest.raises(WalletError, match="wallet"):
-        credits.purchase(operator=operator, bundle_id="growth", user=None)
-
-    assert credits.balance(operator) == credits.WELCOME_CREDITS  # unchanged
-    assert not LedgerEntry.objects.filter(entry_type=LedgerEntry.Type.SMS_CREDITS).exists()
-
-
-def test_a_send_is_charged_once_however_many_times_the_task_retries():
-    """The debit is unique per message — a retried Celery task cannot rob an ISP twice."""
-    from apps.notifications.models import Message
-
-    operator = OperatorFactory(slug="isp-retry")
-    fund_wallet(operator)
-    credits.purchase(operator=operator, bundle_id="starter", user=None)
-    msg = Message.objects.create(operator=operator, to_phone="254700000001", body="hi")
-
-    credits.consume(operator, msg)
-    credits.consume(operator, msg)  # the retry
-    credits.consume(operator, msg)
-
-    assert SmsCreditEntry.objects.filter(message=msg).count() == 1
-    assert credits.balance(operator) == credits.WELCOME_CREDITS + 1_000 - 1
-
-
-def test_a_long_message_costs_more_than_one_credit():
-    """SMS is billed per 160-character segment; the gateway charges us for each."""
-    from apps.notifications.tasks import _segments
-
-    assert _segments("short") == 1
-    assert _segments("x" * 160) == 1
-    assert _segments("x" * 161) == 2
-    assert _segments("x" * 306) == 2
-    assert _segments("x" * 307) == 3
-
-
-def test_an_isp_with_no_credits_does_not_send_on_the_managed_gateway():
-    """We would be handing the gateway money the ISP never gave us."""
-    from apps.notifications.models import Message
-    from apps.notifications.tasks import send_message
-
-    operator = OperatorFactory(slug="isp-empty")
-    MessagingSettings.objects.create(operator=operator)  # managed
-    spend_welcome_credits(operator)
-    msg = Message.objects.create(operator=operator, to_phone="254700000002", body="hi")
-
-    send_message(msg.pk)
-
-    msg.refresh_from_db()
-    assert msg.status == Message.Status.FAILED
-    assert "credits" in msg.error.lower()
-
-
-def test_an_isp_on_their_own_gateway_needs_no_credits():
-    """Their provider bills them directly; metering them too would charge twice."""
-    operator = OperatorFactory(slug="isp-byo")
-    MessagingSettings.objects.create(operator=operator, sms_provider="mobilesasa")
-    spend_welcome_credits(operator)
-
-    assert is_managed_sms(operator) is False
-    assert credits.balance(operator) == 0  # and that is fine — their provider bills them
-
-
-def test_buying_credits_requires_the_second_factor():
-    """Wallet money leaving is money leaving — same lock as a payout."""
-    operator = OperatorFactory(slug="isp-mfa")
-    fund_wallet(operator)
-
-    resp = owner(operator).post(BUY_URL, {"bundle": "starter"}, format="json")
-
-    assert resp.status_code == 403
-    assert resp.json()["mfa_required"] is True
-    assert credits.balance(operator) == credits.WELCOME_CREDITS  # nothing was bought

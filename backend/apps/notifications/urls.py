@@ -3,7 +3,6 @@ from rest_framework.routers import SimpleRouter
 
 from .messaging_views import (
     ActivateProviderView,
-    BuyCreditsView,
     ConfigureProviderView,
     DisconnectProviderView,
     EmailSettingsView,
@@ -20,7 +19,6 @@ urlpatterns = [
     # Settings > Communications: which gateway this ISP's messages leave on.
     path("settings/email/", EmailSettingsView.as_view(), name="messaging-email"),
     path("settings/test/", MessagingTestView.as_view(), name="messaging-test"),
-    path("settings/credits/buy/", BuyCreditsView.as_view(), name="sms-credits-buy"),
     path("settings/<str:channel>/", ProvidersView.as_view(), name="messaging-providers"),
     path(
         "settings/<str:channel>/<str:provider_id>/",
