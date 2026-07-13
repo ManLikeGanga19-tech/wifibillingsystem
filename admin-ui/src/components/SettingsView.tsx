@@ -2,6 +2,7 @@ import { Settings } from 'lucide-react';
 import { ViewHeader } from './ui';
 import BrandingPanel from './settings/BrandingPanel';
 import CommsPanel from './settings/CommsPanel';
+import EmailPanel from './settings/EmailPanel';
 import ProfilePanel from './settings/ProfilePanel';
 import Placeholder from './settings/Placeholder';
 import SettlementSetup from './SettlementSetup';
@@ -52,9 +53,9 @@ const NAV: Group[] = [
     title: 'Billing & messaging',
     items: [
       { id: 'payments', label: 'Payments', sub: 'Payout account & credentials' },
-      { id: 'sms', label: 'SMS', sub: 'SMS gateway', under: 'Communications' },
+      { id: 'sms', label: 'SMS', sub: 'Providers & credits', under: 'Communications' },
       { id: 'email', label: 'Email', sub: 'SMTP gateway' },
-      { id: 'whatsapp', label: 'WhatsApp', sub: 'WhatsApp gateway' },
+      { id: 'whatsapp', label: 'WhatsApp', sub: 'WhatsApp providers' },
       { id: 'templates', label: 'Message templates', sub: 'Receipts, expiry & reminders' },
       { id: 'loyalty', label: 'Loyalty points', sub: 'Reward subscribers for payments' },
     ],
@@ -177,7 +178,7 @@ export default function SettingsView({
             <Placeholder title="Hotspot" blurb="Captive-portal instructions, voucher defaults and hotspot behaviour." />
           )}
           {active === 'sms' && <CommsPanel channel="sms" />}
-          {active === 'email' && <CommsPanel channel="email" />}
+          {active === 'email' && <EmailPanel />}
           {active === 'whatsapp' && <CommsPanel channel="whatsapp" />}
           {active === 'templates' && (
             <Placeholder title="Message templates" blurb="Customise the wording of receipts, expiry warnings and reminders." />

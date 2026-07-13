@@ -16,6 +16,7 @@ class LedgerEntry(OperatorOwnedModel):
         PPPOE_FEE = "pppoe_fee", "PPPoE per-user fee"
         SETUP_FEE = "setup_fee", "One-time setup fee"
         PAYOUT = "payout", "Payout withdrawal"
+        SMS_CREDITS = "sms_credits", "SMS credits bought"
         ADJUSTMENT = "adjustment", "Manual adjustment"
 
     entry_type = models.CharField(max_length=12, choices=Type.choices, db_index=True)

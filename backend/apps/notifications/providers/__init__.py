@@ -1,28 +1,60 @@
 """Choosing WHOSE gateway a message leaves on.
 
-The hybrid rule, in one place:
+The rule, in one place:
 
   1. Dev/test override (NOTIFICATIONS_PROVIDER=dummy) — nothing paid ever leaves the box.
-  2. The ISP's OWN credentials, if they configured this channel and the credentials are
-     actually there (MessagingSettings.uses_own guards the half-configured case).
-  3. The PLATFORM's credentials — the default, so messaging works on day one with
-     nothing to set up.
+  2. The provider the ISP has made ACTIVE for that channel, built from the credentials
+     they stored for it.
+  3. For SMS only, the default: the managed WIFI.OS gateway, which runs on our account
+     and is metered in credits.
 
-WhatsApp is the exception: there is no platform account, so an ISP who hasn't brought
-their own gets an explicit "switched off" error rather than a silent black hole.
+WhatsApp has no default. We hold no Meta business identity for an ISP, so an ISP who has
+not connected a provider gets an explicit "not connected" rather than a silent black hole.
 """
 
 import os
 
+from ..catalog import MANAGED_SMS
 from .africastalking import AfricasTalkingSMS
 from .base import MessageProvider, ProviderError, SendResult
+from .bulk import (
+    ApiwapWhatsApp,
+    BlessedTextsSMS,
+    BongaSMS,
+    HostPinnacleSMS,
+    InfobipSMS,
+    MobileSasaSMS,
+    NotivaWhatsApp,
+    TwilioSMS,
+)
 from .dummy import DummyProvider
 from .email import DjangoEmailProvider, SmtpEmailProvider
-from .whatsapp import WhatsAppCloud
 
 SMS = "sms"
 EMAIL = "email"
 WHATSAPP = "whatsapp"
+
+#: provider id -> how to build it from the ISP's stored credentials.
+SMS_ADAPTERS = {
+    "africastalking": lambda c: AfricasTalkingSMS(
+        username=c.get("username", ""),
+        api_key=c.get("api_key", ""),
+        sender_id=c.get("sender_id", ""),
+    ),
+    "mobilesasa": lambda c: MobileSasaSMS(**c),
+    "bongasms": lambda c: BongaSMS(**c),
+    "blessedtexts": lambda c: BlessedTextsSMS(**c),
+    "hostpinnacle": lambda c: HostPinnacleSMS(**c),
+    "twilio": lambda c: TwilioSMS(**c),
+    "infobip": lambda c: InfobipSMS(**c),
+}
+
+WHATSAPP_ADAPTERS = {
+    "apiwap": lambda c: ApiwapWhatsApp(**c),
+    "notiva": lambda c: NotivaWhatsApp(**c),
+    "twilio": lambda c: TwilioSMS(whatsapp=True, **c),
+    "infobip": lambda c: InfobipSMS(whatsapp=True, **c),
+}
 
 
 def _messaging_settings(operator):
@@ -33,30 +65,42 @@ def _messaging_settings(operator):
     return MessagingSettings.objects.filter(operator=operator).first()
 
 
-def resolve_provider(channel: str, operator=None) -> MessageProvider:
-    """The real resolution: own credentials, else the platform's. No dummy override —
-    kept separate from get_provider so the hybrid rule can be tested for what it would
-    do in production, not what dev short-circuits it to."""
+def _credentials(operator, channel: str, provider_id: str) -> dict:
+    from ..models import ProviderCredential
+
+    row = ProviderCredential.objects.filter(
+        operator=operator, channel=channel, provider=provider_id
+    ).first()
+    return row.values if row else {}
+
+
+def is_managed_sms(operator) -> bool:
+    """True when this ISP's SMS leaves on OUR gateway — the only case we meter credits
+    for. An ISP on their own provider is billed by that provider, not by us."""
+    config = _messaging_settings(operator)
+    active = config.active_provider(SMS) if config else MANAGED_SMS
+    return active in ("", MANAGED_SMS)
+
+
+def managed_sms() -> MessageProvider:
+    """The WIFI.OS gateway: our account, our key. The ISP pays in credits, not with a
+    credential — which is why nothing here comes from their settings."""
     from django.conf import settings
 
-    config = _messaging_settings(operator)
-    own = bool(config and config.uses_own(channel))
+    return AfricasTalkingSMS(
+        username=settings.AT_USERNAME,
+        api_key=settings.AT_API_KEY,
+        sender_id=settings.AT_SENDER_ID,
+    )
 
-    if channel == SMS:
-        if own:
-            return AfricasTalkingSMS(
-                username=config.sms_username,
-                api_key=config.sms_api_key,
-                sender_id=config.sms_sender_id,
-            )
-        return AfricasTalkingSMS(
-            username=settings.AT_USERNAME,
-            api_key=settings.AT_API_KEY,
-            sender_id=settings.AT_SENDER_ID,
-        )
+
+def resolve_provider(channel: str, operator=None) -> MessageProvider:
+    """The real resolution, with no dev short-circuit — so the rule can be tested for
+    what it would do in PRODUCTION, not what dev turns it into."""
+    config = _messaging_settings(operator)
 
     if channel == EMAIL:
-        if own:
+        if config and config.uses_own(EMAIL):
             return SmtpEmailProvider(
                 host=config.smtp_host,
                 port=config.smtp_port,
@@ -68,22 +112,26 @@ def resolve_provider(channel: str, operator=None) -> MessageProvider:
             )
         return DjangoEmailProvider()
 
+    if channel == SMS:
+        active = config.active_provider(SMS) if config else MANAGED_SMS
+        if active in ("", MANAGED_SMS):
+            return managed_sms()
+        build = SMS_ADAPTERS.get(active)
+        if build is None:
+            raise ProviderError(f"Unknown SMS provider {active!r}")
+        return build(_credentials(operator, SMS, active))
+
     if channel == WHATSAPP:
-        if own:
-            return WhatsAppCloud(
-                phone_number_id=config.whatsapp_phone_number_id,
-                token=config.whatsapp_token,
-            )
-        if config is not None:
-            # They have settings and haven't brought a WhatsApp account: say so.
+        active = config.active_provider(WHATSAPP) if config else ""
+        if not active:
             raise ProviderError(
-                "WhatsApp is switched off. Add your WhatsApp Business credentials in "
+                "WhatsApp is not connected. Choose a provider in "
                 "Settings > Communications to send on this channel."
             )
-        return WhatsAppCloud(
-            phone_number_id=settings.WHATSAPP_PHONE_NUMBER_ID,
-            token=settings.WHATSAPP_TOKEN,
-        )
+        build = WHATSAPP_ADAPTERS.get(active)
+        if build is None:
+            raise ProviderError(f"Unknown WhatsApp provider {active!r}")
+        return build(_credentials(operator, WHATSAPP, active))
 
     raise ProviderError(f"Unknown channel {channel!r}")
 
@@ -104,7 +152,8 @@ __all__ = [
     "ProviderError",
     "SendResult",
     "SmtpEmailProvider",
-    "WhatsAppCloud",
     "get_provider",
+    "is_managed_sms",
+    "managed_sms",
     "resolve_provider",
 ]

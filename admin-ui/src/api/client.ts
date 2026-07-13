@@ -491,18 +491,61 @@ export interface OperatorSettings {
   commission_rate: string;
 }
 
-/** Which gateway this ISP's messages leave on.
+/** A gateway an ISP can send through.
  *
- *  Note what is NOT here: the credentials. The API never returns a saved key — only
- *  whether one exists (`*_configured`). The form sends a secret when it is being
- *  changed and leaves it blank otherwise, which the server reads as "keep the one you
- *  have". So there is never a moment where an SMS key is sitting in a browser. */
-export interface MessagingSettings {
-  sms_mode: 'platform' | 'own';
-  sms_username: string;
-  sms_sender_id: string;
-  sms_api_key_configured: boolean;
+ *  Note what is NOT here: the credential values. The API never returns a saved secret —
+ *  only whether one is `set`. A secret field submits blank unless it is being changed,
+ *  which the server reads as "keep the one you have". So an SMS key is never sitting in
+ *  a browser. */
+export interface ProviderField {
+  key: string;
+  label: string;
+  secret: boolean;
+  placeholder: string;
+  required: boolean;
+  /** Echoed for plain fields so the form is editable; always "" for a secret. */
+  value: string;
+  /** Whether a value is stored. For a secret this is all we are told. */
+  set: boolean;
+}
 
+export interface ProviderCard {
+  id: string;
+  name: string;
+  region: string;
+  /** The WIFI.OS gateway: no credentials, paid for in credits. */
+  managed: boolean;
+  note: string;
+  active: boolean;
+  configured: boolean;
+  fields: ProviderField[];
+}
+
+export interface CreditBundle {
+  id: string;
+  credits: number;
+  price: string;
+  per_sms: string;
+}
+
+export interface CreditSummary {
+  balance: number;
+  low: boolean;
+  wallet_balance: string;
+  bundles: CreditBundle[];
+}
+
+export interface ProvidersResponse {
+  channel: 'sms' | 'whatsapp';
+  active: string;
+  providers: ProviderCard[];
+  /** SMS only. */
+  credits?: CreditSummary;
+  /** WhatsApp only. */
+  note?: string;
+}
+
+export interface EmailSettings {
   email_mode: 'platform' | 'own';
   smtp_host: string;
   smtp_port: number;
@@ -511,20 +554,10 @@ export interface MessagingSettings {
   from_email: string;
   from_name: string;
   smtp_password_configured: boolean;
-
-  whatsapp_mode: 'off' | 'own';
-  whatsapp_phone_number_id: string;
-  whatsapp_token_configured: boolean;
 }
 
-/** What the form sends: everything above except the `*_configured` flags, plus the
- *  write-only secrets. */
-export type MessagingSettingsUpdate = Partial<
-  Omit<MessagingSettings, 'sms_api_key_configured' | 'smtp_password_configured' | 'whatsapp_token_configured'>
-> & {
-  sms_api_key?: string;
+export type EmailSettingsUpdate = Partial<Omit<EmailSettings, 'smtp_password_configured'>> & {
   smtp_password?: string;
-  whatsapp_token?: string;
 };
 
 // ---- PPPoE / Broadband ----------------------------------------------------
@@ -790,12 +823,51 @@ export const api = {
   },
 
   messaging: {
-    get: () => request<MessagingSettings>('/notifications/settings/'),
-    update: (data: MessagingSettingsUpdate) =>
-      request<MessagingSettings>('/notifications/settings/', {
-        method: 'PATCH',
-        body: JSON.stringify(data),
+    /** Every gateway on this channel, and where this ISP stands with each. */
+    providers: (channel: 'sms' | 'whatsapp') =>
+      request<ProvidersResponse>(`/notifications/settings/${channel}/`),
+
+    /** Save credentials for one gateway. Secrets left blank keep their stored value. */
+    configure: (
+      channel: 'sms' | 'whatsapp',
+      providerId: string,
+      credentials: Record<string, string>,
+      activate = false
+    ) =>
+      request<{ providers: ProviderCard[]; active: string }>(
+        `/notifications/settings/${channel}/${providerId}/`,
+        { method: 'POST', body: JSON.stringify({ credentials, activate }) }
+      ),
+
+    /** Make a gateway the live one. Only one sends at a time. */
+    activate: (channel: 'sms' | 'whatsapp', providerId: string) =>
+      request<{ providers: ProviderCard[]; active: string }>(
+        `/notifications/settings/${channel}/${providerId}/activate/`,
+        { method: 'POST', body: '{}' }
+      ),
+
+    disconnect: (channel: 'sms' | 'whatsapp', providerId: string) =>
+      request<{ providers: ProviderCard[]; active: string }>(
+        `/notifications/settings/${channel}/${providerId}/disconnect/`,
+        { method: 'DELETE' }
+      ),
+
+    /** Top up SMS credits from the wallet. Money moving = second factor, like a payout. */
+    buyCredits: (bundle: string, mfaCode: string) =>
+      request<CreditSummary>('/notifications/settings/credits/buy/', {
+        method: 'POST',
+        body: JSON.stringify({ bundle, mfa_code: mfaCode }),
       }),
+
+    email: {
+      get: () => request<EmailSettings>('/notifications/settings/email/'),
+      update: (data: EmailSettingsUpdate) =>
+        request<EmailSettings>('/notifications/settings/email/', {
+          method: 'PATCH',
+          body: JSON.stringify(data),
+        }),
+    },
+
     /** Send a real message to yourself. Wrong credentials fail SILENTLY in production —
      *  this is how the ISP finds out now instead of via an angry customer. */
     test: (channel: 'sms' | 'email' | 'whatsapp', to: string) =>

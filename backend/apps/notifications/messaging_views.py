@@ -1,15 +1,15 @@
-"""Communications settings: which gateway an ISP's messages leave on.
+"""Communications settings: the gateway an ISP's messages leave on, and the credits that
+pay for the managed one.
 
 The security shape of this file, stated plainly:
 
-  * Credentials go IN and never come OUT. A read reports `sms_api_key_configured: true`,
-    never the key. You cannot leak what you do not serialise, and an ISP's SMS key is
-    money — anyone who steals it can send on their account at their cost.
-  * A blank secret on write means "leave it alone", so the console can save the form
-    without asking the ISP to re-type a key it is not allowed to show them.
-  * Switching a channel to `own` with no working credentials would silently strand every
-    customer notification, so the serializer refuses it and the model falls back to the
-    platform even if a bad row somehow lands (see MessagingSettings.uses_own).
+  * Credentials go IN and never come OUT. A read reports WHICH fields are set, never what
+    they are. You cannot leak what you do not serialise, and a bulk-SMS key is money —
+    anyone who steals it sends on the ISP's account at the ISP's cost.
+  * A blank secret on write means "leave it alone", so the console can save a form
+    without asking an ISP to re-type a key it is not allowed to show them.
+  * Buying credits is money leaving a wallet, so it carries the same second factor and
+    the same audit line as a payout.
 """
 
 from drf_spectacular.utils import extend_schema
@@ -18,29 +18,24 @@ from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.accounts import mfa
+from apps.accounts.mfa import MfaError, MfaRequired
+from apps.billing.services import WalletError, wallet_balance
 from apps.core.permissions import CanManageMoney, RequireTenant, TenantIsOperational
 from apps.core.schema import OBJECT_RESPONSE
 from apps.core.services import audit
 from apps.core.tenancy import acting_tenant
 
+from . import catalog, credits
 from .models import (
     GATEWAY_MODE_CHOICES,
-    WHATSAPP_MODE_CHOICES,
     Channel,
     MessagingSettings,
+    ProviderCredential,
 )
 from .providers import ProviderError, get_provider, resolve_provider
 
-# The secrets. Listed once, so "never return these" is a fact of the module rather than
-# something each new field has to remember.
-SECRET_FIELDS = ("sms_api_key", "smtp_password", "whatsapp_token")
-
-PLAIN_FIELDS = (
-    "sms_mode", "sms_username", "sms_sender_id",
-    "email_mode", "smtp_host", "smtp_port", "smtp_username", "smtp_use_tls",
-    "from_email", "from_name",
-    "whatsapp_mode", "whatsapp_phone_number_id",
-)
+CHANNELS = (Channel.SMS, Channel.WHATSAPP)
 
 
 def _settings_for(operator) -> MessagingSettings:
@@ -48,118 +43,273 @@ def _settings_for(operator) -> MessagingSettings:
     return config
 
 
-def _as_dict(c: MessagingSettings) -> dict:
-    data = {field: getattr(c, field) for field in PLAIN_FIELDS}
-    # Whether a secret exists — never the secret itself.
-    for field in SECRET_FIELDS:
-        data[f"{field}_configured"] = bool(getattr(c, field))
-    return data
+def _cards(operator, channel: str, config: MessagingSettings) -> list[dict]:
+    """The catalog, annotated with what THIS ISP has done with it — which provider is
+    live, and which ones already hold credentials."""
+    stored = {
+        row.provider: row.values
+        for row in ProviderCredential.objects.filter(operator=operator, channel=channel)
+    }
+    active = config.active_provider(channel)
+    return [
+        {
+            "id": p.id,
+            "name": p.name,
+            "region": p.region,
+            "managed": p.managed,
+            "note": p.note,
+            "active": p.id == active,
+            # Configured = every REQUIRED field has a value. A half-filled provider must
+            # not look ready, or the ISP activates it and their receipts stop.
+            "configured": p.managed
+            or all(stored.get(p.id, {}).get(f.key) for f in p.fields if f.required),
+            "fields": [
+                {
+                    "key": f.key,
+                    "label": f.label,
+                    "secret": f.secret,
+                    "placeholder": f.placeholder,
+                    "required": f.required,
+                    # For a secret we say only that one is stored. For a plain field we
+                    # can safely echo the value back so the form is editable.
+                    "value": "" if f.secret else stored.get(p.id, {}).get(f.key, ""),
+                    "set": bool(stored.get(p.id, {}).get(f.key)),
+                }
+                for f in p.fields
+            ],
+        }
+        for p in catalog.by_channel(channel)
+    ]
 
 
-class MessagingSettingsSerializer(serializers.Serializer):
-    sms_mode = serializers.ChoiceField(choices=GATEWAY_MODE_CHOICES, required=False)
-    sms_username = serializers.CharField(max_length=100, required=False, allow_blank=True)
-    sms_api_key = serializers.CharField(required=False, allow_blank=True, write_only=True)
-    sms_sender_id = serializers.CharField(max_length=11, required=False, allow_blank=True)
-
-    email_mode = serializers.ChoiceField(choices=GATEWAY_MODE_CHOICES, required=False)
-    smtp_host = serializers.CharField(max_length=200, required=False, allow_blank=True)
-    smtp_port = serializers.IntegerField(min_value=1, max_value=65535, required=False)
-    smtp_username = serializers.CharField(max_length=200, required=False, allow_blank=True)
-    smtp_password = serializers.CharField(required=False, allow_blank=True, write_only=True)
-    smtp_use_tls = serializers.BooleanField(required=False)
-    from_email = serializers.EmailField(required=False, allow_blank=True)
-    from_name = serializers.CharField(max_length=80, required=False, allow_blank=True)
-
-    whatsapp_mode = serializers.ChoiceField(choices=WHATSAPP_MODE_CHOICES, required=False)
-    whatsapp_phone_number_id = serializers.CharField(
-        max_length=50, required=False, allow_blank=True
-    )
-    whatsapp_token = serializers.CharField(required=False, allow_blank=True, write_only=True)
-
-    def __init__(self, *args, current: MessagingSettings = None, **kwargs):
-        # Validation needs to know what is ALREADY stored: "switch to own" is legitimate
-        # when the key was saved on a previous visit and the form (correctly) can't show
-        # it back to be re-submitted.
-        self.current = current
-        super().__init__(*args, **kwargs)
-
-    def _will_have(self, data: dict, field: str) -> bool:
-        """The value this field ends up with — the incoming one, else what's stored."""
-        incoming = data.get(field)
-        if incoming:
-            return True
-        return bool(getattr(self.current, field, ""))
-
-    def validate(self, data):
-        own = MessagingSettings.Mode.OWN
-        errors = {}
-
-        if data.get("sms_mode") == own:
-            if not self._will_have(data, "sms_api_key"):
-                errors["sms_api_key"] = "Required to send SMS on your own account."
-            if not self._will_have(data, "sms_username"):
-                errors["sms_username"] = "Your Africa's Talking username is required."
-
-        if data.get("email_mode") == own:
-            if not self._will_have(data, "smtp_host"):
-                errors["smtp_host"] = "Required to send email from your own server."
-            if not self._will_have(data, "from_email"):
-                errors["from_email"] = "The address your customers see mail come from."
-
-        if data.get("whatsapp_mode") == own:
-            if not self._will_have(data, "whatsapp_token"):
-                errors["whatsapp_token"] = "Required to send on WhatsApp."
-            if not self._will_have(data, "whatsapp_phone_number_id"):
-                errors["whatsapp_phone_number_id"] = "Your WhatsApp phone number ID is required."
-
-        if errors:
-            raise serializers.ValidationError(errors)
-        return data
-
-
-class MessagingSettingsView(APIView):
-    """Read and update the ISP's gateways. Same bar as the other money-adjacent
-    settings: SMS spends the ISP's credit and sets the sender name customers see."""
+class ProvidersView(APIView):
+    """Every gateway an ISP may use on this channel, and where they stand with each."""
 
     permission_classes = [IsAdminUser, RequireTenant, TenantIsOperational, CanManageMoney]
 
-    @extend_schema(responses=OBJECT_RESPONSE, summary="This ISP's messaging gateways")
-    def get(self, request):
-        return Response(_as_dict(_settings_for(acting_tenant(request))))
+    @extend_schema(responses=OBJECT_RESPONSE, summary="SMS/WhatsApp gateways and their state")
+    def get(self, request, channel: str):
+        if channel not in CHANNELS:
+            return Response({"detail": "Unknown channel."}, status=status.HTTP_404_NOT_FOUND)
+        operator = acting_tenant(request)
+        config = _settings_for(operator)
+        body = {
+            "channel": channel,
+            "active": config.active_provider(channel),
+            "providers": _cards(operator, channel, config),
+        }
+        if channel == Channel.SMS:
+            body["credits"] = _credit_summary(operator)
+        else:
+            body["note"] = catalog.WHATSAPP_NOTE
+        return Response(body)
+
+
+class ConfigureProviderSerializer(serializers.Serializer):
+    #: {field_key: value}. A secret sent blank means "keep the stored one".
+    credentials = serializers.DictField(child=serializers.CharField(allow_blank=True))
+    #: Make this the live provider for the channel once it is configured.
+    activate = serializers.BooleanField(default=False)
+
+
+class ConfigureProviderView(APIView):
+    """Save credentials for one gateway, and optionally make it the live one."""
+
+    permission_classes = [IsAdminUser, RequireTenant, TenantIsOperational, CanManageMoney]
 
     @extend_schema(
-        request=MessagingSettingsSerializer,
+        request=ConfigureProviderSerializer,
         responses=OBJECT_RESPONSE,
-        summary="Update the messaging gateways (SMS, email, WhatsApp)",
+        summary="Store credentials for a gateway (secrets are write-only)",
     )
-    def patch(self, request):
-        config = _settings_for(acting_tenant(request))
-        s = MessagingSettingsSerializer(data=request.data, current=config)
-        s.is_valid(raise_exception=True)
-        data = s.validated_data
+    def post(self, request, channel: str, provider_id: str):
+        provider = catalog.lookup(channel, provider_id) if channel in CHANNELS else None
+        if provider is None:
+            return Response({"detail": "Unknown gateway."}, status=status.HTTP_404_NOT_FOUND)
+        if provider.managed:
+            return Response(
+                {"detail": "The WIFI.OS gateway needs no credentials — it runs on ours."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        for field in PLAIN_FIELDS:
-            if field in data:
-                setattr(config, field, data[field])
-        # A blank secret means "keep the one you already have" — the form cannot show it
-        # back, so an empty box must not wipe a working key.
-        for field in SECRET_FIELDS:
-            if data.get(field):
-                setattr(config, field, data[field])
-        config.save()
+        s = ConfigureProviderSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        incoming = s.validated_data["credentials"]
+
+        operator = acting_tenant(request)
+        row, _ = ProviderCredential.objects.get_or_create(
+            operator=operator, channel=channel, provider=provider_id
+        )
+        values = dict(row.values)
+        known = {f.key for f in provider.fields}
+        for key, value in incoming.items():
+            if key not in known:
+                continue  # ignore anything not in the catalog — no smuggling extra keys
+            if value == "" and key in catalog.secret_keys(channel, provider_id):
+                continue  # blank secret = keep the stored one
+            values[key] = value
+
+        missing = [f.label for f in provider.fields if f.required and not values.get(f.key)]
+        if missing:
+            return Response(
+                {"detail": f"Still needed: {', '.join(missing)}."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        row.values = values
+        row.save()
+
+        config = _settings_for(operator)
+        if s.validated_data["activate"]:
+            _activate(config, channel, provider_id)
 
         audit(
-            "messaging_settings_updated",
-            operator=config.operator,
+            "messaging_provider_configured",
+            operator=operator,
             actor=request.user,
-            target=config.operator,
-            # Modes only. A secret must never reach an audit row.
-            sms_mode=config.sms_mode,
-            email_mode=config.email_mode,
-            whatsapp_mode=config.whatsapp_mode,
+            target=operator,
+            channel=channel,
+            provider=provider_id,  # the NAME of the gateway; never a credential
+            activated=s.validated_data["activate"],
         )
-        return Response(_as_dict(config))
+        return Response({"providers": _cards(operator, channel, config),
+                         "active": config.active_provider(channel)})
+
+
+class ActivateProviderView(APIView):
+    """Switch the live gateway. One is active per channel at a time."""
+
+    permission_classes = [IsAdminUser, RequireTenant, TenantIsOperational, CanManageMoney]
+
+    @extend_schema(request=None, responses=OBJECT_RESPONSE, summary="Make a gateway the live one")
+    def post(self, request, channel: str, provider_id: str):
+        provider = catalog.lookup(channel, provider_id) if channel in CHANNELS else None
+        if provider is None:
+            return Response({"detail": "Unknown gateway."}, status=status.HTTP_404_NOT_FOUND)
+
+        operator = acting_tenant(request)
+        if not provider.managed:
+            values = _stored(operator, channel, provider_id)
+            missing = [f.label for f in provider.fields if f.required and not values.get(f.key)]
+            if missing:
+                # Activating a half-configured gateway would silently stop every receipt.
+                return Response(
+                    {"detail": f"Add its credentials first: {', '.join(missing)}."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        config = _settings_for(operator)
+        _activate(config, channel, provider_id)
+        audit(
+            "messaging_provider_activated",
+            operator=operator, actor=request.user, target=operator,
+            channel=channel, provider=provider_id,
+        )
+        return Response({"providers": _cards(operator, channel, config),
+                         "active": config.active_provider(channel)})
+
+
+class DisconnectProviderView(APIView):
+    """Turn a channel off (WhatsApp), or drop stored credentials."""
+
+    permission_classes = [IsAdminUser, RequireTenant, TenantIsOperational, CanManageMoney]
+
+    @extend_schema(responses=OBJECT_RESPONSE, summary="Disconnect a gateway")
+    def delete(self, request, channel: str, provider_id: str):
+        if channel not in CHANNELS:
+            return Response({"detail": "Unknown channel."}, status=status.HTTP_404_NOT_FOUND)
+        operator = acting_tenant(request)
+        ProviderCredential.objects.filter(
+            operator=operator, channel=channel, provider=provider_id
+        ).delete()
+
+        config = _settings_for(operator)
+        if config.active_provider(channel) == provider_id:
+            # SMS always has somewhere to fall back to (ours). WhatsApp does not, so it
+            # simply goes quiet — which is the honest outcome of removing its only key.
+            if channel == Channel.SMS:
+                config.sms_provider = catalog.MANAGED_SMS
+            else:
+                config.whatsapp_provider = ""
+            config.save()
+
+        audit(
+            "messaging_provider_disconnected",
+            operator=operator, actor=request.user, target=operator,
+            channel=channel, provider=provider_id,
+        )
+        return Response({"providers": _cards(operator, channel, config),
+                         "active": config.active_provider(channel)})
+
+
+# --- credits ---------------------------------------------------------------------------
+
+
+def _credit_summary(operator) -> dict:
+    balance = credits.balance(operator)
+    return {
+        "balance": balance,
+        "low": balance <= credits.LOW_BALANCE,
+        "wallet_balance": str(wallet_balance(operator)),
+        "bundles": [
+            {
+                "id": b.id,
+                "credits": b.credits,
+                "price": str(b.price),
+                "per_sms": str(b.per_sms),
+            }
+            for b in credits.BUNDLES
+        ],
+    }
+
+
+class BuyCreditsSerializer(serializers.Serializer):
+    bundle = serializers.CharField()
+    mfa_code = serializers.CharField(required=False, allow_blank=True)
+
+
+class BuyCreditsView(APIView):
+    """Top up SMS credits from the ISP's wallet."""
+
+    permission_classes = [IsAdminUser, RequireTenant, TenantIsOperational, CanManageMoney]
+
+    def handle_exception(self, exc):
+        if isinstance(exc, MfaRequired):
+            # A DEMAND, not a failure — the console shows the code box rather than a red
+            # error, exactly as it does for a payout.
+            return Response(
+                {"detail": str(exc), "mfa_required": True, "enrolled": mfa.is_enrolled(
+                    self.request.user)},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if isinstance(exc, MfaError):
+            return Response({"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN)
+        return super().handle_exception(exc)
+
+    @extend_schema(
+        request=BuyCreditsSerializer, responses=OBJECT_RESPONSE,
+        summary="Buy SMS credits with wallet money",
+    )
+    def post(self, request):
+        s = BuyCreditsSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+
+        # The second factor, at the door where money moves — the same lock as a payout.
+        # Wallet money buying credits is still the ISP's money leaving their balance.
+        mfa.require(request.user, s.validated_data.get("mfa_code", ""))
+
+        operator = acting_tenant(request)
+        try:
+            credits.purchase(
+                operator=operator, bundle_id=s.validated_data["bundle"], user=request.user
+            )
+        except WalletError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(_credit_summary(operator))
+
+
+# --- test send -------------------------------------------------------------------------
 
 
 class TestSendSerializer(serializers.Serializer):
@@ -170,17 +320,16 @@ class TestSendSerializer(serializers.Serializer):
 class MessagingTestView(APIView):
     """Send one real message to the ISP's own number/address.
 
-    The whole point of this button: credentials that are wrong fail SILENTLY in
-    production — an unapproved sender ID, a rejected SMTP password — and the ISP only
-    learns when a customer says "I never got my code". This makes the failure happen
-    now, to them, with the provider's own error message in front of them.
+    The whole point of this button: wrong credentials fail SILENTLY in production — an
+    unapproved sender ID, a rejected password, an account with no balance — and the ISP
+    only learns when a customer says "I never got my code". This makes the failure happen
+    now, to them, with the gateway's own words in front of them.
     """
 
     permission_classes = [IsAdminUser, RequireTenant, TenantIsOperational, CanManageMoney]
 
     @extend_schema(
-        request=TestSendSerializer,
-        responses=OBJECT_RESPONSE,
+        request=TestSendSerializer, responses=OBJECT_RESPONSE,
         summary="Send a test message to yourself to prove the gateway works",
     )
     def post(self, request):
@@ -209,9 +358,9 @@ class MessagingTestView(APIView):
         else:
             message.to_phone = to.lstrip("+")
 
-        # When the ISP is testing THEIR OWN credentials, the send must be real — a dummy
-        # "success" would prove nothing, which is the exact failure this button exists to
-        # prevent. On the platform gateway, dev's dummy override still applies.
+        # When the ISP is testing THEIR OWN gateway the send must be real — a dummy
+        # "success" would prove nothing, which is the exact failure this exists to catch.
+        # On our managed gateway, dev's dummy override still applies.
         try:
             provider = (
                 resolve_provider(channel, operator)
@@ -233,11 +382,8 @@ class MessagingTestView(APIView):
 
         audit(
             "messaging_test_send",
-            operator=operator,
-            actor=request.user,
-            target=operator,
-            channel=channel,
-            ok=result.ok,
+            operator=operator, actor=request.user, target=operator,
+            channel=channel, ok=result.ok,
         )
         if not result.ok:
             return Response(
@@ -245,3 +391,80 @@ class MessagingTestView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         return Response({"detail": f"Test {channel} sent to {to}."})
+
+
+# --- email (unchanged shape: our mailer, or the ISP's own SMTP) -------------------------
+
+EMAIL_FIELDS = (
+    "email_mode", "smtp_host", "smtp_port", "smtp_username", "smtp_use_tls",
+    "from_email", "from_name",
+)
+
+
+class EmailSettingsSerializer(serializers.Serializer):
+    email_mode = serializers.ChoiceField(choices=GATEWAY_MODE_CHOICES, required=False)
+    smtp_host = serializers.CharField(max_length=200, required=False, allow_blank=True)
+    smtp_port = serializers.IntegerField(min_value=1, max_value=65535, required=False)
+    smtp_username = serializers.CharField(max_length=200, required=False, allow_blank=True)
+    smtp_password = serializers.CharField(required=False, allow_blank=True, write_only=True)
+    smtp_use_tls = serializers.BooleanField(required=False)
+    from_email = serializers.EmailField(required=False, allow_blank=True)
+    from_name = serializers.CharField(max_length=80, required=False, allow_blank=True)
+
+
+def _email_dict(c: MessagingSettings) -> dict:
+    data = {f: getattr(c, f) for f in EMAIL_FIELDS}
+    data["smtp_password_configured"] = bool(c.smtp_password)
+    return data
+
+
+class EmailSettingsView(APIView):
+    permission_classes = [IsAdminUser, RequireTenant, TenantIsOperational, CanManageMoney]
+
+    @extend_schema(responses=OBJECT_RESPONSE, summary="This ISP's email gateway")
+    def get(self, request):
+        return Response(_email_dict(_settings_for(acting_tenant(request))))
+
+    @extend_schema(request=EmailSettingsSerializer, responses=OBJECT_RESPONSE,
+                   summary="Update the email gateway")
+    def patch(self, request):
+        config = _settings_for(acting_tenant(request))
+        s = EmailSettingsSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        data = s.validated_data
+
+        if data.get("email_mode") == "own":
+            host = data.get("smtp_host") or config.smtp_host
+            sender = data.get("from_email") or config.from_email
+            if not host or not sender:
+                return Response(
+                    {"detail": "An SMTP host and a From address are needed to send your "
+                               "own mail."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        for field in EMAIL_FIELDS:
+            if field in data:
+                setattr(config, field, data[field])
+        if data.get("smtp_password"):  # blank = keep the stored one
+            config.smtp_password = data["smtp_password"]
+        config.save()
+
+        audit("messaging_email_updated", operator=config.operator, actor=request.user,
+              target=config.operator, email_mode=config.email_mode)
+        return Response(_email_dict(config))
+
+
+def _stored(operator, channel: str, provider_id: str) -> dict:
+    row = ProviderCredential.objects.filter(
+        operator=operator, channel=channel, provider=provider_id
+    ).first()
+    return row.values if row else {}
+
+
+def _activate(config: MessagingSettings, channel: str, provider_id: str) -> None:
+    if channel == Channel.SMS:
+        config.sms_provider = provider_id
+    else:
+        config.whatsapp_provider = provider_id
+    config.save()
