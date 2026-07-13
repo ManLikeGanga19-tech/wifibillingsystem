@@ -181,7 +181,7 @@ class PlatformTenantViewSet(viewsets.ModelViewSet):
         to walk into their console at all."""
         from django.db.models import Sum
 
-        from apps.billing.models import LedgerEntry, Payout
+        from apps.billing.models import LedgerEntry, Payout, Settlement
         from apps.core.analytics_views import EARNING_TYPES
         from apps.core.governance_views import AuditLogSerializer
         from apps.core.models import AuditLog
@@ -207,7 +207,10 @@ class PlatformTenantViewSet(viewsets.ModelViewSet):
                         ledger.filter(entry_type=LedgerEntry.Type.SALE)
                     ),
                     "platform_revenue": -total(ledger.filter(entry_type__in=EARNING_TYPES)),
-                    "wallet_balance": total(ledger),
+                    # What we HOLD for them (and could be asked to pay out) — not what they
+                    # earned. Sales settled into their own gateway are in gross_collected
+                    # above, but we never received that cash.
+                    "wallet_balance": total(ledger.filter(settlement=Settlement.PLATFORM)),
                     "payouts_paid": total(Payout.objects.filter(
                         operator=op, status=Payout.Status.PAID
                     )),
@@ -320,13 +323,20 @@ class PlatformReconciliationView(APIView):
     def get(self, request):
         from django.db.models import Sum
 
-        from apps.billing.models import LedgerEntry, Payout
+        from apps.billing.models import LedgerEntry, Payout, Settlement
         from apps.payments.models import C2BPayment, Transaction
 
         def total(qs, field="amount"):
             return qs.aggregate(v=Sum(field))["v"] or 0
 
-        sales = total(LedgerEntry.objects.filter(entry_type=LedgerEntry.Type.SALE))
+        # This view reconciles CASH — what came through our account, what we still hold,
+        # what we have paid out. Sales settled straight into an ISP's own gateway are real
+        # revenue but never entered our account, so they are reported SEPARATELY. Folding
+        # them into "collected" would claim we received money we never saw, and the
+        # reconciliation would never balance against the bank.
+        sale_entries = LedgerEntry.objects.filter(entry_type=LedgerEntry.Type.SALE)
+        sales = total(sale_entries.filter(settlement=Settlement.PLATFORM))
+        settled_direct = total(sale_entries.filter(settlement=Settlement.DIRECT))
         commission = total(LedgerEntry.objects.filter(entry_type=LedgerEntry.Type.COMMISSION))
         fees = total(
             LedgerEntry.objects.filter(
@@ -338,7 +348,9 @@ class PlatformReconciliationView(APIView):
             )
         )
         payouts_debit = total(LedgerEntry.objects.filter(entry_type=LedgerEntry.Type.PAYOUT))
-        owed_to_isps = total(LedgerEntry.objects.all())
+        # What we owe ISPs = what we are HOLDING for them. Platform-settled only: we cannot
+        # owe somebody money that went straight into their own account.
+        owed_to_isps = total(LedgerEntry.objects.filter(settlement=Settlement.PLATFORM))
         paid_out = total(Payout.objects.filter(status=Payout.Status.PAID))
         pending_payouts = total(Payout.objects.filter(status=Payout.Status.REQUESTED))
 
@@ -355,7 +367,12 @@ class PlatformReconciliationView(APIView):
         return Response(
             {
                 "scope": "all_isps",
+                # Cash that actually passed through our account.
                 "total_collected": sales,
+                # Sales that went straight to an ISP's own gateway. Real revenue, real fee
+                # basis — but we never held a shilling of it, so it is NOT in the numbers
+                # above or below.
+                "settled_direct_to_isps": settled_direct,
                 # Gross platform fees before transaction costs
                 "platform_earnings": gross_earnings,
                 # What the M-Pesa/bank rails take (estimated)

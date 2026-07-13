@@ -10,7 +10,7 @@ from django.utils import timezone
 
 from apps.core.services import audit
 
-from .models import LedgerEntry, Payout
+from .models import LedgerEntry, Payout, Settlement
 
 MINIMUM_PAYOUT = Decimal("100.00")
 
@@ -19,10 +19,31 @@ class WalletError(Exception):
     pass
 
 
-def wallet_balance(operator) -> Decimal:
-    return LedgerEntry.objects.filter(operator=operator).aggregate(v=Sum("amount"))[
-        "v"
-    ] or Decimal("0.00")
+def withdrawable_balance(operator) -> Decimal:
+    """What this ISP may actually take out — money WIFI.OS is holding for them.
+
+    THE INVARIANT of the finance module. A sale settled straight into the ISP's own
+    gateway is real revenue and appears in their reports, but we never received that cash:
+    counting it here would let them withdraw money we do not have, on every direct sale,
+    silently. So custody is filtered, not assumed.
+    """
+    return LedgerEntry.objects.filter(
+        operator=operator, settlement=Settlement.PLATFORM
+    ).aggregate(v=Sum("amount"))["v"] or Decimal("0.00")
+
+
+#: The old name, kept because a dozen call sites say "wallet balance" and mean exactly
+#: this: the money we hold. Anything that means REVENUE must not use it — see
+#: reports.revenue_summary.
+wallet_balance = withdrawable_balance
+
+
+def recorded_revenue(operator) -> Decimal:
+    """Everything they sold, whoever held the cash. The basis for reports and for the fee
+    we invoice — NOT for payouts."""
+    return LedgerEntry.objects.filter(
+        operator=operator, entry_type=LedgerEntry.Type.SALE
+    ).aggregate(v=Sum("amount"))["v"] or Decimal("0.00")
 
 
 def credit_pppoe_payment(operator, amount: Decimal, *, memo: str = "") -> None:
@@ -105,11 +126,26 @@ def charge_setup_fee(operator) -> bool:
     return True
 
 
-def credit_sale(tx) -> None:
-    """Credit the ISP's wallet for a successful transaction, withholding the
-    platform commission at source. Idempotent per transaction (DB constraint)."""
+def credit_sale(tx, *, settlement: str = Settlement.PLATFORM) -> None:
+    """Record a successful sale. Idempotent per transaction (DB constraint).
+
+    Where the cash landed decides how we are paid, and the two cases are genuinely
+    different:
+
+    * `platform` — the money is in OUR account, so we withhold commission at source and
+      the remainder is theirs to withdraw. This is the aggregator path.
+    * `direct` — the money went straight to the ISP's own gateway. We cannot withhold a
+      commission from money we never held, so we do NOT write one here: the fee is accrued
+      against their platform account and invoiced (Phase 2/4). Writing a commission debit
+      against a wallet that holds none of this sale's cash would simply eat into the
+      unrelated money we DO hold for them, which is somebody else's shilling.
+
+    Both write the SALE, because both are revenue.
+    """
     operator = tx.operator
     gross = Decimal(tx.amount)
+    direct = settlement == Settlement.DIRECT
+
     # effective_* is 0 for the platform's own ISP — Danamo never bills itself
     rate = operator.effective_commission_pct
     commission = (gross * rate / Decimal("100")).quantize(
@@ -122,14 +158,16 @@ def credit_sale(tx) -> None:
                 entry_type=LedgerEntry.Type.SALE,
                 amount=gross,
                 transaction=tx,
+                settlement=settlement,
                 memo=f"Sale {tx.mpesa_receipt or tx.checkout_request_id}",
             )
-            if commission > 0:
+            if commission > 0 and not direct:
                 LedgerEntry.objects.create(
                     operator=operator,
                     entry_type=LedgerEntry.Type.COMMISSION,
                     amount=-commission,
                     transaction=tx,
+                    settlement=Settlement.PLATFORM,
                     memo=f"{rate}% platform commission",
                 )
     except IntegrityError:
@@ -139,7 +177,8 @@ def credit_sale(tx) -> None:
         operator=operator,
         target=tx,
         gross=str(gross),
-        commission=str(commission),
+        commission=str(commission) if not direct else "0.00",
+        settlement=settlement,
     )
 
 
@@ -191,7 +230,10 @@ def request_payout(*, operator, amount: Decimal, user, method="mpesa", destinati
 
     with db_transaction.atomic():
         op_locked = type(operator).objects.select_for_update().get(pk=operator.pk)
-        if amount > wallet_balance(op_locked):
+        # WITHDRAWABLE, not revenue. A sale that settled straight into the ISP's own
+        # gateway is money we never received; if it counted here we would be paying out
+        # cash we do not have.
+        if amount > withdrawable_balance(op_locked):
             raise WalletError("Withdrawal exceeds your wallet balance.")
         payout = Payout.objects.create(
             operator=op_locked,

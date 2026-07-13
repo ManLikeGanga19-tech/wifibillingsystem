@@ -8,6 +8,21 @@ from django.db import models
 from apps.core.models import OperatorOwnedModel
 
 
+class Settlement(models.TextChoices):
+    """WHERE THE CASH ACTUALLY IS. Not the same question as "did they earn it".
+
+    An ISP may sell through OUR paybill (money lands with us; we withhold commission and
+    they withdraw the rest) or through THEIR OWN gateway (money lands with them, instantly;
+    we never touch it and invoice our fee monthly).
+
+    Both are real revenue and both belong in their reports. Only one of them is money we
+    are holding on their behalf — and that is the only money they may withdraw.
+    """
+
+    PLATFORM = "platform", "Held by WIFI.OS"
+    DIRECT = "direct", "Paid straight to the ISP"
+
+
 class LedgerEntry(OperatorOwnedModel):
     class Type(models.TextChoices):
         SALE = "sale", "Sale (gross)"
@@ -22,6 +37,20 @@ class LedgerEntry(OperatorOwnedModel):
     entry_type = models.CharField(max_length=12, choices=Type.choices, db_index=True)
     # Signed: credits positive, debits negative. KES.
     amount = models.DecimalField(max_digits=12, decimal_places=2)
+
+    # THE INVARIANT: an ISP may only withdraw money we are actually holding.
+    #
+    # Defaults to `platform` because that is what every entry written before the ISP could
+    # bring their own gateway genuinely was — the money passed through us. A `direct` entry
+    # records a sale whose cash went straight to the ISP's own account: it counts toward
+    # their revenue and toward the fee they owe us, and it must NEVER count toward what
+    # they can withdraw. See billing.services.withdrawable_balance.
+    settlement = models.CharField(
+        max_length=8,
+        choices=Settlement.choices,
+        default=Settlement.PLATFORM,
+        db_index=True,
+    )
     transaction = models.ForeignKey(
         "payments.Transaction",
         null=True,

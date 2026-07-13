@@ -177,11 +177,15 @@ def ledger_csv(operator, start, end):
         .order_by("created_at")
         .iterator()
     )
-    header = ["Date", "Type", "Amount", "Memo"]
+    # "Settlement" is here so the ISP can see, line by line, which money we were holding
+    # for them and which went straight into their own account. Without it the CSV would
+    # total to more than they can ever withdraw, and look like a mistake on our part.
+    header = ["Date", "Type", "Settlement", "Amount", "Memo"]
     rows = (
         [
             timezone.localtime(e.created_at).strftime("%Y-%m-%d %H:%M"),
             e.entry_type,
+            e.get_settlement_display(),
             e.amount,
             e.memo,
         ]

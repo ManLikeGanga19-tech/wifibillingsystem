@@ -19,7 +19,7 @@ from drf_spectacular.utils import extend_schema
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.billing.models import LedgerEntry, Payout
+from apps.billing.models import LedgerEntry, Payout, Settlement
 from apps.payments.models import C2BPayment, Transaction
 
 from .models import Operator
@@ -107,8 +107,12 @@ class PlatformKpisView(APIView):
                 entry_type=LedgerEntry.Type.SALE, created_at__gte=month_start
             )
         )
-        # Float = every ISP wallet balance summed = what we owe them
-        float_held = _sum(LedgerEntry.objects.all())
+        # Float = every ISP wallet balance summed = what we owe them, and therefore what we
+        # must actually be HOLDING. Sales settled straight into an ISP's own gateway never
+        # touched our account, so counting them here would inflate our float by money that
+        # was never ours to hold — and this number is what tells us we can cover a payout
+        # run.
+        float_held = _sum(LedgerEntry.objects.filter(settlement=Settlement.PLATFORM))
 
         # --- Alerts (things a human must act on) ------------------------------
         pending_approvals = Operator.objects.filter(status=Operator.Status.PENDING).count()
