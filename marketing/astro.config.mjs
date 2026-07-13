@@ -21,6 +21,7 @@ export default defineConfig({
   vite: {
     plugins: [tailwind()],
     server: {
+      allowedHosts: true, // dev server: allow the docker service hostname (marketing)
       proxy: {
         '/api': {
           target: process.env.API_ORIGIN ?? 'http://localhost:8000',

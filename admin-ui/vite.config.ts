@@ -18,6 +18,9 @@ export default defineConfig(() => {
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
       host: true, // reachable from outside the container when dockerised
+      // Dev server only (never prod): accept the compose service hostnames too, so the
+      // app is reachable at http://admin-ui:4600 etc. on the docker network.
+      allowedHosts: true,
       // localhost:8000 on the host, http://api:8000 inside Docker (compose service name)
       proxy: {
         '/api': process.env.API_PROXY_TARGET ?? 'http://localhost:8000',

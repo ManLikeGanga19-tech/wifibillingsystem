@@ -50,14 +50,13 @@ export const MEDIA: Record<string, MediaSlot> = {
   },
   payments: {
     id: 'payments',
-    kind: 'clip',
-    file: 'stk-push.mp4',
-    poster: 'stk-push.png',
-    aspect: '16/9',
-    caption: 'A customer buys a bundle. M-Pesa prompt, connected, counted.',
+    kind: 'shot',
+    file: 'stk-push.png',
+    aspect: '16/10',
+    caption: 'A customer buys a bundle by M-Pesa — no app, no signup.',
     brief:
-      'Screen recording (15–25s, no audio): captive portal → pick a plan → enter ' +
-      'phone → STK prompt → connected. This is the whole product in one loop.',
+      'The captive portal a WiFi customer sees: pick a plan, pay by M-Pesa. Swap for a ' +
+      'screen recording of the full pay→connected loop when you have one.',
   },
   wallet: {
     id: 'wallet',
@@ -91,14 +90,13 @@ export const MEDIA: Record<string, MediaSlot> = {
   },
   onboarding: {
     id: 'onboarding',
-    kind: 'clip',
-    file: 'go-live.mp4',
-    poster: 'go-live.png',
-    aspect: '16/9',
-    caption: 'Sign up, add your paybill, take money. No sales call.',
+    kind: 'shot',
+    file: 'go-live.png',
+    aspect: '16/10',
+    caption: 'Sign up in five steps. No sales call.',
     brief:
-      'Screen recording (20–30s, no audio): the go-live checklist → add settlement ' +
-      'account → "payments are ON". Sells the thing competitors make you phone them for.',
+      'The signup wizard — name, email, your subdomain. Swap for a recording of the ' +
+      'full go-live (add paybill → payments ON) when you have one.',
   },
 };
 
