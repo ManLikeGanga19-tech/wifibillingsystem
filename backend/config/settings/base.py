@@ -158,6 +158,8 @@ SPECTACULAR_SETTINGS = {
     "ENUM_NAME_OVERRIDES": {
         "OperatorStatus": "apps.core.enums.OPERATOR_STATUS_CHOICES",
         "PaymentStatus": "apps.core.enums.TRANSACTION_STATUS_CHOICES",
+        # SMS and email share the platform/own choice set — one name, not two.
+        "GatewayMode": "apps.core.enums.GATEWAY_MODE_CHOICES",
     },
 }
 

@@ -491,6 +491,42 @@ export interface OperatorSettings {
   commission_rate: string;
 }
 
+/** Which gateway this ISP's messages leave on.
+ *
+ *  Note what is NOT here: the credentials. The API never returns a saved key — only
+ *  whether one exists (`*_configured`). The form sends a secret when it is being
+ *  changed and leaves it blank otherwise, which the server reads as "keep the one you
+ *  have". So there is never a moment where an SMS key is sitting in a browser. */
+export interface MessagingSettings {
+  sms_mode: 'platform' | 'own';
+  sms_username: string;
+  sms_sender_id: string;
+  sms_api_key_configured: boolean;
+
+  email_mode: 'platform' | 'own';
+  smtp_host: string;
+  smtp_port: number;
+  smtp_username: string;
+  smtp_use_tls: boolean;
+  from_email: string;
+  from_name: string;
+  smtp_password_configured: boolean;
+
+  whatsapp_mode: 'off' | 'own';
+  whatsapp_phone_number_id: string;
+  whatsapp_token_configured: boolean;
+}
+
+/** What the form sends: everything above except the `*_configured` flags, plus the
+ *  write-only secrets. */
+export type MessagingSettingsUpdate = Partial<
+  Omit<MessagingSettings, 'sms_api_key_configured' | 'smtp_password_configured' | 'whatsapp_token_configured'>
+> & {
+  sms_api_key?: string;
+  smtp_password?: string;
+  whatsapp_token?: string;
+};
+
 // ---- PPPoE / Broadband ----------------------------------------------------
 
 export interface PppoePlan {
@@ -751,6 +787,22 @@ export const api = {
     },
     deleteLogo: () =>
       request<{ logo: string }>('/operator/branding/logo/', { method: 'DELETE' }),
+  },
+
+  messaging: {
+    get: () => request<MessagingSettings>('/notifications/settings/'),
+    update: (data: MessagingSettingsUpdate) =>
+      request<MessagingSettings>('/notifications/settings/', {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      }),
+    /** Send a real message to yourself. Wrong credentials fail SILENTLY in production —
+     *  this is how the ISP finds out now instead of via an angry customer. */
+    test: (channel: 'sms' | 'email' | 'whatsapp', to: string) =>
+      request<{ detail: string }>('/notifications/settings/test/', {
+        method: 'POST',
+        body: JSON.stringify({ channel, to }),
+      }),
   },
 
   billing: {

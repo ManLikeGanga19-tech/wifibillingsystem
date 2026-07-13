@@ -10,6 +10,7 @@ import {
   TrendingUp,
 } from 'lucide-react';
 import { api, logout, type Me } from './api/client';
+import { useHashRoute } from './utils/useHashRoute';
 import { ToastHost } from './components/ui';
 import LoginView from './components/LoginView';
 import CommandCenter from './views/CommandCenter';
@@ -20,6 +21,11 @@ import SearchView from './views/SearchView';
 import TenantsView from './views/TenantsView';
 
 type Tab = 'command' | 'finance' | 'tenants' | 'ops' | 'governance' | 'search';
+
+/** The sections the URL may name; anything else falls back to the Command Center. */
+const KNOWN_TABS: ReadonlySet<Tab> = new Set<Tab>([
+  'command', 'finance', 'tenants', 'ops', 'governance', 'search',
+]);
 
 const ISP_CONSOLE_URL = 'http://localhost:4600';
 
@@ -50,7 +56,12 @@ export default function App() {
   // is a question only the SERVER can answer. We ask it — nothing is stored here.
   const [me, setMe] = useState<Me | null>(null);
   const [checking, setChecking] = useState(true);
-  const [tab, setTab] = useState<Tab>('command');
+
+  // The page you're on lives in the URL, so a refresh keeps you here instead of
+  // bouncing you back to the Command Center.
+  const { route, navigate } = useHashRoute('command');
+  const tab: Tab = KNOWN_TABS.has(route.section as Tab) ? (route.section as Tab) : 'command';
+  const setTab = useCallback((next: Tab) => navigate(next), [navigate]);
   const [openTenant, setOpenTenant] = useState<number | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 

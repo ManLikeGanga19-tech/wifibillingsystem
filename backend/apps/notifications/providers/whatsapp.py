@@ -3,6 +3,10 @@
 NOTE: business-initiated messages outside the 24h customer service window must
 use a pre-approved template. Free-text works only inside that window; expect
 error 131047 otherwise and prefer SMS for cold bulk sends.
+
+Credentials are passed in — there is no platform WhatsApp account (we hold no Meta
+business identity on an ISP's behalf), so in practice this only ever runs on an ISP's
+own credentials.
 """
 
 import httpx
@@ -12,14 +16,12 @@ from .base import MessageProvider, ProviderError, SendResult
 
 
 class WhatsAppCloud(MessageProvider):
-    def __init__(self):
-        if not (settings.WHATSAPP_TOKEN and settings.WHATSAPP_PHONE_NUMBER_ID):
-            raise ProviderError("WHATSAPP_TOKEN / WHATSAPP_PHONE_NUMBER_ID not configured")
-        self.url = (
-            f"{settings.WHATSAPP_API_BASE.rstrip('/')}/"
-            f"{settings.WHATSAPP_PHONE_NUMBER_ID}/messages"
-        )
-        self.token = settings.WHATSAPP_TOKEN
+    def __init__(self, phone_number_id: str, token: str, api_base: str = ""):
+        if not (token and phone_number_id):
+            raise ProviderError("WhatsApp token / phone number ID is not configured")
+        base = (api_base or settings.WHATSAPP_API_BASE).rstrip("/")
+        self.url = f"{base}/{phone_number_id}/messages"
+        self.token = token
 
     def send(self, message) -> SendResult:
         resp = httpx.post(

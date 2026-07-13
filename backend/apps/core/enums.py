@@ -13,6 +13,7 @@ schema's enum names derived from the real choices rather than duplicated by hand
 Imported lazily during schema generation, so importing models here is safe.
 """
 
+from apps.notifications.models import GATEWAY_MODE_CHOICES as _GATEWAY_MODE_CHOICES
 from apps.payments.models import Transaction
 
 from .models import Operator
@@ -22,3 +23,8 @@ OPERATOR_STATUS_CHOICES = Operator.Status.choices
 
 #: pending / success / failed / timeout / reconciled
 TRANSACTION_STATUS_CHOICES = Transaction.Status.choices
+
+#: platform / own — SMS and email share ONE gateway-mode choice set, so it needs one name
+#: in the schema. Without this, spectacular sees the same choices under two names
+#: (SmsModeEnum, EmailModeEnum) and warns.
+GATEWAY_MODE_CHOICES = _GATEWAY_MODE_CHOICES

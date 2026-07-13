@@ -1,17 +1,22 @@
-"""Africa's Talking SMS. Username 'sandbox' automatically targets their sandbox API."""
+"""Africa's Talking SMS. Username 'sandbox' automatically targets their sandbox API.
+
+Credentials are passed IN, never read from settings here: the same class serves the
+platform's account and an ISP's own account (see providers.resolve_provider). A provider
+that reached for global settings could only ever send as one sender.
+"""
 
 import httpx
-from django.conf import settings
 
 from .base import MessageProvider, ProviderError, SendResult
 
 
 class AfricasTalkingSMS(MessageProvider):
-    def __init__(self):
-        self.username = settings.AT_USERNAME
-        self.api_key = settings.AT_API_KEY
-        if not self.api_key:
-            raise ProviderError("AT_API_KEY is not configured")
+    def __init__(self, username: str, api_key: str, sender_id: str = ""):
+        if not api_key:
+            raise ProviderError("No Africa's Talking API key is configured")
+        self.username = username or "sandbox"
+        self.api_key = api_key
+        self.sender_id = sender_id
         host = (
             "https://api.sandbox.africastalking.com"
             if self.username == "sandbox"
@@ -21,8 +26,8 @@ class AfricasTalkingSMS(MessageProvider):
 
     def send(self, message) -> SendResult:
         data = {"username": self.username, "to": f"+{message.to_phone}", "message": message.body}
-        if settings.AT_SENDER_ID:
-            data["from"] = settings.AT_SENDER_ID
+        if self.sender_id:
+            data["from"] = self.sender_id
         resp = httpx.post(
             self.url,
             data=data,

@@ -15,7 +15,8 @@ def send_message(self, message_id: int):
     msg = Message.objects.get(pk=message_id)
     if msg.status == Message.Status.SENT:
         return
-    result = get_provider(msg.channel).send(msg)
+    # The operator decides whose gateway this leaves on — their own, or the platform's.
+    result = get_provider(msg.channel, msg.operator).send(msg)
     if result.ok:
         msg.status = Message.Status.SENT
         msg.provider_ref = result.provider_ref

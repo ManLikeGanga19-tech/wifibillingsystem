@@ -1,7 +1,7 @@
-import { useState } from 'react';
 import { Settings } from 'lucide-react';
 import { ViewHeader } from './ui';
 import BrandingPanel from './settings/BrandingPanel';
+import CommsPanel from './settings/CommsPanel';
 import ProfilePanel from './settings/ProfilePanel';
 import Placeholder from './settings/Placeholder';
 import SettlementSetup from './SettlementSetup';
@@ -79,8 +79,21 @@ const NAV: Group[] = [
   },
 ];
 
-export default function SettingsView({ onOpenWallet }: { onOpenWallet: () => void }) {
-  const [active, setActive] = useState<ItemId>('branding');
+const ITEM_IDS = new Set(NAV.flatMap((g) => g.items).map((i) => i.id));
+
+export default function SettingsView({
+  onOpenWallet,
+  section,
+  onSectionChange,
+}: {
+  onOpenWallet: () => void;
+  /** Which panel is open, from the URL (#/settings/branding) — so a refresh keeps you
+   *  on the section you were editing, and you can link somebody straight to it. */
+  section?: string;
+  onSectionChange: (id: string) => void;
+}) {
+  const active: ItemId = ITEM_IDS.has(section as ItemId) ? (section as ItemId) : 'branding';
+  const setActive = (id: ItemId) => onSectionChange(id);
   const current = NAV.flatMap((g) => g.items).find((i) => i.id === active)!;
 
   return (
@@ -88,8 +101,9 @@ export default function SettingsView({ onOpenWallet }: { onOpenWallet: () => voi
       <ViewHeader icon={<Settings className="h-4.5 w-4.5" />} title="Settings" subtitle="Personalise and configure your ISP." />
 
       <div className="grid gap-5 lg:grid-cols-[220px_1fr]">
-        {/* Inner sidebar */}
-        <nav className="lg:sticky lg:top-4 self-start">
+        {/* Inner sidebar — scrolls on its own (it's long), so the panel beside it stays
+            put instead of the whole page having to travel to reach the last item. */}
+        <nav className="self-start lg:sticky lg:top-4 lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto lg:pr-1">
           {/* Mobile: a select. Desktop: the full list. */}
           <select
             value={active}
@@ -162,15 +176,9 @@ export default function SettingsView({ onOpenWallet }: { onOpenWallet: () => voi
           {active === 'hotspot' && (
             <Placeholder title="Hotspot" blurb="Captive-portal instructions, voucher defaults and hotspot behaviour." />
           )}
-          {active === 'sms' && (
-            <Placeholder title="SMS gateway" blurb="Use the platform SMS out of the box, or bring your own Africa's Talking credentials and sender ID." />
-          )}
-          {active === 'email' && (
-            <Placeholder title="Email (SMTP)" blurb="Send receipts and reminders from your own address with your own SMTP server." />
-          )}
-          {active === 'whatsapp' && (
-            <Placeholder title="WhatsApp" blurb="Connect a WhatsApp gateway to message customers where they already are." />
-          )}
+          {active === 'sms' && <CommsPanel channel="sms" />}
+          {active === 'email' && <CommsPanel channel="email" />}
+          {active === 'whatsapp' && <CommsPanel channel="whatsapp" />}
           {active === 'templates' && (
             <Placeholder title="Message templates" blurb="Customise the wording of receipts, expiry warnings and reminders." />
           )}

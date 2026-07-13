@@ -28,6 +28,7 @@ import {
 import { BandwidthProfile, Subscriber, OutboundCampaign } from './types';
 import { api, ApiPlan, ApiTenant, logout, Me, NavCounts } from './api/client';
 import { planToProfile, profileToPlan, campaignToUi, subscriberToUi } from './api/mappers';
+import { useHashRoute } from './utils/useHashRoute';
 import { toast, ToastHost } from './components/ui';
 
 import LoginView from './components/LoginView';
@@ -78,6 +79,15 @@ type TabId =
   | 'pppoe_plans'
   | 'pppoe_invoices'
   | 'network';
+
+/** Every section the URL is allowed to name. Anything else in the hash is somebody
+ *  typing, or a stale link to a renamed page — fall back rather than render blank. */
+const KNOWN_TABS: ReadonlySet<TabId> = new Set<TabId>([
+  'dashboard', 'active_users', 'users', 'tickets', 'leads', 'packages', 'payments',
+  'vouchers', 'expenses', 'messages', 'emails', 'campaigns', 'mikrotik', 'equipment',
+  'settings', 'wallet', 'reports', 'pppoe_clients', 'pppoe_plans', 'pppoe_invoices',
+  'network',
+]);
 
 interface NavItem {
   id: TabId;
@@ -150,7 +160,15 @@ export default function App() {
   const [me, setMe] = useState<Me | null>(null);
   const [checking, setChecking] = useState(true);
   const [tenants, setTenants] = useState<ApiTenant[]>([]);
-  const [activeTab, setActiveTab] = useState<TabId>('dashboard');
+
+  // Which page you're on lives in the URL (#/payments, #/settings/branding), so a
+  // refresh keeps you here and Back/Forward work. An unknown or hand-typed section
+  // falls back to the dashboard rather than rendering nothing.
+  const { route, navigate } = useHashRoute('dashboard');
+  const activeTab: TabId = KNOWN_TABS.has(route.section as TabId)
+    ? (route.section as TabId)
+    : 'dashboard';
+  const setActiveTab = useCallback((tab: TabId) => navigate(tab), [navigate]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   // Ephemeral UI preference — deliberately NOT persisted (no browser storage).
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -563,7 +581,13 @@ export default function App() {
             )}
             {activeTab === 'mikrotik' && <RoutersView />}
             {activeTab === 'equipment' && <EquipmentView />}
-            {activeTab === 'settings' && <SettingsView onOpenWallet={() => setActiveTab('wallet')} />}
+            {activeTab === 'settings' && (
+              <SettingsView
+                onOpenWallet={() => setActiveTab('wallet')}
+                section={route.sub}
+                onSectionChange={(id) => navigate('settings', id)}
+              />
+            )}
             {activeTab === 'wallet' && <WalletView />}
             {activeTab === 'reports' && <ReportsView />}
             {activeTab === 'pppoe_clients' && <PppoeClientsView />}
