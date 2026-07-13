@@ -8,6 +8,9 @@
  * moment, and the gap between "what marketing promises" and "what has been shot" is
  * visible to whoever looks at the page instead of hiding in someone's head.
  *
+ * A slot may ask for a `frame: 'phone'` — a portrait phone recording shown inside a
+ * device bezel at its NATURAL aspect, so nothing is cropped off the bottom.
+ *
  * The existence check runs at BUILD time (Node, in this frontmatter). Nothing about
  * it reaches the browser.
  */
@@ -16,8 +19,6 @@ import path from 'node:path';
 import type { MediaSlot } from '../lib/media';
 
 interface Props {
-  /** NOT named `slot` — that is a reserved attribute in Astro (named slots), and it
-   *  silently collides with the component's own props. */
   media: MediaSlot;
   /** The hero shot should load eagerly; everything below the fold should not. */
   eager?: boolean;
@@ -33,67 +34,82 @@ const hasMedia = has(slot.file);
 const hasPoster = has(slot.poster);
 const src = `/media/${slot.file}`;
 const poster = slot.poster ? `/media/${slot.poster}` : undefined;
+const isPhone = slot.frame === 'phone';
 ---
 
-<figure class={`m-0 ${className}`}>
-  <div
-    class="relative border border-ink bg-card overflow-hidden"
-    style={`aspect-ratio: ${slot.aspect}`}
-  >
-    {
-      hasMedia && slot.kind === 'shot' && (
-        <img
-          src={src}
-          alt={slot.caption}
-          loading={eager ? 'eager' : 'lazy'}
-          decoding="async"
-          class="h-full w-full object-cover object-top"
-        />
-      )
-    }
-
-    {
-      hasMedia && slot.kind === 'clip' && (
-        // Muted + inline + loop: it behaves like a moving screenshot, so it may
-        // autoplay. `preload=metadata` keeps it off the critical path — this page
-        // gets opened on a phone, on mobile data, by someone deciding whether to
-        // trust us.
-        <video
-          src={src}
-          poster={hasPoster ? poster : undefined}
-          autoplay
-          muted
-          loop
-          playsinline
-          preload="metadata"
-          aria-label={slot.caption}
-          class="h-full w-full object-cover object-top"
-        />
-      )
-    }
-
-    {
-      !hasMedia && (
-        <div class="absolute inset-0 flex flex-col justify-center gap-2 p-5 sm:p-8">
-          {/* A hatched frame reads as "deliberately empty", where a grey box reads
-              as "broken". */}
-          <div
-            class="absolute inset-0 opacity-[0.06]"
-            style="background-image: repeating-linear-gradient(45deg, #141414 0, #141414 1px, transparent 0, transparent 10px)"
-          />
-          <p class="relative text-[10px] font-mono font-bold uppercase tracking-widest text-ink/50">
-            {slot.kind === 'clip' ? 'Screen recording' : 'Screenshot'} · awaiting capture
-          </p>
-          <p class="relative font-mono text-xs sm:text-sm font-bold">
-            public/media/{slot.file}
-          </p>
-          <p class="relative max-w-prose text-xs sm:text-sm leading-relaxed text-ink/70">
-            {slot.brief}
-          </p>
+{
+  isPhone && hasMedia && slot.kind === 'clip' ? (
+    /* Portrait phone recording in a device frame. The video keeps its natural aspect
+       (h-auto), so it is never cut off — the whole screen shows. */
+    <figure class={`m-0 ${className}`}>
+      <div class="mx-auto w-full max-w-[280px]">
+        <div class="rounded-[2.3rem] border-[6px] border-ink bg-ink p-1.5 shadow-[0_10px_40px_rgba(20,20,20,0.25)]">
+          <div class="relative overflow-hidden rounded-[1.7rem] bg-black">
+            <div class="absolute left-1/2 top-2 z-10 h-1.5 w-14 -translate-x-1/2 rounded-full bg-white/25" />
+            <video
+              src={src}
+              poster={hasPoster ? poster : undefined}
+              autoplay
+              muted
+              loop
+              playsinline
+              preload="metadata"
+              aria-label={slot.caption}
+              class="block h-auto w-full"
+            />
+          </div>
         </div>
-      )
-    }
-  </div>
+      </div>
+      <figcaption class="mt-3 text-center font-mono text-[11px] text-ink/60">{slot.caption}</figcaption>
+    </figure>
+  ) : (
+    <figure class={`m-0 ${className}`}>
+      <div
+        class="relative overflow-hidden border border-ink bg-card"
+        style={`aspect-ratio: ${slot.aspect}`}
+      >
+        {hasMedia && slot.kind === 'shot' && (
+          <img
+            src={src}
+            alt={slot.caption}
+            loading={eager ? 'eager' : 'lazy'}
+            decoding="async"
+            class="h-full w-full object-cover object-top"
+          />
+        )}
 
-  <figcaption class="mt-2 font-mono text-[11px] text-ink/60">{slot.caption}</figcaption>
-</figure>
+        {hasMedia && slot.kind === 'clip' && (
+          <video
+            src={src}
+            poster={hasPoster ? poster : undefined}
+            autoplay
+            muted
+            loop
+            playsinline
+            preload="metadata"
+            aria-label={slot.caption}
+            class="h-full w-full object-cover object-top"
+          />
+        )}
+
+        {!hasMedia && (
+          <div class="absolute inset-0 flex flex-col justify-center gap-2 p-5 sm:p-8">
+            <div
+              class="absolute inset-0 opacity-[0.06]"
+              style="background-image: repeating-linear-gradient(45deg, #141414 0, #141414 1px, transparent 0, transparent 10px)"
+            />
+            <p class="relative text-[10px] font-mono font-bold uppercase tracking-widest text-ink/50">
+              {slot.kind === 'clip' ? 'Screen recording' : 'Screenshot'} · awaiting capture
+            </p>
+            <p class="relative font-mono text-xs sm:text-sm font-bold">public/media/{slot.file}</p>
+            <p class="relative max-w-prose text-xs sm:text-sm leading-relaxed text-ink/70">
+              {slot.brief}
+            </p>
+          </div>
+        )}
+      </div>
+
+      <figcaption class="mt-2 font-mono text-[11px] text-ink/60">{slot.caption}</figcaption>
+    </figure>
+  )
+}

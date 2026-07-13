@@ -28,6 +28,9 @@ export interface MediaSlot {
   poster?: string;
   /** Intrinsic aspect ratio. Reserving it stops the page jumping when media loads. */
   aspect: '16/9' | '16/10' | '4/3' | '9/16';
+  /** 'phone' shows a portrait clip inside a device bezel at its natural aspect, so a
+   *  phone recording is never cropped. Omitted = the normal framed box. */
+  frame?: 'phone';
   /** Shown under the media, and read by screen readers as the alt text. */
   caption: string;
   /** What this shot has to prove. This is the brief, not a description. */
@@ -53,10 +56,10 @@ export const MEDIA: Record<string, MediaSlot> = {
     kind: 'clip',
     file: 'stk-push.mp4',
     // No poster: the video is portrait and the only screenshot we have is landscape,
-    // so the video's own first frame is the right still. (Add a portrait poster.png
-    // here later if you want one on slow connections.)
-    // A real phone recording — portrait, framed like the device a customer holds.
+    // so the video's own first frame is the right still.
+    // A real phone recording — shown in a phone frame at natural aspect, never cropped.
     aspect: '9/16',
+    frame: 'phone',
     caption: 'A customer buys a bundle by M-Pesa — no app, no signup.',
     brief:
       'Screen recording of the captive portal: pick a plan, pay by M-Pesa, get online.',
