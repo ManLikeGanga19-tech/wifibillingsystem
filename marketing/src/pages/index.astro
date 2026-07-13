@@ -162,8 +162,31 @@ const steps = [
         </p>
       </div>
 
-      <div class="mt-8">
-        <Media media={MEDIA.payments} />
+      <!-- The customer's phone (portrait video) beside what happens behind it. -->
+      <div class="mt-8 grid items-center gap-8 lg:grid-cols-[300px_1fr]">
+        <div class="mx-auto w-full max-w-[300px]">
+          <Media media={MEDIA.payments} eager />
+        </div>
+        <ol class="space-y-4">
+          {
+            [
+              ['Pick a bundle', 'They tap a plan on the captive portal — no app to install, no account to make.'],
+              ['Pay with M-Pesa', 'An STK prompt lands on their phone. They enter their PIN. That is the whole checkout.'],
+              ['Online in seconds', 'The router is provisioned automatically and they are browsing — day or night, nobody woken up.'],
+              ['Counted and banked', 'The money is attributed to you in the ledger, and the session ends by itself when the time is up.'],
+            ].map(([title, body], i) => (
+              <li class="flex gap-4">
+                <span class="grid h-8 w-8 shrink-0 place-items-center border border-ink bg-ink font-mono text-sm font-black text-paper">
+                  {i + 1}
+                </span>
+                <div>
+                  <h3 class="font-mono text-xs font-bold uppercase tracking-wide">{title}</h3>
+                  <p class="mt-1 text-sm leading-relaxed text-ink/70">{body}</p>
+                </div>
+              </li>
+            ))
+          }
+        </ol>
       </div>
 
       <div class="mt-10 grid gap-6 md:grid-cols-2">

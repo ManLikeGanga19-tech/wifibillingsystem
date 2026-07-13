@@ -50,13 +50,16 @@ export const MEDIA: Record<string, MediaSlot> = {
   },
   payments: {
     id: 'payments',
-    kind: 'shot',
-    file: 'stk-push.png',
-    aspect: '16/10',
+    kind: 'clip',
+    file: 'stk-push.mp4',
+    // No poster: the video is portrait and the only screenshot we have is landscape,
+    // so the video's own first frame is the right still. (Add a portrait poster.png
+    // here later if you want one on slow connections.)
+    // A real phone recording — portrait, framed like the device a customer holds.
+    aspect: '9/16',
     caption: 'A customer buys a bundle by M-Pesa — no app, no signup.',
     brief:
-      'The captive portal a WiFi customer sees: pick a plan, pay by M-Pesa. Swap for a ' +
-      'screen recording of the full pay→connected loop when you have one.',
+      'Screen recording of the captive portal: pick a plan, pay by M-Pesa, get online.',
   },
   wallet: {
     id: 'wallet',
