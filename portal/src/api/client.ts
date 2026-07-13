@@ -106,6 +106,22 @@ export interface DeviceStatus {
 
 /** The device's latest session, so a returning/expired customer lands on renewal
  *  instead of a cold plan list. Returns no phone (MAC is spoofable — see the view). */
+export interface Branding {
+  name_for_customers: string;
+  tagline: string;
+  logo: string;
+  primary_color: string;
+  accent_color: string;
+  support_phone: string;
+  support_email: string;
+}
+
+/** The ISP's brand for this router/subdomain — so the portal wears their name, logo and
+ *  colours, not the generic WIFI.OS. */
+export function getBranding(routerId?: number | null): Promise<Branding> {
+  return request(`/branding/${routerId ? `?router=${routerId}` : ''}`);
+}
+
 export function getDeviceStatus(mac: string, routerId?: number | null): Promise<DeviceStatus> {
   const q = new URLSearchParams({ mac });
   if (routerId) q.set('router', String(routerId));

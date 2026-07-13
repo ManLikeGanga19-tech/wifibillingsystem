@@ -470,6 +470,17 @@ export interface ApiTenant {
   staff_count: number;
 }
 
+export interface Branding {
+  display_name: string;
+  name_for_customers: string;
+  tagline: string;
+  logo: string;
+  primary_color: string;
+  accent_color: string;
+  support_phone: string;
+  support_email: string;
+}
+
 export interface OperatorSettings {
   name: string;
   slug: string;
@@ -717,6 +728,29 @@ export const api = {
     get: () => request<OperatorSettings>('/operator/settings/'),
     update: (data: Record<string, string>) =>
       request<OperatorSettings>('/operator/settings/', { method: 'PATCH', body: JSON.stringify(data) }),
+  },
+
+  branding: {
+    get: () => request<Branding>('/operator/branding/'),
+    update: (data: Partial<Branding>) =>
+      request<Branding>('/operator/branding/', { method: 'PATCH', body: JSON.stringify(data) }),
+    /** Multipart upload — the browser sets the boundary Content-Type, so we bypass the
+     *  JSON request helper but keep the cookie + CSRF token. */
+    uploadLogo: async (file: File): Promise<{ logo: string }> => {
+      const form = new FormData();
+      form.append('logo', file);
+      const resp = await fetch(`${BASE}/api/v1/operator/branding/logo/`, {
+        ...withCookies,
+        method: 'POST',
+        headers: { 'X-CSRFToken': readCsrfToken() },
+        body: form,
+      });
+      const body = await resp.json().catch(() => null);
+      if (!resp.ok) throw new ApiError(resp.status, body);
+      return body as { logo: string };
+    },
+    deleteLogo: () =>
+      request<{ logo: string }>('/operator/branding/logo/', { method: 'DELETE' }),
   },
 
   billing: {

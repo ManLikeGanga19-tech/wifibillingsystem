@@ -7,7 +7,9 @@ import {
   listPlans,
   redeemVoucher,
   retryProvision,
+  getBranding,
   getDeviceStatus,
+  type Branding,
   type PaymentStatus,
   type Plan,
   type SessionInfo,
@@ -38,6 +40,8 @@ export default function App() {
   const [plans, setPlans] = useState<Plan[] | null>(null);
   const [loadError, setLoadError] = useState('');
   const [tab, setTab] = useState<'mpesa' | 'voucher'>('mpesa');
+  // The ISP's brand — so the portal wears their name, logo and colours, not ours.
+  const [brand, setBrand] = useState<Branding | null>(null);
   // The renewal prompt: set when the customer's previous session has ended (their tab
   // timed out to zero, or the router redirected them back here after cutting them off).
   // It turns the cold plan list into "your <plan> ended — tap to get back online".
@@ -66,6 +70,14 @@ export default function App() {
   }, [captive.routerId]);
 
   useEffect(loadPlans, [loadPlans]);
+
+  // Load the ISP's branding once. Failure is fine — we just stay generic.
+  useEffect(() => {
+    getBranding(captive.routerId)
+      .then(setBrand)
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // On load, greet a RETURNING device. If the router redirected them back here after
   // their session ended, show a renewal prompt instead of a cold plan list. Only when
@@ -175,16 +187,28 @@ export default function App() {
     setStage({ kind: 'waiting', ...pending });
   };
 
+  const brandName = brand?.name_for_customers || 'WIFI.OS';
+  const brandTagline = brand?.tagline || 'Fast WiFi. Lipa na M-Pesa.';
+  const primary = brand?.primary_color || '#141414';
+
   return (
-    <div className="min-h-screen flex flex-col items-center px-4 py-6">
-      {/* Brand header */}
+    <div
+      className="min-h-screen flex flex-col items-center px-4 py-6"
+      // The ISP's accent themes the branded bits (see index.css --brand-accent usage).
+      style={{ ['--brand-accent' as string]: brand?.accent_color || '#228B22' }}
+    >
+      {/* Brand header — the ISP's logo/name, not ours */}
       <header className="w-full max-w-md flex items-center gap-2.5 mb-6">
-        <div className="w-9 h-9 bg-[#141414] flex items-center justify-center">
-          <Wifi className="h-5 w-5 text-[#E4E3E0]" />
+        <div className="w-9 h-9 flex items-center justify-center overflow-hidden" style={{ background: brand?.logo ? 'transparent' : primary }}>
+          {brand?.logo ? (
+            <img src={brand.logo} alt={brandName} className="max-h-9 max-w-9 object-contain" />
+          ) : (
+            <Wifi className="h-5 w-5 text-[#E4E3E0]" />
+          )}
         </div>
-        <div>
-          <h1 className="font-bold text-lg leading-none tracking-tight">WIFI.OS</h1>
-          <p className="text-xs text-[#141414]/60">Fast WiFi. Lipa na M-Pesa.</p>
+        <div className="min-w-0">
+          <h1 className="font-bold text-lg leading-none tracking-tight truncate" style={{ color: primary }}>{brandName}</h1>
+          <p className="text-xs text-[#141414]/60 truncate">{brandTagline}</p>
         </div>
       </header>
 
@@ -316,7 +340,11 @@ export default function App() {
       </main>
 
       <footer className="w-full max-w-md text-center text-xs text-[#141414]/40 mt-8">
-        Need help? Talk to the site attendant or call your provider.
+        {brand?.support_phone || brand?.support_email ? (
+          <>Need help? Call <b className="text-[#141414]/60">{brand.support_phone || brand.support_email}</b></>
+        ) : (
+          'Need help? Talk to the site attendant or call your provider.'
+        )}
       </footer>
     </div>
   );
@@ -405,7 +433,7 @@ function PlanList({
               {plan.shared_users && plan.shared_users > 1 ? ` • ${plan.shared_users} devices` : ''}
             </p>
           </div>
-          <span className="font-black text-lg text-[#228B22] whitespace-nowrap">{formatKsh(plan.price)}</span>
+          <span className="font-black text-lg whitespace-nowrap" style={{ color: 'var(--brand-accent, #228B22)' }}>{formatKsh(plan.price)}</span>
         </button>
       ))}
       {plans.length === 0 && (
@@ -458,7 +486,7 @@ function PhoneEntry({
           <p className="font-bold">{plan.name}</p>
           <p className="text-xs text-[#141414]/60">{formatDuration(plan.duration)} • {formatSpeed(plan.download_kbps)}</p>
         </div>
-        <span className="font-black text-xl text-[#228B22]">{formatKsh(plan.price)}</span>
+        <span className="font-black text-xl" style={{ color: 'var(--brand-accent, #228B22)' }}>{formatKsh(plan.price)}</span>
       </div>
       <label className="text-sm font-bold block mb-1.5">M-Pesa phone number</label>
       <input
@@ -475,6 +503,7 @@ function PhoneEntry({
       <button
         onClick={submit}
         disabled={!valid || busy}
+        style={{ backgroundColor: !valid || busy ? undefined : 'var(--brand-accent, #228B22)' }}
         className="mt-4 w-full bg-[#228B22] disabled:bg-[#141414]/20 text-white font-bold py-4 text-base flex items-center justify-center gap-2 active:opacity-85 transition"
       >
         {busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <Smartphone className="h-5 w-5" />}

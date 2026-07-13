@@ -8,7 +8,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
     host: true,
-    allowedHosts: true, // dev server: allow the docker service hostnames
+    allowedHosts: true as const, // dev server: allow the docker service hostnames
     proxy: { '/api': API },
   },
 });

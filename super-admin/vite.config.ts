@@ -11,7 +11,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
     host: true, // reachable from outside the container when dockerised
-    allowedHosts: true, // dev server: allow the docker service hostnames
+    allowedHosts: true as const, // dev server: allow the docker service hostnames
     proxy: { '/api': API },
   },
 });

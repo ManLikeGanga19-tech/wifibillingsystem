@@ -1,83 +1,196 @@
-import { useEffect, useState, type FormEvent } from 'react';
-import { Settings, Save, Loader2, Wallet } from 'lucide-react';
-import { api, OperatorSettings } from '../api/client';
-import { Btn, Field, inputCls, Panel, toast, ViewHeader } from './ui';
+import { useState } from 'react';
+import { Settings } from 'lucide-react';
+import { ViewHeader } from './ui';
+import BrandingPanel from './settings/BrandingPanel';
+import ProfilePanel from './settings/ProfilePanel';
+import Placeholder from './settings/Placeholder';
+import SettlementSetup from './SettlementSetup';
+
+/**
+ * The settings SHELL. One frame, an inner sidebar of every setting an ISP has, and a
+ * panel per item. We ship the whole sidebar at once and build the panels step by step —
+ * so the structure is stable and a not-yet-built section says so honestly instead of
+ * hiding.
+ */
+
+type ItemId =
+  | 'branding' | 'domain'
+  | 'pppoe' | 'hotspot'
+  | 'payments' | 'sms' | 'email' | 'whatsapp' | 'templates' | 'loyalty'
+  | 'alerts'
+  | 'ai' | 'developer'
+  | 'profile' | 'security';
+
+interface Item {
+  id: ItemId;
+  label: string;
+  sub: string;
+  /** A dimmed sub-heading above this item (e.g. "Communications"). */
+  under?: string;
+}
+interface Group {
+  title: string;
+  items: Item[];
+}
+
+const NAV: Group[] = [
+  {
+    title: 'General',
+    items: [
+      { id: 'branding', label: 'Branding', sub: 'Identity, logo, colours' },
+      { id: 'domain', label: 'Domain', sub: 'Tenant URL & DNS' },
+    ],
+  },
+  {
+    title: 'Network',
+    items: [
+      { id: 'pppoe', label: 'PPPoE', sub: 'Fixed-line subscribers, FUP, reminders' },
+      { id: 'hotspot', label: 'Hotspot', sub: 'Captive portal, vouchers, instructions' },
+    ],
+  },
+  {
+    title: 'Billing & messaging',
+    items: [
+      { id: 'payments', label: 'Payments', sub: 'Payout account & credentials' },
+      { id: 'sms', label: 'SMS', sub: 'SMS gateway', under: 'Communications' },
+      { id: 'email', label: 'Email', sub: 'SMTP gateway' },
+      { id: 'whatsapp', label: 'WhatsApp', sub: 'WhatsApp gateway' },
+      { id: 'templates', label: 'Message templates', sub: 'Receipts, expiry & reminders' },
+      { id: 'loyalty', label: 'Loyalty points', sub: 'Reward subscribers for payments' },
+    ],
+  },
+  {
+    title: 'Notifications',
+    items: [{ id: 'alerts', label: 'Operator alerts', sub: 'Router status & sales digests' }],
+  },
+  {
+    title: 'Integrations',
+    items: [
+      { id: 'ai', label: 'AI Assistant', sub: 'Provider & API key' },
+      { id: 'developer', label: 'Developer', sub: 'API tokens & webhooks' },
+    ],
+  },
+  {
+    title: 'Account',
+    items: [
+      { id: 'profile', label: 'Profile', sub: 'Your name & contact' },
+      { id: 'security', label: 'Password & 2FA', sub: 'Sign-in security' },
+    ],
+  },
+];
 
 export default function SettingsView({ onOpenWallet }: { onOpenWallet: () => void }) {
-  const [settings, setSettings] = useState<OperatorSettings | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [biz, setBiz] = useState({ name: '', owner_name: '', contact_phone: '', contact_email: '' });
-
-  useEffect(() => {
-    api.operatorSettings.get().then((s) => {
-      setSettings(s);
-      setBiz({
-        name: s.name,
-        owner_name: s.owner_name,
-        contact_phone: s.contact_phone,
-        contact_email: s.contact_email,
-      });
-    }).catch(() => toast('error', 'Could not load settings.'));
-  }, []);
-
-  const saveBiz = async (e: FormEvent) => {
-    e.preventDefault();
-    setBusy(true);
-    try {
-      setSettings(await api.operatorSettings.update(biz));
-      toast('success', 'Business details saved.');
-    } catch {
-      toast('error', 'Failed to save.');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  if (!settings) {
-    return (
-      <div className="flex justify-center py-24">
-        <Loader2 className="h-8 w-8 animate-spin text-[#141414]/40" />
-      </div>
-    );
-  }
+  const [active, setActive] = useState<ItemId>('branding');
+  const current = NAV.flatMap((g) => g.items).find((i) => i.id === active)!;
 
   return (
     <div className="space-y-5 text-[#141414]">
-      <ViewHeader
-        icon={<Settings className="h-4.5 w-4.5" />}
-        title="Business Settings"
-        subtitle={`Console address: ${settings.slug}.wifios.co.ke`}
-      />
+      <ViewHeader icon={<Settings className="h-4.5 w-4.5" />} title="Settings" subtitle="Personalise and configure your ISP." />
 
-      <Panel title="Business details">
-        <form onSubmit={saveBiz} className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
-          <Field label="Business name">
-            <input required value={biz.name} onChange={(e) => setBiz({ ...biz, name: e.target.value })} className={inputCls} />
-          </Field>
-          <Field label="Owner">
-            <input value={biz.owner_name} onChange={(e) => setBiz({ ...biz, owner_name: e.target.value })} className={inputCls} />
-          </Field>
-          <Field label="Contact phone">
-            <input value={biz.contact_phone} onChange={(e) => setBiz({ ...biz, contact_phone: e.target.value })} className={inputCls} />
-          </Field>
-          <Field label="Contact email">
-            <input type="email" value={biz.contact_email} onChange={(e) => setBiz({ ...biz, contact_email: e.target.value })} className={inputCls} />
-          </Field>
-          <Btn type="submit" disabled={busy}><Save className="h-3.5 w-3.5" /> Save</Btn>
-        </form>
-      </Panel>
+      <div className="grid gap-5 lg:grid-cols-[220px_1fr]">
+        {/* Inner sidebar */}
+        <nav className="lg:sticky lg:top-4 self-start">
+          {/* Mobile: a select. Desktop: the full list. */}
+          <select
+            value={active}
+            onChange={(e) => setActive(e.target.value as ItemId)}
+            className="mb-4 w-full border border-[#141414] bg-white p-2.5 font-mono text-xs lg:hidden"
+          >
+            {NAV.map((g) => (
+              <optgroup key={g.title} label={g.title}>
+                {g.items.map((i) => (
+                  <option key={i.id} value={i.id}>{i.label}</option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
 
-      <Panel title="How you get paid">
-        <p className="text-xs font-mono text-[#141414]/70 leading-relaxed mb-3">
-          Customer payments are collected securely via <b>Danamo Tech Ltd</b> — you don't
-          need your own paybill or any Safaricom paperwork. Every sale is credited to your
-          wallet with the platform commission ({Number(settings.commission_rate)}%) already
-          deducted, and you withdraw to M-Pesa whenever you like.
-        </p>
-        <Btn variant="outline" onClick={onOpenWallet}>
-          <Wallet className="h-3.5 w-3.5" /> Open my wallet
-        </Btn>
-      </Panel>
+          <div className="hidden lg:block">
+            {NAV.map((g) => (
+              <div key={g.title} className="mb-4">
+                <p className="px-2 pb-1.5 font-mono text-[10px] font-bold uppercase tracking-widest text-[#141414]/40">
+                  {g.title}
+                </p>
+                {g.items.map((i) => (
+                  <div key={i.id}>
+                    {i.under && (
+                      <p className="px-2 pt-2 pb-1 font-mono text-[9px] uppercase tracking-widest text-[#141414]/30">
+                        {i.under}
+                      </p>
+                    )}
+                    <button
+                      onClick={() => setActive(i.id)}
+                      className={`w-full border-l-2 px-2.5 py-1.5 text-left transition ${
+                        active === i.id
+                          ? 'border-[#228B22] bg-[#141414] text-[#E4E3E0]'
+                          : 'border-transparent hover:bg-[#f0efec]'
+                      }`}
+                    >
+                      <span className="block font-mono text-[12px] font-bold">{i.label}</span>
+                      <span className={`block text-[10px] ${active === i.id ? 'text-[#E4E3E0]/60' : 'text-[#141414]/50'}`}>
+                        {i.sub}
+                      </span>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        </nav>
+
+        {/* Panel */}
+        <div className="min-w-0">
+          <div className="mb-4 border-b border-[#141414]/15 pb-3">
+            <h2 className="font-mono text-sm font-bold uppercase">{current.label}</h2>
+            <p className="text-xs text-[#141414]/50">{current.sub}</p>
+          </div>
+
+          {active === 'branding' && <BrandingPanel />}
+          {active === 'payments' && (
+            <div className="border border-[#141414] bg-white p-5">
+              <SettlementSetup onWentLive={() => {}} />
+            </div>
+          )}
+          {active === 'profile' && <ProfilePanel onOpenWallet={onOpenWallet} />}
+
+          {active === 'domain' && (
+            <Placeholder title="Domain" blurb="Your tenant URL and, later, custom domains with DNS setup." />
+          )}
+          {active === 'pppoe' && (
+            <Placeholder title="PPPoE" blurb="Fair-use policy, suspension rules and payment reminders for fixed-line subscribers." />
+          )}
+          {active === 'hotspot' && (
+            <Placeholder title="Hotspot" blurb="Captive-portal instructions, voucher defaults and hotspot behaviour." />
+          )}
+          {active === 'sms' && (
+            <Placeholder title="SMS gateway" blurb="Use the platform SMS out of the box, or bring your own Africa's Talking credentials and sender ID." />
+          )}
+          {active === 'email' && (
+            <Placeholder title="Email (SMTP)" blurb="Send receipts and reminders from your own address with your own SMTP server." />
+          )}
+          {active === 'whatsapp' && (
+            <Placeholder title="WhatsApp" blurb="Connect a WhatsApp gateway to message customers where they already are." />
+          )}
+          {active === 'templates' && (
+            <Placeholder title="Message templates" blurb="Customise the wording of receipts, expiry warnings and reminders." />
+          )}
+          {active === 'loyalty' && (
+            <Placeholder title="Loyalty points" blurb="Reward subscribers for paying — points they can redeem against WiFi." />
+          )}
+          {active === 'alerts' && (
+            <Placeholder title="Operator alerts" blurb="Get told when a router goes down, and a daily sales digest." />
+          )}
+          {active === 'ai' && (
+            <Placeholder title="AI Assistant" blurb="Plug in an AI provider and API key to help you run support and analytics." />
+          )}
+          {active === 'developer' && (
+            <Placeholder title="Developer" blurb="API tokens and webhooks to integrate WIFI.OS with your own tools." />
+          )}
+          {active === 'security' && (
+            <Placeholder title="Password & 2FA" blurb="Change your password and manage the authenticator that protects your money. (2FA already guards withdrawals today.)" />
+          )}
+        </div>
+      </div>
     </div>
   );
 }
