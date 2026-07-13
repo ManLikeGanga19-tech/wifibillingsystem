@@ -1,0 +1,220 @@
+---
+import Media from '../components/Media.astro';
+import Base from '../layouts/Base.astro';
+import { MEDIA } from '../lib/media';
+
+/**
+ * Every capability the system actually has, grouped the way an ISP thinks about their
+ * business: selling WiFi, running the network, getting paid, keeping it safe. Honest —
+ * nothing here is a roadmap item; it's all built. Written to survive an operator asking
+ * "but does it do X?" — the answer is on this page.
+ */
+
+interface Feature {
+  title: string;
+  body: string;
+}
+interface Group {
+  eyebrow: string;
+  heading: string;
+  intro: string;
+  features: Feature[];
+}
+
+const groups: Group[] = [
+  {
+    eyebrow: 'Hotspot',
+    heading: 'Sell WiFi by the hour, the day, the week',
+    intro: 'Walk-in customers pay with M-Pesa and are online in seconds — day or night, nobody woken up.',
+    features: [
+      { title: 'M-Pesa STK Push', body: 'The customer picks a plan, an M-Pesa prompt lands on their phone, they enter their PIN. No app, no account, no cash to count.' },
+      { title: 'Instant provisioning', body: 'The moment payment lands, the router is told and the customer is connected automatically. No staff, no vouchers to hand out.' },
+      { title: 'Vouchers too', body: 'Generate and print voucher batches for resellers or cash customers. Single-use, unambiguous codes — no confusing 0/O or 1/I.' },
+      { title: 'Auto-renew on expiry', body: 'When their time runs out they are sent back to the payment screen to buy again — instead of silently dropping offline.' },
+      { title: 'Data & speed caps', body: 'Each plan enforces its own speed and data limit on the router itself, per user — so a "1GB" plan really is 1GB.' },
+      { title: 'Never a lost payment', body: 'If a customer pays but does not connect — a lost callback, a router blink — they are reconnected automatically, or with one click, keeping the full time they paid for.' },
+    ],
+  },
+  {
+    eyebrow: 'Broadband',
+    heading: 'PPPoE billing on autopilot',
+    intro: 'Monthly home and business clients invoice themselves, pay by paybill, and are suspended and restored without you lifting a finger.',
+    features: [
+      { title: 'Anniversary billing', body: 'Every client is invoiced on their own join date, not one big run at month-end. Predictable, and it spreads your support load.' },
+      { title: 'Pay by account number', body: 'Each client gets a globally-unique paybill account number, so a payment routes to exactly the right client and ISP — no mistakes.' },
+      { title: 'Auto suspend & restore', body: 'Overdue clients are moved to a walled garden that nags them to pay; paying restores them instantly. No midnight phone calls.' },
+      { title: 'Mistyped payments, resolved', body: 'A customer who fat-fingers their account number lands in a queue with a smart suggestion of who they are — one click reunites the money with them.' },
+      { title: 'Full client register', body: 'Names, plans, account numbers, balances and payment history in one place — the book of who owes what, always current.' },
+    ],
+  },
+  {
+    eyebrow: 'Money',
+    heading: 'Every shilling attributed — and yours to withdraw',
+    intro: 'Customers pay one trusted paybill; the system splits every payment to the right ISP in a ledger you can see, and settles to you on demand.',
+    features: [
+      { title: 'A ledger, not a guess', body: 'Every payment is matched to a client, a plan and a router the instant it arrives. You always know who has paid.' },
+      { title: 'Withdraw on demand', body: 'Move your balance to your own paybill or bank whenever you want. We show our commission as a visible line, never a silent deduction.' },
+      { title: 'We absorb the M-Pesa fees', body: 'Transaction charges come out of our margin, not your ledger. The rate you were quoted is the rate you pay.' },
+      { title: 'Reports & exports', body: 'Revenue by period, by plan, by source — plus CSV exports of every payment to reconcile against your M-Pesa statement.' },
+      { title: 'Nobody loses a shilling', body: 'Money paid while an ISP is still being set up is held safely and released the moment they go live — never lost, never refused.' },
+    ],
+  },
+  {
+    eyebrow: 'Network',
+    heading: 'Your MikroTiks, controlled',
+    intro: 'Enrol a router by pasting one script. From then on the system provisions users, enforces plans, and keeps the router honest.',
+    features: [
+      { title: 'One-paste enrolment', body: 'Add a RouterOS v7 router with a single script. It appears in your console with its model, version and health.' },
+      { title: 'Works when we can not', body: 'Time and data limits are set on the router itself, so a customer who paid stays online — and one who did not stays off — even if our servers are unreachable.' },
+      { title: 'Live health monitoring', body: 'See which routers are online, their uptime and load, and get told when one goes dark.' },
+      { title: 'Many sites, one console', body: 'Run every tower and site from one dashboard, with each session provisioned onto the right router automatically.' },
+    ],
+  },
+  {
+    eyebrow: 'Reach',
+    heading: 'Talk to your customers',
+    intro: 'The messages that turn a hotspot from something people re-buy when they remember into something that reminds them.',
+    features: [
+      { title: 'Payment receipts by SMS', body: '"You are online until 4pm." The text that confirms their money worked, and tells them when it runs out so they can plan.' },
+      { title: 'Renewal nudges', body: 'A few minutes before their time or data runs out, a text prompts them to top up — instead of just disconnecting.' },
+      { title: 'Marketing campaigns', body: 'Blast an offer to all, active, or lapsed customers over SMS, WhatsApp or email — from the same console.' },
+    ],
+  },
+  {
+    eyebrow: 'Trust',
+    heading: 'Built to be safe with money',
+    intro: 'This system holds customers’ payments, so it is engineered for that from the ground up — not as an afterthought.',
+    features: [
+      { title: 'Two-factor on your money', body: 'Withdrawing and changing where you get paid need a code from your authenticator app — so someone in your console can not empty your wallet.' },
+      { title: 'One ISP can never see another', body: 'Every ISP’s data is walled off from every other’s, fail-closed: if the system can not be sure whose data it is, it shows nothing.' },
+      { title: 'No passwords in your browser', body: 'Your session lives in a cookie your browser will not hand to scripts — so a bad web page can not steal it, and you never clear your cache to fix a glitch.' },
+      { title: 'Everything important is logged', body: 'Who changed a payout account, who reset a device, who logged in — an audit trail for when a payment is disputed.' },
+      { title: 'Secrets encrypted at rest', body: 'Router passwords and authenticator seeds are encrypted in the database — a leaked backup hands out nothing usable.' },
+    ],
+  },
+  {
+    eyebrow: 'Platform',
+    heading: 'Your own branded WISP, live in minutes',
+    intro: 'Sign up, add your paybill, and you are trading — on your own address, with no sales call.',
+    features: [
+      { title: 'Your own subdomain', body: 'yourname.wifios.co.ke — your console and your customers’ captive portal, on your own address.' },
+      { title: 'Self-service signup', body: 'Five short steps to a live account. First month free, no card, and you can build everything before you take a shilling.' },
+      { title: 'Run the whole business', body: 'Tickets, leads, expenses, equipment and a live dashboard of revenue, sessions and network health — all in one place.' },
+    ],
+  },
+];
+---
+
+<Base
+  title="Features — WIFI.OS"
+  description="Everything WIFI.OS does for a Kenyan ISP: hotspot and PPPoE billing, M-Pesa payments, MikroTik control, SMS, reports, and bank-grade security."
+>
+  <!-- HERO -->
+  <section class="border-b border-ink">
+    <div class="mx-auto max-w-6xl px-4 py-12 sm:px-6 sm:py-16">
+      <p class="font-mono text-[10px] font-bold uppercase tracking-widest text-ink/50">Features</p>
+      <h1 class="mt-2 max-w-3xl font-serif text-4xl leading-tight font-bold sm:text-5xl">
+        Everything a Kenyan ISP needs — in one system.
+      </h1>
+      <p class="mt-4 max-w-2xl text-base leading-relaxed text-ink/75">
+        Hotspot and broadband billing, M-Pesa collection, MikroTik control, customer SMS,
+        reports, and the security to be trusted with the money. Not a roadmap — this is
+        what it does today.
+      </p>
+      <div class="mt-7 flex flex-wrap gap-3">
+        <a
+          href="/signup"
+          class="inline-flex items-center gap-2 border border-money bg-money px-5 py-3 font-mono text-xs font-bold uppercase text-white transition hover:opacity-85"
+        >
+          Start free
+        </a>
+        <a
+          href="/pricing"
+          class="inline-flex items-center gap-2 border border-ink bg-card px-5 py-3 font-mono text-xs font-bold uppercase transition hover:bg-hover"
+        >
+          See pricing
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ONE-LINE CONTENTS -->
+  <section class="border-b border-ink bg-card">
+    <div class="mx-auto flex max-w-6xl flex-wrap gap-x-6 gap-y-2 px-4 py-4 sm:px-6">
+      {
+        groups.map((g) => (
+          <a
+            href={`#${g.eyebrow.toLowerCase()}`}
+            class="font-mono text-[11px] font-bold uppercase tracking-wide text-ink/60 transition hover:text-ink"
+          >
+            {g.eyebrow}
+          </a>
+        ))
+      }
+    </div>
+  </section>
+
+  <!-- GROUPS -->
+  {
+    groups.map((g, i) => (
+      <section id={g.eyebrow.toLowerCase()} class={`border-b border-ink ${i % 2 ? 'bg-card' : ''}`}>
+        <div class="mx-auto max-w-6xl px-4 py-14 sm:px-6">
+          <div class="max-w-2xl">
+            <p class="font-mono text-[10px] font-bold uppercase tracking-widest text-money">
+              {g.eyebrow}
+            </p>
+            <h2 class="mt-2 font-serif text-3xl font-bold sm:text-4xl">{g.heading}</h2>
+            <p class="mt-3 text-sm leading-relaxed text-ink/70">{g.intro}</p>
+          </div>
+
+          <div class="mt-8 grid gap-px border border-ink bg-ink/15 sm:grid-cols-2 lg:grid-cols-3">
+            {g.features.map((f) => (
+              <div class="bg-paper p-5">
+                <h3 class="flex items-start gap-2 font-mono text-xs font-bold uppercase tracking-wide">
+                  <span class="mt-1 h-1.5 w-1.5 shrink-0 bg-money" />
+                  {f.title}
+                </h3>
+                <p class="mt-2 text-sm leading-relaxed text-ink/70">{f.body}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+    ))
+  }
+
+  <!-- A LOOK AT IT -->
+  <section class="border-b border-ink">
+    <div class="mx-auto max-w-6xl px-4 py-14 sm:px-6">
+      <h2 class="font-serif text-3xl font-bold sm:text-4xl">A look at it</h2>
+      <p class="mt-2 max-w-2xl text-sm leading-relaxed text-ink/70">
+        The real console and the real captive portal — not mockups.
+      </p>
+      <div class="mt-8 grid gap-6 md:grid-cols-2">
+        <Media media={MEDIA.hero} />
+        <Media media={MEDIA.wallet} />
+        <Media media={MEDIA.pppoe} />
+        <Media media={MEDIA.routers} />
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section>
+    <div class="mx-auto max-w-6xl px-4 py-16 text-center sm:px-6">
+      <h2 class="font-serif text-3xl font-bold sm:text-4xl lg:text-5xl">
+        All of it, from month one.
+      </h2>
+      <p class="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-ink/70">
+        Your first month is free, and you can set everything up before you take a single
+        payment.
+      </p>
+      <a
+        href="/signup"
+        class="mt-7 inline-flex items-center gap-2 border border-money bg-money px-6 py-3.5 font-mono text-xs font-bold uppercase text-white transition hover:opacity-85"
+      >
+        Create your ISP account
+      </a>
+    </div>
+  </section>
+</Base>

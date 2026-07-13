@@ -21,7 +21,10 @@ export default defineConfig({
   vite: {
     plugins: [tailwind()],
     server: {
-      allowedHosts: true, // dev server: allow the docker service hostname (marketing)
+      // Dev server only: allow the compose service hostname so the site is reachable at
+      // http://marketing:4900 on the docker network. Astro's bundled Vite wants an
+      // explicit list here (it ignores `true`).
+      allowedHosts: ['marketing', 'localhost', '127.0.0.1'],
       proxy: {
         '/api': {
           target: process.env.API_ORIGIN ?? 'http://localhost:8000',
