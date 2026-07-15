@@ -53,6 +53,19 @@ def initiate_stk_push(*, phone: str, plan, mac: str = "", router=None) -> Transa
             "operator, or try again shortly."
         )
 
+    # BILLING GATE. An ISP who owes us past their limit cannot take NEW money — this is
+    # what stops their debt to us growing while they ignore the invoice. It never touches
+    # a customer who ALREADY paid: their session runs to expiry regardless. The customer
+    # sees a neutral "settling up" message, not the ISP's billing troubles.
+    from apps.billing.enforcement import can_sell
+
+    if not can_sell(operator):
+        logger.warning("STK push refused for %s: operator %s is restricted", phone, operator.slug)
+        raise ProvisioningUnavailable(
+            "This hotspot is briefly unavailable while the operator settles their account. "
+            "Please try again shortly."
+        )
+
     # WHOSE gateway takes this money. Stamped on the transaction at birth, not looked up
     # later: an ISP who switches gateway tomorrow must not have today's in-flight payments
     # verified against the wrong account, and a sale must stay settled the way it was

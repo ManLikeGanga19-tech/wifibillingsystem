@@ -41,13 +41,18 @@ class VoucherViewSet(TenantReadOnlyViewSet):
             return Response(
                 {"plan_id": "Unknown or inactive plan"}, status=status.HTTP_400_BAD_REQUEST
             )
-        created = generate_batch(
-            operator=operator,
-            plan=plan,
-            count=serializer.validated_data["count"],
-            prefix=serializer.validated_data["prefix"],
-            created_by=request.user,
-        )
+        from apps.vouchers.services import VoucherError
+
+        try:
+            created = generate_batch(
+                operator=operator,
+                plan=plan,
+                count=serializer.validated_data["count"],
+                prefix=serializer.validated_data["prefix"],
+                created_by=request.user,
+            )
+        except VoucherError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_402_PAYMENT_REQUIRED)
         return Response(
             VoucherSerializer(created, many=True).data, status=status.HTTP_201_CREATED
         )

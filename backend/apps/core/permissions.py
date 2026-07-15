@@ -103,6 +103,38 @@ class ReadOnlyForSupport(BasePermission):
         return not user.is_read_only
 
 
+class NotBillingLocked(BasePermission):
+    """PAST-DUE LOCKOUT: read-only + pay.
+
+    When an ISP owes us past their lock threshold (billing.enforcement.is_locked), the
+    owner's console drops to read-only — they can still SEE everything and, crucially, still
+    PAY us (the top-up/settlement views are separate APIViews that do not carry this
+    permission, so they stay open — there must never be a catch-22 where the one screen that
+    clears the debt is itself locked).
+
+    Distinct from TenantIsOperational (which is SUSPENDED — an AML/TOS shutdown that hides
+    the console entirely). Past-due is a money state, not a trust state.
+    """
+
+    message = (
+        "Your account is past due. You can still view everything and pay — settle your "
+        "balance in Settings > Payments to restore full access."
+    )
+
+    def has_permission(self, request, view):
+        if request.method in SAFE_METHODS:
+            return True  # reading is always allowed
+        user = request.user
+        if user and user.is_authenticated and user.is_platform_staff:
+            return True  # platform staff can still act on a locked tenant
+        operator = acting_tenant(request)
+        if operator is None:
+            return True  # RequireTenant reports this case
+        from apps.billing.enforcement import is_locked
+
+        return not is_locked(operator)
+
+
 class CanManageMoney(BasePermission):
     """Withdrawals and payout destinations: the ISP OWNER, acting as themselves."""
 

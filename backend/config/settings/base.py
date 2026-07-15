@@ -186,6 +186,12 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.notifications.tasks.warn_low_platform_balance",
         "schedule": crontab(minute=0),  # hourly; the task itself warns once per fall
     },
+    # Tell an ISP they are past due before new sales stop. Restriction/lockout themselves
+    # are DERIVED (enforced live on every request), so this task only sends the heads-up.
+    "warn-past-due-operators": {
+        "task": "apps.billing.tasks.warn_past_due_operators",
+        "schedule": crontab(minute=5),  # hourly; warns once per fall
+    },
     "charge-monthly-base-fees": {
         "task": "apps.billing.tasks.charge_monthly_base_fees",
         "schedule": crontab(minute=30, hour=0, day_of_month=1),

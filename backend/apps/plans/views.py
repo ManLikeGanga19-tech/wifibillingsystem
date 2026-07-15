@@ -1,7 +1,12 @@
 from rest_framework import viewsets
 from rest_framework.permissions import AllowAny, IsAdminUser
 
-from apps.core.permissions import ReadOnlyForSupport, RequireTenant, TenantIsOperational
+from apps.core.permissions import (
+    NotBillingLocked,
+    ReadOnlyForSupport,
+    RequireTenant,
+    TenantIsOperational,
+)
 from apps.core.tenancy import acting_tenant
 
 from .models import Plan
@@ -17,7 +22,13 @@ class PlanViewSet(viewsets.ModelViewSet):
     def get_permissions(self):
         if self.action in ("list", "retrieve"):
             return [AllowAny()]
-        return [IsAdminUser(), RequireTenant(), TenantIsOperational(), ReadOnlyForSupport()]
+        # NotBillingLocked: a past-due ISP cannot add new plans (that is "load"), but can
+        # still read them. This viewset is a plain ModelViewSet (dual public/staff), so it
+        # does not inherit the mixin's lock — it is added here explicitly.
+        return [
+            IsAdminUser(), RequireTenant(), TenantIsOperational(),
+            ReadOnlyForSupport(), NotBillingLocked(),
+        ]
 
     def _portal_operator(self):
         """Unauthenticated portal traffic: tenant from subdomain, else ?router=.

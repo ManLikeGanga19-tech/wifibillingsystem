@@ -43,6 +43,17 @@ class Operator(TimeStampedModel):
     # ISP who cannot take money while they wait is an ISP who signs up with somebody else.
     payment_gateway = models.CharField(max_length=20, default="wifios")
 
+    # How much this ISP may OWE us before the auto-suspension ladder bites. NULL = use the
+    # scaling formula (billing.enforcement.credit_limit); a value overrides it per tenant,
+    # and 0 means "never enforce this tenant". The ladder LEVEL is derived, never stored —
+    # see billing.enforcement — so paying always lifts restrictions on the next read.
+    credit_limit_override = models.DecimalField(
+        max_digits=12, decimal_places=2, null=True, blank=True
+    )
+    # When we last texted them "you owe us". Warn once per fall, cleared when they recover —
+    # same discipline as the low-SMS-balance alert.
+    billing_warned_at = models.DateTimeField(null=True, blank=True)
+
     # The secret in this ISP's payment webhook URL. It NAMES the operator (so an incoming
     # callback is attributed without trusting anything in the body) and AUTHENTICATES it
     # (so a random POST is a 404, not a free WiFi session). Per-tenant, because each ISP

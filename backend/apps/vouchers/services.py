@@ -22,6 +22,17 @@ def _generate_code(prefix: str = "") -> str:
 
 
 def generate_batch(*, operator, plan, count: int, prefix: str = "", created_by=None):
+    # A restricted ISP cannot mint new vouchers — a voucher is prepaid inventory they would
+    # sell to collect money while owing us. Same gate as the STK push; existing vouchers
+    # still redeem, so no customer who already bought one is affected.
+    from apps.billing.enforcement import can_sell
+
+    if not can_sell(operator):
+        raise VoucherError(
+            "New vouchers are paused while your account is settled. Existing vouchers still "
+            "work. Pay your balance in Settings > Payments to resume."
+        )
+
     batch_id = uuid.uuid4()
     vouchers = []
     for _ in range(count):

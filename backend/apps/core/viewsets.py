@@ -10,7 +10,12 @@ from rest_framework import viewsets
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import IsAdminUser
 
-from .permissions import ReadOnlyForSupport, RequireTenant, TenantIsOperational
+from .permissions import (
+    NotBillingLocked,
+    ReadOnlyForSupport,
+    RequireTenant,
+    TenantIsOperational,
+)
 from .tenancy import acting_tenant
 
 
@@ -20,6 +25,9 @@ class TenantScopedMixin:
         RequireTenant,
         TenantIsOperational,
         ReadOnlyForSupport,
+        # Past-due lockout is read-only + pay. The pay/top-up views are plain APIViews that
+        # do NOT compose this mixin, so they stay open even when everything else is locked.
+        NotBillingLocked,
     ]
 
     def get_operator(self):
