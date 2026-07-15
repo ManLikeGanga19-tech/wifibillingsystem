@@ -149,6 +149,23 @@ def test_paying_unlocks_the_console():
     assert ok.status_code == 201  # full access restored, no job run
 
 
+# --- the console can see its own state (the banner's data) ------------------------------
+
+
+def test_me_surfaces_the_billing_level_for_the_banner():
+    """The past-due banner renders from /me/. If this drops, the ISP gets a silently
+    read-only console with no explanation — the worst kind of broken."""
+    operator = OperatorFactory(slug="mebill")
+    restrict(operator)
+
+    body = owner(operator).get("/api/v1/me/").json()
+
+    billing = body["acting_operator"]["billing"]
+    assert billing["level"] == "restricted"
+    assert Decimal(billing["owed"]) > 0
+    assert "credit_limit" in billing
+
+
 # --- the warning ------------------------------------------------------------------------
 
 

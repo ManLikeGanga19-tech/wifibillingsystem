@@ -33,6 +33,7 @@ import { toast, ToastHost } from './components/ui';
 
 import LoginView from './components/LoginView';
 import GoLiveBanner from './components/GoLiveBanner';
+import PastDueBanner from './components/PastDueBanner';
 import LiveDashboard from './components/LiveDashboard';
 import ActiveUsersView from './components/ActiveUsersView';
 import UsersView from './components/UsersView';
@@ -549,6 +550,15 @@ export default function App() {
                   loadMe().catch(() => {});
                   toast('success', 'Payments are ON. Your free month starts now.');
                 }}
+              />
+            )}
+
+            {/* Past-due: pinned while they owe, so a refused sale or a read-only console is
+                explained, not mysterious. Vanishes the moment they pay (level -> current). */}
+            {acting?.billing && (
+              <PastDueBanner
+                billing={acting.billing}
+                onPay={() => navigate('settings', 'sms')}
               />
             )}
 

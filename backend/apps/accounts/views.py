@@ -41,6 +41,9 @@ class MeView(APIView):
                 # every blocked action just looks like a broken product.
                 "can_transact": op.can_transact,
                 "go_live_blockers": _go_live_blockers(op),
+                # Past-due state, so the console can show the banner and (at LOCKED) explain
+                # why writes are refused. Derived live — see billing.enforcement.
+                "billing": _billing_state(op),
             }
 
         return Response(
@@ -58,6 +61,14 @@ class MeView(APIView):
                 "acting_operator": as_dict(acting),
             }
         )
+
+
+def _billing_state(op) -> dict:
+    """The past-due summary the console banner renders from. `level` is current/warned/
+    restricted/locked; the amounts let the banner say exactly what to pay."""
+    from apps.billing.enforcement import owed_summary
+
+    return owed_summary(op)
 
 
 def _go_live_blockers(op) -> list[dict]:

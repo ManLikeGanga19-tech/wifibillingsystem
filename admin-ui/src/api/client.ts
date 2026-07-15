@@ -317,6 +317,16 @@ export interface Settlement {
   explainer: string;
 }
 
+/** Past-due state, derived live from what the ISP owes vs their credit limit. Drives the
+ *  banner and explains why writes are refused when locked. */
+export interface BillingState {
+  owed: string;
+  credit_limit: string;
+  level: 'current' | 'warned' | 'restricted' | 'locked';
+  restrict_at: string;
+  lock_at: string;
+}
+
 export interface MeOperator {
   id: number;
   name: string;
@@ -327,6 +337,7 @@ export interface MeOperator {
   can_transact: boolean;
   /** Why not, and what to do about it. Empty when they're live. */
   go_live_blockers: GoLiveBlocker[];
+  billing: BillingState;
 }
 
 export interface Me {
