@@ -27,3 +27,6 @@ Thumbs.db
 
 deploy/.env
 deploy/backups/
+scripts/node_modules/
+scripts/package.json
+scripts/package-lock.json
