@@ -330,3 +330,20 @@ def test_unbuilt_gateways_are_shown_but_honestly_marked_unavailable():
     assert by_id["mpesa"]["available"] is True
     assert by_id["kopokopo"]["available"] is False
     assert by_id["paystack"]["available"] is False
+
+
+# --- security review findings -----------------------------------------------------------
+
+
+def test_the_managed_gateway_cannot_be_test_charged():
+    """SECURITY: the managed gateway runs on OUR Daraja. A test charge there would let any
+    ISP owner fire STK prompts at arbitrary phones on Danamo's account — a cost/harassment
+    vector, and pointless (our credentials always work). Only BYO gateways are testable."""
+    operator = OperatorFactory(slug="notest")
+
+    resp = owner(operator).post(
+        f"{GATEWAYS_URL}wifios/test/", {"phone": "254700000001"}, format="json"
+    )
+
+    assert resp.status_code == 400
+    assert "cannot be test-charged" in resp.json()["detail"]

@@ -277,7 +277,9 @@ def test_a_lost_callback_is_settled_by_reconciliation(monkeypatch):
         def stk_query(self, checkout_request_id):
             return {"ResultCode": "0", "ResultDesc": "Success"}
 
-    monkeypatch.setattr(topup_mod, "DarajaClient", lambda: FakeDaraja())
+    monkeypatch.setattr(
+        topup_mod.DarajaClient, "for_platform", classmethod(lambda cls: FakeDaraja())
+    )
 
     topup_mod.reconcile(row)  # no callback ever came
 
@@ -298,7 +300,9 @@ def test_the_callback_and_the_reconciler_racing_each_other_credit_once(monkeypat
         def stk_query(self, checkout_request_id):
             return {"ResultCode": "0", "ResultDesc": "Success"}
 
-    monkeypatch.setattr(topup_mod, "DarajaClient", lambda: FakeDaraja())
+    monkeypatch.setattr(
+        topup_mod.DarajaClient, "for_platform", classmethod(lambda cls: FakeDaraja())
+    )
 
     topup_mod.handle_callback(
         {
@@ -358,3 +362,32 @@ def test_one_isp_cannot_see_anothers_balance():
     body = owner(operator).get(ACCOUNT_URL).json()
 
     assert Decimal(body["balance"]) == pa.WELCOME_CREDIT  # ours, not theirs
+
+
+def test_topup_uses_the_PLATFORM_daraja_not_a_bare_client(monkeypatch):
+    """SECURITY/CORRECTNESS: a top-up is the ISP paying US, so it must go on Danamo's
+    paybill (DarajaClient.for_platform), not a bare DarajaClient() — which, post-refactor,
+    raises 'credentials not configured' and would break every top-up in production. The
+    mocked tests hid this; this one pins the construction path."""
+    from apps.billing import topup as topup_mod
+
+    operator = OperatorFactory(slug="platclient")
+    calls = {"for_platform": 0}
+
+    class FakePlatform:
+        def stk_push(self, **kwargs):
+            calls["for_platform"] += 1
+            return {"CheckoutRequestID": "ws_CO_x", "MerchantRequestID": "m"}
+
+    monkeypatch.setattr(
+        topup_mod.DarajaClient, "for_platform", classmethod(lambda cls: FakePlatform())
+    )
+    # A bare DarajaClient() must NOT be relied on — make it explode if used.
+    monkeypatch.setattr(
+        topup_mod.DarajaClient, "__init__",
+        lambda self, *a, **k: (_ for _ in ()).throw(AssertionError("bare client used")),
+    )
+
+    topup_mod.initiate(operator=operator, phone="254700000001", amount=100)
+
+    assert calls["for_platform"] == 1

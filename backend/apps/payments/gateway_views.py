@@ -23,6 +23,7 @@ from drf_spectacular.utils import extend_schema
 from rest_framework import serializers, status
 from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
 from apps.core.models import Operator
@@ -210,6 +211,9 @@ class TestGatewayView(APIView):
     """
 
     permission_classes = [IsAdminUser, RequireTenant, TenantIsOperational, CanManageMoney]
+    # Fires a real STK prompt — throttle it like every other STK-initiating endpoint.
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "stk-push"
 
     @extend_schema(
         request=TestGatewaySerializer, responses=OBJECT_RESPONSE,
@@ -220,6 +224,17 @@ class TestGatewayView(APIView):
         from apps.plans.models import Plan
 
         from .gateways import GatewayError
+
+        # The MANAGED gateway runs on OUR Daraja shortcode. A test charge there would let
+        # any ISP owner fire real STK prompts at arbitrary phones on Danamo's account — a
+        # cost and harassment vector — and it proves nothing (our credentials always work).
+        # Only a bring-your-own gateway, which charges the ISP's OWN account, is testable.
+        gateway = catalog.lookup(gateway_id)
+        if gateway is None or gateway.managed or gateway_id not in ADAPTERS:
+            return Response(
+                {"detail": "This gateway cannot be test-charged."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         operator = acting_tenant(request)
         try:

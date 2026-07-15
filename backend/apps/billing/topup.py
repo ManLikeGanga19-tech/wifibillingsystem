@@ -75,7 +75,7 @@ def initiate(*, operator, phone: str, bundle_id: str = "", amount=None, user=Non
         checkout_request_id=None,  # filled below; a failed push leaves no orphan row
     )
     try:
-        resp = DarajaClient().stk_push(
+        resp = DarajaClient.for_platform().stk_push(
             phone=msisdn,
             amount=int(pay),  # Daraja takes whole shillings
             account_reference=f"TOPUP{operator.id}",
@@ -152,7 +152,7 @@ def reconcile(topup: TopUp) -> None:
     topup.reconcile_attempts += 1
     topup.save(update_fields=["reconcile_attempts", "updated_at"])
     try:
-        data = DarajaClient().stk_query(topup.checkout_request_id)
+        data = DarajaClient.for_platform().stk_query(topup.checkout_request_id)
     except DarajaError as exc:
         logger.info("top-up %s not resolvable yet: %s", topup.pk, exc)
         return

@@ -19,6 +19,7 @@ from drf_spectacular.utils import extend_schema
 from rest_framework import serializers, status
 from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
 from apps.core.permissions import CanManageMoney, RequireTenant, TenantIsOperational
@@ -134,6 +135,12 @@ class TopUpView(APIView):
     """Start an STK push so the ISP can pay us."""
 
     permission_classes = [IsAdminUser, RequireTenant, TenantIsOperational, CanManageMoney]
+    # Every call fires a real STK prompt on our paybill. Throttle it so a compromised or
+    # malicious console cannot spray prompts at arbitrary phones — same limit as the
+    # subscriber STK push. (M-Pesa still requires the recipient's PIN, so no money moves;
+    # this caps the nuisance.)
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "stk-push"
 
     @extend_schema(
         request=TopUpSerializer, responses=OBJECT_RESPONSE, summary="Top up by M-Pesa (STK)"
