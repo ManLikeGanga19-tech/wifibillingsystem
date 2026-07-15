@@ -10,7 +10,6 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.accounts.models import Role
-from apps.billing.models import LedgerEntry
 from apps.billing.services import charge_pppoe_user_fees, wallet_balance
 from apps.payments.c2b import process_c2b_confirmation
 from apps.payments.models import C2BPayment
@@ -180,12 +179,15 @@ class TestC2BPayment:
 
 class TestPlatformFee:
     def test_per_user_fee_charged_monthly(self):
+        from apps.billing.models import PlatformLedgerEntry
+
         op = OperatorFactory(pppoe_user_fee=Decimal("50.00"))
         PppoeClientFactory.create_batch(3, operator=op, status=Client.Status.ACTIVE)
         PppoeClientFactory(operator=op, status=Client.Status.DISABLED)  # not billable
         assert charge_pppoe_user_fees() == 1
-        # 3 active users x 50 = 150 debit
-        fee = LedgerEntry.objects.filter(operator=op, entry_type="pppoe_fee").first()
+        # 3 active users x 50 = 150 debit — on the PLATFORM ACCOUNT (what they owe us),
+        # not the wallet. The wallet is now purely custody; all fees live in one place.
+        fee = PlatformLedgerEntry.objects.get(operator=op, reason="pppoe_fee")
         assert fee.amount == Decimal("-150.00")
 
     def test_platform_owned_isp_exempt(self):

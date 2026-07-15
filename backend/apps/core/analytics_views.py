@@ -64,23 +64,14 @@ class PlatformKpisView(APIView):
         month_start = _month_start(now)
 
         # --- Revenue ---------------------------------------------------------
-        # Ledger fee entries are negative (they debit the ISP); flip for revenue.
-        mrr = -_sum(
-            LedgerEntry.objects.filter(
-                entry_type__in=RECURRING_TYPES, created_at__gte=month_start
-            )
-        )
-        earnings_month = -_sum(
-            LedgerEntry.objects.filter(
-                entry_type__in=EARNING_TYPES, created_at__gte=month_start
-            )
-        )
-        by_stream = {
-            t.value: -_sum(
-                LedgerEntry.objects.filter(entry_type=t, created_at__gte=month_start)
-            )
-            for t in EARNING_TYPES
-        }
+        # Fees now live in TWO ledgers (aggregator commission withheld in the wallet;
+        # everything else accrued on the platform account). billing.revenue spans both, so
+        # moving a fee between them can never silently drop it from MRR.
+        from apps.billing.revenue import platform_earnings, platform_earnings_by_stream
+
+        mrr = platform_earnings(start=month_start, recurring_only=True)
+        earnings_month = platform_earnings(start=month_start)
+        by_stream = platform_earnings_by_stream(start=month_start)
 
         # --- Costs we absorb --------------------------------------------------
         costs_month = (
@@ -209,14 +200,27 @@ class PlatformTimeseriesView(APIView):
                 out[r["d"].isoformat()] = -r["v"] if negate else r["v"]
             return out
 
+        from apps.billing.models import PlatformLedgerEntry
+        from apps.billing.revenue import PLATFORM_REVENUE_REASONS
+
         sales = daily(
             LedgerEntry.objects.filter(entry_type=LedgerEntry.Type.SALE), "created_at"
         )
-        earnings = daily(
-            LedgerEntry.objects.filter(entry_type__in=EARNING_TYPES),
-            "created_at",
-            negate=True,  # fee entries are stored negative
+        # Earnings span both ledgers now: aggregator commission withheld in the wallet PLUS
+        # every fee accrued on the platform account. Merge the two daily series so no day
+        # under-reports.
+        earn_wallet = daily(
+            LedgerEntry.objects.filter(entry_type=LedgerEntry.Type.COMMISSION),
+            "created_at", negate=True,
         )
+        earn_platform = daily(
+            PlatformLedgerEntry.objects.filter(reason__in=PLATFORM_REVENUE_REASONS),
+            "created_at", negate=True,
+        )
+        earnings = {
+            d: earn_wallet.get(d, Decimal("0")) + earn_platform.get(d, Decimal("0"))
+            for d in set(earn_wallet) | set(earn_platform)
+        }
         tx_costs = daily(
             Transaction.objects.filter(status__in=Transaction.SUCCESS_STATUSES),
             "callback_received_at",
@@ -268,13 +272,25 @@ class TenantPnlView(APIView):
         rows = []
         operators = Operator.objects.all().order_by("name")
 
-        # Pre-aggregate per operator to avoid an N+1 storm
-        earn = {
-            r["operator"]: -r["v"]
-            for r in LedgerEntry.objects.filter(entry_type__in=EARNING_TYPES)
+        from apps.billing.models import PlatformLedgerEntry
+        from apps.billing.revenue import PLATFORM_REVENUE_REASONS
+
+        # Pre-aggregate per operator to avoid an N+1 storm. Earnings span both ledgers:
+        # aggregator commission withheld in the wallet + fees accrued on the platform
+        # account. Merge so a per-ISP P&L never under-counts what they earn us.
+        earn: dict = {}
+        for r in (
+            LedgerEntry.objects.filter(entry_type=LedgerEntry.Type.COMMISSION)
             .values("operator")
             .annotate(v=Coalesce(Sum("amount"), Value(Decimal("0")), output_field=_MONEY))
-        }
+        ):
+            earn[r["operator"]] = earn.get(r["operator"], Decimal("0")) - r["v"]
+        for r in (
+            PlatformLedgerEntry.objects.filter(reason__in=PLATFORM_REVENUE_REASONS)
+            .values("operator")
+            .annotate(v=Coalesce(Sum("amount"), Value(Decimal("0")), output_field=_MONEY))
+        ):
+            earn[r["operator"]] = earn.get(r["operator"], Decimal("0")) - r["v"]
         gross = {
             r["operator"]: r["v"]
             for r in LedgerEntry.objects.filter(entry_type=LedgerEntry.Type.SALE)

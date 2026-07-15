@@ -334,19 +334,11 @@ class PlatformReconciliationView(APIView):
         # revenue but never entered our account, so they are reported SEPARATELY. Folding
         # them into "collected" would claim we received money we never saw, and the
         # reconciliation would never balance against the bank.
+        from apps.billing.revenue import platform_earnings
+
         sale_entries = LedgerEntry.objects.filter(entry_type=LedgerEntry.Type.SALE)
         sales = total(sale_entries.filter(settlement=Settlement.PLATFORM))
         settled_direct = total(sale_entries.filter(settlement=Settlement.DIRECT))
-        commission = total(LedgerEntry.objects.filter(entry_type=LedgerEntry.Type.COMMISSION))
-        fees = total(
-            LedgerEntry.objects.filter(
-                entry_type__in=[
-                    LedgerEntry.Type.BASE_FEE,
-                    LedgerEntry.Type.PPPOE_FEE,
-                    LedgerEntry.Type.SETUP_FEE,
-                ]
-            )
-        )
         payouts_debit = total(LedgerEntry.objects.filter(entry_type=LedgerEntry.Type.PAYOUT))
         # What we owe ISPs = what we are HOLDING for them. Platform-settled only: we cannot
         # owe somebody money that went straight into their own account.
@@ -362,7 +354,9 @@ class PlatformReconciliationView(APIView):
         )
         payout_cost = total(Payout.objects.filter(status=Payout.Status.PAID), "platform_cost")
         tx_costs = collect_cost + payout_cost
-        gross_earnings = -(commission + fees)
+        # Our fees, across BOTH ledgers (withheld aggregator commission + platform-account
+        # accruals). billing.revenue is the single seam so nothing is missed.
+        gross_earnings = platform_earnings()
 
         return Response(
             {

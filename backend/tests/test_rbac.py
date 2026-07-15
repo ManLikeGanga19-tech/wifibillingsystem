@@ -251,9 +251,13 @@ class TestPlatformOwnedExemption:
         paying = OperatorFactory(
             slug="paying-isp", base_fee=Decimal("1500.00"), status=Operator.Status.ACTIVE
         )
+        from apps.billing.platform_account import debt
+
         assert charge_monthly_base_fees() == 1  # only the paying tenant
-        assert wallet_balance(own) == Decimal("0.00")
-        assert wallet_balance(paying) == Decimal("-1500.00")
+        # The platform-owned WISP is fee-exempt; the paying tenant now owes the base fee on
+        # the platform account (net of its welcome credit), not the wallet.
+        assert debt(own) == Decimal("0.00")
+        assert debt(paying) == Decimal("1300.00")  # 1500 fee - 200 welcome credit
 
     def test_normal_isp_still_pays_commission(self, db):
         normal = OperatorFactory(

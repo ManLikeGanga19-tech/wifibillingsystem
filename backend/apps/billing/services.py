@@ -46,6 +46,29 @@ def recorded_revenue(operator) -> Decimal:
     ).aggregate(v=Sum("amount"))["v"] or Decimal("0.00")
 
 
+def amount_owed(operator) -> Decimal:
+    """What the ISP owes us that we CANNOT cover from money we already hold — the number
+    the enforcement ladder runs on.
+
+    Fees live on the platform account; custody lives in the wallet. An aggregator ISP with
+    a healthy wallet owes us nothing in practice — we simply take our fee from what we
+    hold. A direct ISP has no wallet, so their whole platform debt stands. Netting here (a
+    pure read) does what a nightly wallet->platform sweep would, with nothing to drift.
+    """
+    from apps.billing.platform_account import debt
+
+    return max(Decimal("0.00"), debt(operator) - withdrawable_balance(operator))
+
+
+def available_to_withdraw(operator) -> Decimal:
+    """What they may actually take out: money we hold, minus what they owe us. We do not
+    hand back cash while a fee sits unpaid — that would be paying an ISP their sales and
+    then chasing them for our cut."""
+    from apps.billing.platform_account import debt
+
+    return max(Decimal("0.00"), withdrawable_balance(operator) - debt(operator))
+
+
 def credit_pppoe_payment(operator, amount: Decimal, *, memo: str = "") -> None:
     """Credit the ISP wallet for a broadband (C2B) payment. No commission is
     withheld here — the platform charges a flat per-active-user fee monthly
@@ -69,6 +92,8 @@ def charge_pppoe_user_fees() -> int:
     from apps.core.models import Operator
     from apps.pppoe.models import Client
 
+    from .models import PlatformLedgerEntry
+    from .platform_account import accrue_fee
     from .pricing import pppoe_user_fee_total
 
     period = timezone.localdate().strftime("%Y-%m")
@@ -85,18 +110,14 @@ def charge_pppoe_user_fees() -> int:
         fee = pppoe_user_fee_total(active, operator)
         if fee <= 0:
             continue
-        try:
-            with db_transaction.atomic():
-                LedgerEntry.objects.create(
-                    operator=operator,
-                    entry_type=LedgerEntry.Type.PPPOE_FEE,
-                    amount=-fee,
-                    period=period,
-                    memo=f"PPPoE platform fee {period} ({active} users)",
-                )
+        # Onto the platform account (what they owe us), not the wallet. The wallet is now
+        # purely custody; every fee lives in one place so the exposure check and the invoice
+        # see the same number. accrue_fee is idempotent per (operator, month).
+        if accrue_fee(
+            operator, fee, reason=PlatformLedgerEntry.Reason.PPPOE_FEE, period=period,
+            memo=f"PPPoE platform fee {period} ({active} users)",
+        ):
             charged += 1
-        except IntegrityError:
-            continue  # this month already charged
     return charged
 
 
@@ -105,22 +126,19 @@ def charge_setup_fee(operator) -> bool:
     Idempotent: at most one SETUP_FEE entry per operator, ever. Returns True if
     a charge was made. Recouped from the tenant's first sales like every other
     platform fee."""
+    from .models import PlatformLedgerEntry
+    from .platform_account import accrue_fee
+
     fee = operator.effective_setup_fee
     if fee <= 0:
         return False
-    if LedgerEntry.objects.filter(
-        operator=operator, entry_type=LedgerEntry.Type.SETUP_FEE
-    ).exists():
-        return False
-    try:
-        with db_transaction.atomic():
-            LedgerEntry.objects.create(
-                operator=operator,
-                entry_type=LedgerEntry.Type.SETUP_FEE,
-                amount=-fee,
-                memo="One-time onboarding / setup fee",
-            )
-    except IntegrityError:
+    # Onto the platform account. period="once" reuses the (operator, reason, period) unique
+    # constraint as a charge-exactly-once guard — the wallet stays purely custody.
+    entry = accrue_fee(
+        operator, fee, reason=PlatformLedgerEntry.Reason.SETUP_FEE, period="once",
+        memo="One-time onboarding / setup fee",
+    )
+    if entry is None:
         return False
     audit("wallet_setup_fee_charged", operator=operator, amount=str(fee))
     return True
@@ -134,11 +152,10 @@ def credit_sale(tx, *, settlement: str = Settlement.PLATFORM) -> None:
 
     * `platform` — the money is in OUR account, so we withhold commission at source and
       the remainder is theirs to withdraw. This is the aggregator path.
-    * `direct` — the money went straight to the ISP's own gateway. We cannot withhold a
-      commission from money we never held, so we do NOT write one here: the fee is accrued
-      against their platform account and invoiced (Phase 2/4). Writing a commission debit
-      against a wallet that holds none of this sale's cash would simply eat into the
-      unrelated money we DO hold for them, which is somebody else's shilling.
+    * `direct` — the money went straight to the ISP's own gateway. We cannot withhold from
+      money we never held, so instead the commission is ACCRUED to the platform account as
+      a debt (accrue_fee below): tracked live, on the monthly invoice, collected by STK.
+      Nothing goes unnoticed.
 
     Both write the SALE, because both are revenue.
     """
@@ -162,6 +179,8 @@ def credit_sale(tx, *, settlement: str = Settlement.PLATFORM) -> None:
                 memo=f"Sale {tx.mpesa_receipt or tx.checkout_request_id}",
             )
             if commission > 0 and not direct:
+                # AGGREGATOR: we hold the cash, so we withhold our cut at source. It never
+                # becomes a debt because it was never theirs to withdraw.
                 LedgerEntry.objects.create(
                     operator=operator,
                     entry_type=LedgerEntry.Type.COMMISSION,
@@ -172,6 +191,22 @@ def credit_sale(tx, *, settlement: str = Settlement.PLATFORM) -> None:
                 )
     except IntegrityError:
         return  # replayed callback — already credited
+
+    if commission > 0 and direct:
+        # DIRECT: the money went to the ISP, so there is nothing to withhold from. The
+        # commission becomes a debt on the platform account — tracked live, on the invoice,
+        # collected by STK. Nothing goes unnoticed. Idempotent per sale (unique on tx), so
+        # this sits safely OUTSIDE the sale transaction above and a replay is a no-op.
+        from apps.billing.models import PlatformLedgerEntry
+        from apps.billing.platform_account import accrue_fee
+
+        accrue_fee(
+            operator,
+            commission,
+            reason=PlatformLedgerEntry.Reason.COMMISSION,
+            transaction=tx,
+            memo=f"{rate}% commission on direct sale {tx.mpesa_receipt or tx.pk}",
+        )
     audit(
         "wallet_sale_credited",
         operator=operator,
@@ -230,11 +265,12 @@ def request_payout(*, operator, amount: Decimal, user, method="mpesa", destinati
 
     with db_transaction.atomic():
         op_locked = type(operator).objects.select_for_update().get(pk=operator.pk)
-        # WITHDRAWABLE, not revenue. A sale that settled straight into the ISP's own
-        # gateway is money we never received; if it counted here we would be paying out
-        # cash we do not have.
-        if amount > withdrawable_balance(op_locked):
-            raise WalletError("Withdrawal exceeds your wallet balance.")
+        # AVAILABLE, not just withdrawable: money we hold MINUS what they owe us. A sale
+        # that settled to the ISP's own gateway is money we never received (so it is not
+        # withdrawable), and any unpaid platform fee is held back here rather than chased
+        # later.
+        if amount > available_to_withdraw(op_locked):
+            raise WalletError("Withdrawal exceeds your available balance.")
         payout = Payout.objects.create(
             operator=op_locked,
             amount=amount,
@@ -299,6 +335,9 @@ def charge_monthly_base_fees() -> int:
     Idempotent per (operator, month) via DB constraint."""
     from apps.core.models import Operator
 
+    from .models import PlatformLedgerEntry
+    from .platform_account import accrue_fee
+
     period = timezone.localdate().strftime("%Y-%m")
     charged = 0
     operators = list(
@@ -312,18 +351,11 @@ def charge_monthly_base_fees() -> int:
             continue
         if operator.in_base_fee_trial():
             continue  # first month free — base fee not yet started
-        try:
-            # Savepoint per charge: a duplicate-month conflict must not poison
-            # the surrounding transaction
-            with db_transaction.atomic():
-                LedgerEntry.objects.create(
-                    operator=operator,
-                    entry_type=LedgerEntry.Type.BASE_FEE,
-                    amount=-fee,
-                    period=period,
-                    memo=f"Platform subscription {period}",
-                )
+        # Onto the platform account (what they owe us). accrue_fee is idempotent per
+        # (operator, month), so a re-run of the beat task cannot double-charge.
+        if accrue_fee(
+            operator, fee, reason=PlatformLedgerEntry.Reason.BASE_FEE, period=period,
+            memo=f"Platform subscription {period}",
+        ):
             charged += 1
-        except IntegrityError:
-            continue  # this month already charged
     return charged

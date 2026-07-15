@@ -87,6 +87,13 @@ def balance(operator) -> Decimal:
     )["v"] or Decimal("0.00")
 
 
+def debt(operator) -> Decimal:
+    """What the platform account says the ISP owes us, BEFORE netting against any wallet
+    money we hold for them. A positive number. (A positive balance — prepaid SMS — is not
+    debt, so this floors at zero.)"""
+    return max(Decimal("0.00"), -balance(operator))
+
+
 def can_send_sms(operator) -> bool:
     """SMS is prepaid: we pay the gateway the moment it leaves, so a negative balance
     cannot buy more. Fees may drive the balance below zero (that is postpaid, and it is
@@ -120,6 +127,35 @@ def charge_sms(operator, message, segments: int = 1) -> None:
             )
     except IntegrityError:
         pass  # already charged for this message
+
+
+def accrue_fee(operator, amount: Decimal, *, reason: str, memo: str = "", period: str = "",
+               transaction=None) -> PlatformLedgerEntry | None:
+    """Charge a platform FEE to the ISP's account — the debt they settle by STK.
+
+    This is the single door every fee comes through now (base, PPPoE, the commission on a
+    DIRECT sale). "Nothing goes unnoticed": every fee, whatever gateway the sale used, lands
+    here where the exposure check and the monthly invoice can both see it.
+
+    `period` (YYYY-MM) makes a periodic fee idempotent per month via the ledger's unique
+    constraint; a `transaction` link makes a per-sale commission idempotent per sale.
+    Returns None if it was a duplicate (already charged).
+    """
+    amount = Decimal(amount)
+    if amount == 0:
+        return None
+    try:
+        with db_transaction.atomic():
+            return PlatformLedgerEntry.objects.create(
+                operator=operator,
+                amount=-abs(amount),  # a fee always debits
+                reason=reason,
+                period=period,
+                transaction=transaction,
+                memo=memo,
+            )
+    except IntegrityError:
+        return None  # this month / this sale already charged
 
 
 def grant(operator, amount: Decimal, *, memo: str = "") -> PlatformLedgerEntry:

@@ -179,6 +179,7 @@ class PlatformLedgerEntry(OperatorOwnedModel):
         COMMISSION = "commission", "Commission on a direct-settled sale"
         BASE_FEE = "base_fee", "Monthly platform fee"
         PPPOE_FEE = "pppoe_fee", "PPPoE per-user fee"
+        SETUP_FEE = "setup_fee", "One-time onboarding fee"
         REFUND = "refund", "Refund"
         ADJUSTMENT = "adjustment", "Manual adjustment"
 
@@ -202,6 +203,15 @@ class PlatformLedgerEntry(OperatorOwnedModel):
         on_delete=models.PROTECT,
         related_name="ledger_entries",
     )
+    #: The sale this fee is the commission ON. Unique, so the commission on a DIRECT sale is
+    #: charged exactly once however many times a replayed callback lands.
+    transaction = models.ForeignKey(
+        "payments.Transaction",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="platform_fees",
+    )
     #: "YYYY-MM" for periodic fees — the uniqueness guard against double-charging a month.
     period = models.CharField(max_length=7, blank=True)
     memo = models.CharField(max_length=200, blank=True)
@@ -221,6 +231,12 @@ class PlatformLedgerEntry(OperatorOwnedModel):
                 fields=["topup"],
                 condition=models.Q(topup__isnull=False),
                 name="platform_one_credit_per_topup",
+            ),
+            # One commission per direct sale, however many times the callback replays.
+            models.UniqueConstraint(
+                fields=["transaction"],
+                condition=models.Q(transaction__isnull=False),
+                name="platform_one_commission_per_sale",
             ),
             # One periodic fee per operator per month per type.
             models.UniqueConstraint(

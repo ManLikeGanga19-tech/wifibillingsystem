@@ -8,7 +8,7 @@ import pytest
 from rest_framework.test import APIClient
 
 from apps.accounts.models import Role
-from apps.billing.models import LedgerEntry
+from apps.billing.models import LedgerEntry, PlatformLedgerEntry
 from apps.billing.pricing import pppoe_blended_rate, pppoe_user_fee_total
 from apps.billing.services import charge_setup_fee, credit_sale
 from apps.billing.tariffs import collection_cost, payout_cost
@@ -115,7 +115,7 @@ class TestDefaultPppoeRate:
         op = OperatorFactory(pppoe_user_fee=Decimal("0.00"))
         PppoeClientFactory.create_batch(3, operator=op, status=Client.Status.ACTIVE)
         assert charge_pppoe_user_fees() == 1
-        fee = LedgerEntry.objects.get(operator=op, entry_type="pppoe_fee")
+        fee = PlatformLedgerEntry.objects.get(operator=op, reason="pppoe_fee")
         assert fee.amount == Decimal("-120.00")  # 3 users * 40
 
 
@@ -135,7 +135,7 @@ class TestOnlyServedUsersAreBilled:
         PppoeClientFactory(operator=op, status=Client.Status.DISABLED)
 
         assert charge_pppoe_user_fees() == 1
-        fee = LedgerEntry.objects.get(operator=op, entry_type="pppoe_fee")
+        fee = PlatformLedgerEntry.objects.get(operator=op, reason="pppoe_fee")
         assert fee.amount == Decimal("-120.00")  # only the 3 ACTIVE * 40
         assert "(3 users)" in fee.memo
 
@@ -193,14 +193,14 @@ class TestSetupFee:
         op = OperatorFactory(setup_fee=Decimal("10000.00"))
         assert charge_setup_fee(op) is True
         assert charge_setup_fee(op) is False  # already charged
-        entries = LedgerEntry.objects.filter(operator=op, entry_type="setup_fee")
+        entries = PlatformLedgerEntry.objects.filter(operator=op, reason="setup_fee")
         assert entries.count() == 1
         assert entries.first().amount == Decimal("-10000.00")
 
     def test_platform_owned_isp_exempt(self):
         op = OperatorFactory(setup_fee=Decimal("10000.00"), is_platform_owned=True)
         assert charge_setup_fee(op) is False
-        assert not LedgerEntry.objects.filter(operator=op, entry_type="setup_fee").exists()
+        assert not PlatformLedgerEntry.objects.filter(operator=op, reason="setup_fee").exists()
 
     def _platform_owner(self):
         c = APIClient()
@@ -220,7 +220,7 @@ class TestSetupFee:
         )
         resp = self._platform_owner().post(f"/api/v1/platform/tenants/{op.id}/approve/")
         assert resp.status_code == 200, resp.content
-        assert not LedgerEntry.objects.filter(operator=op, entry_type="setup_fee").exists()
+        assert not PlatformLedgerEntry.objects.filter(operator=op, reason="setup_fee").exists()
 
     def test_charge_setup_action_bills_assisted_isp(self):
         op = OperatorFactory(slug="assisted", setup_fee=Decimal("8000.00"))
@@ -228,12 +228,12 @@ class TestSetupFee:
         resp = admin.post(f"/api/v1/platform/tenants/{op.id}/charge-setup/")
         assert resp.status_code == 200, resp.content
         assert resp.json()["charged"] is True
-        entry = LedgerEntry.objects.get(operator=op, entry_type="setup_fee")
+        entry = PlatformLedgerEntry.objects.get(operator=op, reason="setup_fee")
         assert entry.amount == Decimal("-8000.00")
         # second call is a no-op (idempotent)
         resp2 = admin.post(f"/api/v1/platform/tenants/{op.id}/charge-setup/")
         assert resp2.json()["charged"] is False
-        assert LedgerEntry.objects.filter(operator=op, entry_type="setup_fee").count() == 1
+        assert PlatformLedgerEntry.objects.filter(operator=op, reason="setup_fee").count() == 1
 
 
 class TestBaseFeeTrial:
@@ -253,7 +253,7 @@ class TestBaseFeeTrial:
             trial_ends_at=timezone.localdate() + timedelta(days=15),
         )
         assert self._charge() == 0  # still in free month
-        assert not LedgerEntry.objects.filter(entry_type="base_fee").exists()
+        assert not PlatformLedgerEntry.objects.filter(reason="base_fee").exists()
 
     def test_base_fee_charged_after_trial(self):
         from datetime import timedelta
@@ -266,7 +266,7 @@ class TestBaseFeeTrial:
             trial_ends_at=timezone.localdate() - timedelta(days=1),
         )
         assert self._charge() == 1
-        entry = LedgerEntry.objects.get(operator=op, entry_type="base_fee")
+        entry = PlatformLedgerEntry.objects.get(operator=op, reason="base_fee")
         assert entry.amount == Decimal("-500.00")
 
     def test_approval_sets_one_month_trial(self):

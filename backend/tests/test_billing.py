@@ -200,12 +200,16 @@ class TestPayouts:
 
 class TestBaseFee:
     def test_monthly_fee_deducted_once(self, operator):
+        from apps.billing.platform_account import debt
+
         operator.base_fee = Decimal("1500.00")
         operator.status = Operator.Status.ACTIVE
         operator.save()
         assert charge_monthly_base_fees() == 1
         assert charge_monthly_base_fees() == 0  # same month, no double charge
-        assert wallet_balance(operator) == Decimal("-1500.00")
+        # The fee is now a debt on the platform account (net of the welcome credit), not a
+        # wallet debit. The wallet is purely custody.
+        assert debt(operator) == Decimal("1300.00")  # 1500 fee - 200 welcome credit
 
     def test_zero_fee_tenants_skipped(self, db):
         OperatorFactory(slug="freebie", base_fee=Decimal("0.00"))
