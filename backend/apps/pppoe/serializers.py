@@ -63,6 +63,9 @@ class ClientSerializer(serializers.ModelSerializer):
     cpe_equipment = TenantPrimaryKeyRelatedField(
         queryset=Equipment.objects.all(), required=False, allow_null=True
     )
+    # Live metering (pppoe.metering), read-only. `usage` is this cycle's consumption.
+    data_cap_gb = serializers.IntegerField(source="plan.data_cap_gb", read_only=True)
+    usage = serializers.SerializerMethodField()
 
     class Meta:
         model = Client
@@ -73,11 +76,37 @@ class ClientSerializer(serializers.ModelSerializer):
             "delivery_method", "access_point", "cpe_equipment",
             "status", "billing_day", "balance", "next_due_date", "installed_at", "notes",
             "created_at",
+            # Live status + usage
+            "is_online", "last_online_at", "wan_ip", "session_uptime", "usage_synced_at",
+            "data_cap_gb", "usage",
         ]
         read_only_fields = [
             "account_number", "status", "balance", "next_due_date", "created_at",
             "pppoe_username", "pppoe_password",
+            "is_online", "last_online_at", "wan_ip", "session_uptime", "usage_synced_at",
         ]
+
+    def get_usage(self, obj) -> dict:
+        """This billing cycle's data usage. Cheap: one indexed row per client per period."""
+        from .metering import current_period_start
+        from .models import ClientUsage
+
+        period = current_period_start(obj)
+        row = ClientUsage.objects.filter(client=obj, period_start=period).first()
+        down = row.bytes_in if row else 0
+        up = row.bytes_out if row else 0
+        total = down + up
+        cap = obj.plan.data_cap_gb
+        pct = round(100 * total / (cap * 1024**3), 1) if cap else None
+        return {
+            "period_start": period,
+            "bytes_down": down,
+            "bytes_up": up,
+            "bytes_total": total,
+            "gb_total": round(total / 1024**3, 2),
+            "cap_gb": cap,
+            "percent_used": pct,
+        }
 
 
 class InvoiceSerializer(serializers.ModelSerializer):

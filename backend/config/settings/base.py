@@ -223,6 +223,12 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.pppoe.tasks.remind_pppoe_expiry",
         "schedule": crontab(minute=15),  # hourly; once per client per cycle
     },
+    # Live PPPoE usage metering: delta-poll each router's interface counters, accumulate
+    # per cycle, and fire FUP alerts. 5-minute cadence (agreed) — 2 bulk calls per router.
+    "poll-pppoe-usage": {
+        "task": "apps.pppoe.tasks.poll_pppoe_usage",
+        "schedule": 300.0,
+    },
     "expire-sessions": {
         "task": "apps.provisioning.tasks.expire_sessions",
         "schedule": 60.0,

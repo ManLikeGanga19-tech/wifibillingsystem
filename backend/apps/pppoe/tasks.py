@@ -78,6 +78,14 @@ def remind_pppoe_expiry():
 
 
 @shared_task
+def poll_pppoe_usage():
+    """Every 5 min: meter live PPPoE usage off every router and fire FUP alerts."""
+    from .metering import poll_all
+
+    return poll_all()
+
+
+@shared_task
 def suspend_overdue_clients():
     """Daily: suspend active clients with an overdue balance past due date."""
     from .models import Client, Invoice

@@ -11,6 +11,7 @@ from .factories import OperatorFactory, RouterFactory, UserFactory
 def _reset_dummies():
     DummyAdapter.calls = []
     DummyAdapter.usage = {}
+    DummyAdapter.pppoe_active = {}
     DummyAdapter.portal_fails = False
     DummyProvider.sent = []
     yield

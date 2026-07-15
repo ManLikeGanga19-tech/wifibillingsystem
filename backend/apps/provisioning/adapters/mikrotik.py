@@ -207,20 +207,54 @@ class MikroTikRestAdapter(ProvisioningAdapter):
             raise ProvisioningError(f"remove_pppoe_user failed on {self.router}: {exc}") from exc
 
     def get_active_pppoe(self) -> list[ActiveSession]:
+        """Who is online, and how much they have moved THIS SESSION.
+
+        Two bulk reads, joined by username — never one call per client:
+          * /ppp/active  → presence, WAN IP, uptime, caller-id (the remote MAC)
+          * /interface   → the dynamic `<pppoe-{username}>` interface's byte counters
+
+        RouterOS counts from the ROUTER's side, so rx-byte is what the client UPLOADED and
+        tx-byte is what it DOWNLOADED. We report bytes_in = download, bytes_out = upload.
+        Both are session-relative and reset on reconnect; the metering service turns them
+        into a cumulative monthly figure (see pppoe.metering).
+        """
         try:
             with self._client() as c:
-                resp = c.get("/ppp/active")
-                resp.raise_for_status()
-                return [
-                    ActiveSession(
-                        username=a.get("name", ""),
-                        ip_address=a.get("address", ""),
-                        uptime=a.get("uptime", ""),
-                    )
-                    for a in resp.json()
-                ]
+                active = c.get("/ppp/active")
+                active.raise_for_status()
+                # Interface counters. `.proplist` keeps the payload small on big routers.
+                ifaces = c.get(
+                    "/interface", params={".proplist": "name,rx-byte,tx-byte,running"}
+                )
+                ifaces.raise_for_status()
         except httpx.HTTPError as exc:
             raise ProvisioningError(f"get_active_pppoe failed on {self.router}: {exc}") from exc
+
+        # username -> (download_bytes, upload_bytes). The dynamic interface is named
+        # "<pppoe-USERNAME>".
+        counters: dict[str, tuple[int, int]] = {}
+        for row in ifaces.json():
+            name = row.get("name", "")
+            if not name.startswith("<pppoe-") or not name.endswith(">"):
+                continue
+            username = name[len("<pppoe-"):-1]
+            counters[username] = (_to_int(row.get("tx-byte")), _to_int(row.get("rx-byte")))
+
+        sessions = []
+        for a in active.json():
+            username = a.get("name", "")
+            down, up = counters.get(username, (0, 0))
+            sessions.append(
+                ActiveSession(
+                    username=username,
+                    mac_address=a.get("caller-id", ""),
+                    ip_address=a.get("address", ""),
+                    uptime=a.get("uptime", ""),
+                    bytes_in=down,
+                    bytes_out=up,
+                )
+            )
+        return sessions
 
     def get_device_info(self) -> DeviceInfo:
         """Query the router's identity + live health. Stable fields are persisted

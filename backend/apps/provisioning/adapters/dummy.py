@@ -54,8 +54,25 @@ class DummyAdapter(ProvisioningAdapter):
         DummyAdapter.calls.append(("pppoe_remove", client.pppoe_username))
         return ProvisionResult(ok=True)
 
+    #: Tests set this to drive PPPoE metering:
+    #: {pppoe_username: (download_bytes, upload_bytes, ip, uptime, mac)}.
+    pppoe_active: dict = {}
+
     def get_active_pppoe(self) -> list[ActiveSession]:
-        return []
+        out = []
+        for user, v in DummyAdapter.pppoe_active.items():
+            down, up = v[0], v[1]
+            out.append(
+                ActiveSession(
+                    username=user,
+                    bytes_in=down,
+                    bytes_out=up,
+                    ip_address=v[2] if len(v) > 2 else "10.10.0.2",
+                    uptime=v[3] if len(v) > 3 else "1h",
+                    mac_address=v[4] if len(v) > 4 else "",
+                )
+            )
+        return out
 
     # -- Captive portal ---------------------------------------------------
     #: Tests set this to make a router refuse the new address, so the "one router did not

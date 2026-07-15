@@ -746,6 +746,36 @@ export interface PppoeClient {
   installed_at: string | null;
   notes: string;
   created_at: string;
+  // Live metering (read-only). is_online + usage refreshed every ~5 min by the poller.
+  is_online: boolean;
+  last_online_at: string | null;
+  wan_ip: string | null;
+  session_uptime: string;
+  usage_synced_at: string | null;
+  data_cap_gb: number | null;
+  usage: {
+    period_start: string;
+    bytes_total: number;
+    gb_total: number;
+    cap_gb: number | null;
+    percent_used: number | null;
+  };
+}
+
+/** The PPPoE dashboard tile — live fixed-line health for the acting ISP. */
+export interface PppoeUsageSummary {
+  clients_total: number;
+  clients_active: number;
+  online_now: number;
+  data_gb_this_cycle: number;
+  over_fup: number;
+  top_consumers: {
+    account_number: string;
+    full_name: string;
+    gb_total: number;
+    percent_used: number | null;
+  }[];
+  synced_at: string | null;
 }
 
 export interface PppoeInvoice {
@@ -1214,6 +1244,7 @@ export const api = {
       liveStatus: (id: number) =>
         request<{ online: boolean }>(`/pppoe/clients/${id}/live_status/`),
     },
+    usageSummary: () => request<PppoeUsageSummary>('/pppoe/usage-summary/'),
     invoices: {
       list: (query = '') => request<Paginated<PppoeInvoice>>(`/pppoe/invoices/${query}`),
     },

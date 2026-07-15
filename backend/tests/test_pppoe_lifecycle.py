@@ -230,8 +230,7 @@ def test_never_prune_is_expressible():
     assert operator.pppoe_settings.inactive_prune_days is None
 
 
-def test_fup_is_stored_but_flagged_pending_metering():
-    """Honesty: the threshold saves, but the console is told the alert is not live yet."""
+def test_fup_thresholds_save_and_metering_is_live():
     operator = OperatorFactory(slug="fup")
 
     resp = owner(operator).patch(
@@ -240,4 +239,5 @@ def test_fup_is_stored_but_flagged_pending_metering():
 
     assert resp.status_code == 200
     assert resp.json()["fup_alert_percents"] == [80, 95]
-    assert resp.json()["fup_metering_ready"] is False
+    # Metering exists now (pppoe.metering), so FUP alerts fire for capped plans.
+    assert resp.json()["fup_metering_ready"] is True

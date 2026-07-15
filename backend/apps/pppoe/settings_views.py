@@ -81,9 +81,9 @@ def _as_dict(row: PppoeSettings) -> dict:
             "reminder_hours": list(PppoeSettings.REMINDER_HOUR_CHOICES),
             "fup_percents": list(PppoeSettings.FUP_PERCENT_CHOICES),
         },
-        # Honesty: FUP thresholds are stored but inert until per-client usage metering
-        # exists. The UI reads this to say so rather than imply an alert will fire.
-        "fup_metering_ready": False,
+        # Metering is live now (pppoe.metering polls every 5 min), so FUP alerts fire for
+        # any plan that has a data cap. The UI drops the "pending" note.
+        "fup_metering_ready": True,
     }
 
 

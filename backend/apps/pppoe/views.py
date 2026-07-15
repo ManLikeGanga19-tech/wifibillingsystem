@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db.models import Count, Q
+from django.utils import timezone
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.decorators import (
@@ -8,12 +9,14 @@ from rest_framework.decorators import (
     authentication_classes,
     permission_classes,
 )
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAdminUser
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
-from apps.core.permissions import TenantCanTransact
+from apps.core.permissions import RequireTenant, TenantCanTransact, TenantIsOperational
 from apps.core.public import PublicAPIView
 from apps.core.schema import OBJECT_RESPONSE
+from apps.core.tenancy import acting_tenant
 from apps.core.viewsets import TenantModelViewSet, TenantReadOnlyViewSet
 from apps.provisioning.adapters import ProvisioningError, get_adapter
 
@@ -262,3 +265,67 @@ def account_lookup(request):
             "paybill": settings.DARAJA_SHORTCODE or None,
         }
     )
+
+
+class PppoeUsageSummaryView(APIView):
+    """The dashboard tile: live fixed-line health at a glance — who is online, how much data
+    the base is consuming this month, the heaviest users, and who has crossed their cap."""
+
+    permission_classes = [IsAdminUser, RequireTenant, TenantIsOperational]
+
+    @extend_schema(responses=OBJECT_RESPONSE, summary="PPPoE live usage summary (dashboard)")
+    def get(self, request):
+
+        from .metering import current_period_start
+        from .models import ClientUsage
+
+        operator = acting_tenant(request)
+        clients = Client.objects.filter(operator=operator)
+        active = clients.filter(status=Client.Status.ACTIVE)
+
+        # Usage rows for THIS cycle. Clients bill on different days, so each has its own
+        # period start — group by joining on the client's current period.
+        usage_rows = (
+            ClientUsage.objects.filter(operator=operator)
+            .select_related("client", "client__plan")
+        )
+        today = timezone.localdate()
+        this_cycle = [
+            u for u in usage_rows
+            if u.period_start == current_period_start(u.client, today)
+        ]
+
+        total_bytes = sum(u.total_bytes for u in this_cycle)
+        over_fup = 0
+        top = []
+        for u in this_cycle:
+            cap = u.client.plan.data_cap_gb
+            pct = (100 * u.total_bytes / (cap * 1024**3)) if cap else None
+            if pct is not None and pct >= 100:
+                over_fup += 1
+            top.append(
+                {
+                    "account_number": u.client.account_number,
+                    "full_name": u.client.full_name,
+                    "gb_total": round(u.total_bytes / 1024**3, 2),
+                    "percent_used": round(pct, 1) if pct is not None else None,
+                }
+            )
+        top.sort(key=lambda r: r["gb_total"], reverse=True)
+
+        return Response(
+            {
+                "clients_total": clients.count(),
+                "clients_active": active.count(),
+                "online_now": active.filter(is_online=True).count(),
+                "data_gb_this_cycle": round(total_bytes / 1024**3, 2),
+                "over_fup": over_fup,
+                "top_consumers": top[:5],
+                "synced_at": (
+                    active.exclude(usage_synced_at__isnull=True)
+                    .order_by("-usage_synced_at")
+                    .values_list("usage_synced_at", flat=True)
+                    .first()
+                ),
+            }
+        )

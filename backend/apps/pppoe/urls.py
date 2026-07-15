@@ -6,6 +6,7 @@ from .views import (
     AccessPointViewSet,
     ClientViewSet,
     InvoiceViewSet,
+    PppoeUsageSummaryView,
     ServicePlanViewSet,
     SuspendedNoticeView,
     TowerViewSet,
@@ -21,6 +22,7 @@ router.register("access-points", AccessPointViewSet, basename="pppoe-ap")
 
 urlpatterns = [
     path("settings/", PppoeSettingsView.as_view(), name="pppoe-settings"),
+    path("usage-summary/", PppoeUsageSummaryView.as_view(), name="pppoe-usage-summary"),
     path("suspended-notice/", SuspendedNoticeView.as_view(), name="pppoe-suspended-notice"),
     path("account-lookup/", account_lookup, name="pppoe-account-lookup"),
     *router.urls,

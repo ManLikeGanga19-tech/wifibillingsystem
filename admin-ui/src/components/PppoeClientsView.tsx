@@ -1,9 +1,102 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { Users, Plus, Ban, RotateCcw, Zap, Printer, X, Loader2 } from 'lucide-react';
-import { api, PppoeClient, PppoePlan, ApiRouter, AccessPoint } from '../api/client';
+import { Users, Plus, Ban, RotateCcw, Zap, Printer, X, Loader2, Wifi, WifiOff } from 'lucide-react';
+import { api, PppoeClient, PppoePlan, ApiRouter, AccessPoint, PppoeUsageSummary } from '../api/client';
 import {
   Badge, Btn, Field, FilterChips, inputCls, Panel, RefreshBtn, TableShell, tdCls, toast, useList, ViewHeader, fmtDateTime, fmtKsh,
 } from './ui';
+
+/** Live status dot, from the 5-minute metering poll. */
+function LiveDot({ client }: { client: PppoeClient }) {
+  if (client.status !== 'active') return <span className="text-[#141414]/30">—</span>;
+  return client.is_online ? (
+    <span className="flex items-center gap-1 text-[#228B22]" title={`Up ${client.session_uptime}`}>
+      <Wifi className="h-3.5 w-3.5" />
+      <span className="font-mono text-[11px]">{client.session_uptime || 'on'}</span>
+    </span>
+  ) : (
+    <span className="flex items-center gap-1 text-[#141414]/40" title="Offline">
+      <WifiOff className="h-3.5 w-3.5" /> <span className="font-mono text-[11px]">off</span>
+    </span>
+  );
+}
+
+/** This cycle's data usage, with a FUP bar when the plan is capped. */
+function UsageCell({ client }: { client: PppoeClient }) {
+  const u = client.usage;
+  if (!u) return <span className="text-[#141414]/30">—</span>;
+  const pct = u.percent_used;
+  const over = pct !== null && pct >= 100;
+  const near = pct !== null && pct >= 80;
+  return (
+    <div className="min-w-[110px]">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="font-mono text-xs">{u.gb_total} GB</span>
+        {u.cap_gb ? (
+          <span className={`font-mono text-[10px] ${over ? 'text-[#B22222]' : 'text-[#141414]/50'}`}>
+            {pct}%
+          </span>
+        ) : (
+          <span className="font-mono text-[10px] text-[#141414]/40">no cap</span>
+        )}
+      </div>
+      {u.cap_gb ? (
+        <div className="mt-1 h-1 w-full bg-[#141414]/10">
+          <div
+            className={`h-full ${over ? 'bg-[#B22222]' : near ? 'bg-[#E4A11B]' : 'bg-[#228B22]'}`}
+            style={{ width: `${Math.min(pct ?? 0, 100)}%` }}
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** The dashboard tile: live fixed-line health for the whole base. */
+function UsageSummaryTile() {
+  const [s, setS] = useState<PppoeUsageSummary | null>(null);
+  useEffect(() => {
+    api.pppoe.usageSummary().then(setS).catch(() => {});
+  }, []);
+  if (!s || s.clients_active === 0) return null;
+  return (
+    <Panel title="Fixed-line — live">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <Stat label="Online now" value={`${s.online_now} / ${s.clients_active}`} />
+        <Stat label="Data this cycle" value={`${s.data_gb_this_cycle} GB`} />
+        <Stat label="Over FUP" value={String(s.over_fup)} alert={s.over_fup > 0} />
+        <Stat label="Clients" value={String(s.clients_total)} />
+      </div>
+      {s.top_consumers.length > 0 && (
+        <div className="mt-4 border-t border-[#141414]/10 pt-3">
+          <p className="mb-1.5 font-mono text-[10px] font-bold uppercase tracking-wide text-[#141414]/50">
+            Top consumers this cycle
+          </p>
+          {s.top_consumers.slice(0, 5).map((c) => (
+            <div key={c.account_number} className="flex items-baseline justify-between py-0.5 text-xs">
+              <span className="truncate">
+                <span className="font-mono text-[#141414]/60">{c.account_number}</span> {c.full_name}
+              </span>
+              <span className="font-mono">
+                {c.gb_total} GB{c.percent_used !== null ? ` · ${c.percent_used}%` : ''}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+function Stat({ label, value, alert = false }: { label: string; value: string; alert?: boolean }) {
+  return (
+    <div>
+      <p className="font-mono text-[10px] uppercase tracking-wide text-[#141414]/50">{label}</p>
+      <p className={`font-mono text-xl font-black tabular-nums ${alert ? 'text-[#B22222]' : ''}`}>
+        {value}
+      </p>
+    </div>
+  );
+}
 
 const FILTERS = ['all', 'active', 'pending_install', 'suspended', 'disabled'] as const;
 const STATUS_COLOR: Record<PppoeClient['status'], 'green' | 'amber' | 'red' | 'gray' | 'blue'> = {
@@ -102,6 +195,8 @@ export default function PppoeClientsView() {
         <RefreshBtn onClick={reload} />
       </ViewHeader>
 
+      <UsageSummaryTile />
+
       {showForm && (
         <Panel title="Set up a new client">
           <form onSubmit={create} className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
@@ -153,7 +248,7 @@ export default function PppoeClientsView() {
       <FilterChips options={FILTERS} value={filter} onChange={setFilter} right={<span className="text-[11px] font-mono text-[#141414]/50">{count} clients</span>} />
 
       <TableShell
-        headers={['Account', 'Name', 'Plan', 'Delivery', 'Status', 'Balance', 'Next due', '']}
+        headers={['Account', 'Name', 'Plan', 'Live', 'Usage (cycle)', 'Status', 'Balance', 'Next due', '']}
         loading={rows === null}
         error={error}
         empty="No broadband clients yet."
@@ -166,7 +261,8 @@ export default function PppoeClientsView() {
               <span className="block text-[11px] font-mono text-[#141414]/50">{c.pppoe_username}</span>
             </td>
             <td className={tdCls}>{c.plan_name}</td>
-            <td className={tdCls}><Badge color="gray">{c.delivery_method.replace('wireless_', '')}</Badge></td>
+            <td className={tdCls}><LiveDot client={c} /></td>
+            <td className={tdCls}><UsageCell client={c} /></td>
             <td className={tdCls}><Badge color={STATUS_COLOR[c.status]}>{c.status.replace('_', ' ')}</Badge></td>
             <td className={`${tdCls} font-mono text-right ${Number(c.balance) < 0 ? 'text-[#B22222]' : ''}`}>{fmtKsh(c.balance)}</td>
             <td className={`${tdCls} font-mono whitespace-nowrap`}>{c.next_due_date ?? '—'}</td>

@@ -175,6 +175,15 @@ class Client(OperatorOwnedModel):
     # RENEWAL — which moves next_due_date forward — automatically re-arms the reminder,
     # while a second run in the same cycle stays silent.
     expiry_reminded_on = models.DateField(null=True, blank=True)
+
+    # --- Live status, refreshed by the metering poll (pppoe.metering) ----------------
+    # A cheap cache so the dashboard/list can show who is up without touching a router.
+    is_online = models.BooleanField(default=False, db_index=True)
+    last_online_at = models.DateTimeField(null=True, blank=True)
+    wan_ip = models.GenericIPAddressField(null=True, blank=True)
+    session_uptime = models.CharField(max_length=32, blank=True, default="")
+    usage_synced_at = models.DateTimeField(null=True, blank=True)
+
     notes = models.TextField(blank=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL
@@ -323,3 +332,59 @@ class PppoeSettings(models.Model):
 
     def __str__(self):
         return f"PPPoE settings for {self.operator.slug}"
+
+
+class ClientUsage(OperatorOwnedModel):
+    """One broadband client's data usage for one BILLING CYCLE.
+
+    The accounting row behind FUP and the usage displays. Cumulative bytes for the cycle,
+    plus the last raw interface counter so the poller can compute a delta and survive the
+    reconnect resets that zero the router-side counter (see pppoe.metering).
+
+    Source-agnostic: today the poller feeds it from interface counters; a future RADIUS
+    Acct-Stop feed would write the same fields, so nothing downstream changes.
+    """
+
+    client = models.ForeignKey(
+        "pppoe.Client", on_delete=models.CASCADE, related_name="usage_periods"
+    )
+    #: First day of the billing cycle this usage belongs to (client's anniversary).
+    period_start = models.DateField(db_index=True)
+
+    #: Cumulative for the cycle. bytes_in = download to the client, bytes_out = upload.
+    bytes_in = models.BigIntegerField(default=0)
+    bytes_out = models.BigIntegerField(default=0)
+
+    #: The last raw counter we saw, to compute the next delta. A drop below the snapshot
+    #: means the session reconnected and the router's counter reset to zero.
+    snapshot_rx = models.BigIntegerField(default=0)  # client upload counter
+    snapshot_tx = models.BigIntegerField(default=0)  # client download counter
+    snapshot_at = models.DateTimeField(null=True, blank=True)
+
+    #: Which FUP % thresholds have already been alerted this cycle — so each fires once.
+    fup_alerted = models.JSONField(default=list, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-period_start"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["client", "period_start"], name="pppoe_usage_unique_client_period"
+            )
+        ]
+        indexes = [models.Index(fields=["operator", "period_start"])]
+
+    def __str__(self):
+        return f"{self.client.account_number} {self.period_start} {self.total_bytes}B"
+
+    @property
+    def total_bytes(self) -> int:
+        return self.bytes_in + self.bytes_out
+
+    @property
+    def total_gb(self):
+        from decimal import Decimal
+
+        return (Decimal(self.total_bytes) / Decimal(1024**3)).quantize(Decimal("0.01"))
