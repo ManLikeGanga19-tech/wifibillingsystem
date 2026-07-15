@@ -84,6 +84,15 @@ class ProvisioningAdapter(ABC):
     @abstractmethod
     def get_device_info(self) -> DeviceInfo: ...
 
+    # -- Hotspot profile ---------------------------------------------------
+    def ensure_hotspot_profile(self, plan) -> ProvisionResult:
+        """Create/update the /ip/hotspot/user/profile for a plan.
+
+        In RouterOS, rate-limit and shared-users are properties of the user PROFILE, not
+        the user — so the plan's speed and its device allowance live here, and the hotspot
+        user just references this profile by name."""
+        return ProvisionResult(ok=True, message="noop")
+
     # -- Multi-device sharing (tap-to-approve) -----------------------------
     # One paid session, several of a customer's devices. Default no-ops so an adapter that
     # can't do it (or a future RADIUS one) degrades gracefully rather than breaking callers.

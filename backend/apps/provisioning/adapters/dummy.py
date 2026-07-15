@@ -12,7 +12,15 @@ class DummyAdapter(ProvisioningAdapter):
     #: MACs logged in via login_device — so tests (and discovery) know they're now on.
     logged_in: set[str] = set()
 
+    def ensure_hotspot_profile(self, plan) -> ProvisionResult:
+        DummyAdapter.calls.append(
+            ("ensure_hotspot_profile", plan.mikrotik_profile, plan.device_allowance)
+        )
+        return ProvisionResult(ok=True, message="dummy profile ensured")
+
     def activate_user(self, session) -> ProvisionResult:
+        # Mirror the real adapter: speed + shared-users live on the profile, ensured first.
+        self.ensure_hotspot_profile(session.plan)
         DummyAdapter.calls.append(("activate", session.hotspot_username))
         return ProvisionResult(ok=True, message="dummy activated")
 

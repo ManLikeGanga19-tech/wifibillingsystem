@@ -554,12 +554,21 @@ function SuccessCard({
   onExpired: (planName: string) => void;
 }) {
   const session = status.session!;
-  // Auto-connect the device shortly after success when the router gave us a login URL
+  // Does this plan let them add more devices? If so we must NOT bounce them to the internet
+  // automatically — they'd lose the "add your devices" panel (and its in-memory token)
+  // before using it. Their paying device is already online (logged in server-side at
+  // activation), so staying on this screen costs them nothing.
+  const allowance = session.device_allowance;
+  const canAddDevices =
+    !!session.device_token && !!allowance && allowance.general + allowance.tv > 1;
+
+  // Auto-connect (redirect to the internet) only when there's nothing to add. Otherwise we
+  // hold here so they can put their laptop/TV on first, then tap "Done".
   useEffect(() => {
-    if (!hasRouterLogin) return;
+    if (!hasRouterLogin || canAddDevices) return;
     const t = window.setTimeout(() => onConnect(session), 2500);
     return () => window.clearTimeout(t);
-  }, [hasRouterLogin, onConnect, session]);
+  }, [hasRouterLogin, canAddDevices, onConnect, session]);
 
   // Live countdown. When the paid time runs out AND the customer still has this tab
   // open, we send them straight back to the plans to renew — instead of them silently
@@ -594,17 +603,26 @@ function SuccessCard({
           </div>
         )}
         <CredentialBox session={session} />
-        {hasRouterLogin ? (
+        {/* When there are more devices to add, we hold here (they're already online) and
+            let them add first; otherwise connect/redirect automatically as before. */}
+        {hasRouterLogin && !canAddDevices && (
           <>
             <p className="text-xs text-[#141414]/50">Connecting you automatically…</p>
             <ConnectButton onClick={() => onConnect(session)} />
           </>
-        ) : (
+        )}
+        {!hasRouterLogin && (
           <p className="text-xs text-[#141414]/50">
             Use these details on the WiFi login page to connect other devices.
           </p>
         )}
+        {canAddDevices && (
+          <p className="text-xs text-[#228B22] font-bold">You&apos;re online. Add your other devices below.</p>
+        )}
         <DevicePanel session={session} />
+        {hasRouterLogin && canAddDevices && (
+          <ConnectButton onClick={() => onConnect(session)} label="Done — start browsing" />
+        )}
       </div>
     </Card>
   );
@@ -619,13 +637,13 @@ function CredentialBox({ session }: { session: SessionInfo }) {
   );
 }
 
-function ConnectButton({ onClick }: { onClick: () => void }) {
+function ConnectButton({ onClick, label = 'Connect now' }: { onClick: () => void; label?: string }) {
   return (
     <button
       onClick={onClick}
       className="w-full bg-[#141414] text-[#E4E3E0] font-bold py-3.5 flex items-center justify-center gap-2 active:opacity-80"
     >
-      <Wifi className="h-4 w-4" /> Connect now
+      <Wifi className="h-4 w-4" /> {label}
     </button>
   );
 }

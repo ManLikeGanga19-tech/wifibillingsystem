@@ -84,6 +84,45 @@ def record_paying_device(session: Session) -> SessionDevice | None:
     return device
 
 
+def login_paying_device(session: Session) -> bool:
+    """Put the device that paid actually ONLINE, by logging its MAC into the hotspot as the
+    session account.
+
+    Provisioning the account (activate_user) is NOT enough — the device is still sitting at
+    the captive portal, authenticated to nothing. On the normal flow the portal submits the
+    login for it; on a manual reconnect nothing does, so the dashboard says "online" while
+    the customer's device has no internet. This closes that gap for any device currently on
+    the Wi-Fi. Best-effort and idempotent (a second login just finds it already active).
+    Returns True if we issued the login.
+    """
+    mac = (session.mac_address or "").strip()
+    if not mac:
+        return False  # no MAC captured (some captive setups omit it) — nothing to log in
+    try:
+        mac = normalize_mac(mac)
+    except DeviceError:
+        return False
+
+    adapter = get_adapter(session.router)
+    ip = ""
+    try:
+        for h in adapter.list_hosts():
+            if (h.mac_address or "").upper() == mac:
+                ip = h.ip_address
+                break
+    except ProvisioningError:
+        pass  # login can still work MAC-only; the IP is a best-effort hint
+
+    adapter.login_device(
+        username=session.hotspot_username,
+        password=session.hotspot_password,
+        mac=mac,
+        ip=ip,
+    )
+    logger.info("Logged paying device %s online for session #%s", mac, session.pk)
+    return True
+
+
 def discover_devices(session: Session) -> list[dict]:
     """Devices currently on the hotspot that the customer could add — from the router's
     live host table, minus the ones already on this session and any already authorised

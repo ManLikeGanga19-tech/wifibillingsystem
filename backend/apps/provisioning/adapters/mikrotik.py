@@ -64,19 +64,46 @@ class MikroTikRestAdapter(ProvisioningAdapter):
         users = resp.json()
         return users[0][".id"] if users else None
 
+    def ensure_hotspot_profile(self, plan) -> ProvisionResult:
+        """Upsert the /ip/hotspot/user/profile carrying the plan's speed + device allowance.
+
+        rate-limit and shared-users are PROFILE properties in RouterOS, not user ones — so
+        this is where they belong. PATCH an existing profile (preserving whatever else the
+        ISP set on it) or create it; the hotspot user then just names this profile.
+        """
+        payload = {
+            "name": plan.mikrotik_profile,
+            "rate-limit": plan.rate_limit,
+            # Devices that may share ONE account at once: the paying phone plus the
+            # laptops/TV added via tap-to-approve.
+            "shared-users": str(plan.device_allowance),
+        }
+        try:
+            with self._client() as client:
+                existing = self._find_id(
+                    client, "/ip/hotspot/user/profile", name=plan.mikrotik_profile
+                )
+                if existing:
+                    resp = client.patch(f"/ip/hotspot/user/profile/{existing}", json=payload)
+                else:
+                    resp = client.put("/ip/hotspot/user/profile", json=payload)
+                resp.raise_for_status()
+                return ProvisionResult(ok=True, message="profile ensured", raw=_safe_json(resp))
+        except httpx.HTTPError as exc:
+            raise ProvisioningError(
+                f"ensure_hotspot_profile failed on {self.router}: {exc}"
+            ) from exc
+
     def activate_user(self, session) -> ProvisionResult:
         plan = session.plan
+        # Speed + device allowance live on the profile (RouterOS rejects them on the user),
+        # so make sure the plan's profile carries them before we point the user at it.
+        self.ensure_hotspot_profile(plan)
         payload = {
             "name": session.hotspot_username,
             "password": session.hotspot_password,
             "profile": plan.mikrotik_profile,
             "limit-uptime": _ros_duration(plan.duration_seconds),
-            # Enforce the plan's speed on the USER, so bandwidth is capped even if the
-            # named profile on the router is misconfigured or missing. Belt and braces.
-            "rate-limit": plan.rate_limit,
-            # How many of the customer's devices may share this ONE account (and so its one
-            # time+data budget): their phone plus the laptops/TV they add via tap-to-approve.
-            "shared-users": str(plan.device_allowance),
             "comment": f"wifi.os session #{session.pk}",
         }
         if plan.data_cap_mb:
@@ -89,7 +116,7 @@ class MikroTikRestAdapter(ProvisioningAdapter):
                 else:
                     resp = client.put("/ip/hotspot/user", json=payload)
                 resp.raise_for_status()
-                return ProvisionResult(ok=True, message="activated", raw=resp.json())
+                return ProvisionResult(ok=True, message="activated", raw=_safe_json(resp))
         except httpx.HTTPError as exc:
             raise ProvisioningError(f"activate_user failed on {self.router}: {exc}") from exc
 

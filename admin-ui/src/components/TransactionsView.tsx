@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Receipt, RefreshCw, Loader2, AlertTriangle, Wifi, CheckCircle2 } from 'lucide-react';
+import {
+  Receipt,
+  RefreshCw,
+  Loader2,
+  AlertTriangle,
+  Wifi,
+  CheckCircle2,
+  ChevronDown,
+} from 'lucide-react';
 import { api, ApiTransaction } from '../api/client';
 import { toast } from './ui';
 
@@ -22,6 +30,8 @@ export default function TransactionsView() {
   // The "paid but never connected" queue — the customers who paid and are stuck.
   const [unconnected, setUnconnected] = useState<ApiTransaction[]>([]);
   const [reconnecting, setReconnecting] = useState<number | null>(null);
+  const [queueOpen, setQueueOpen] = useState(false);
+  const [reconnectingAll, setReconnectingAll] = useState(false);
 
   const load = useCallback(async () => {
     setRefreshing(true);
@@ -62,6 +72,23 @@ export default function TransactionsView() {
     }
   };
 
+  const reconnectAll = async () => {
+    if (reconnectingAll) return;
+    setReconnectingAll(true);
+    let ok = 0;
+    for (const tx of unconnected) {
+      try {
+        await api.transactions.reconnect(tx.id);
+        ok += 1;
+      } catch {
+        /* keep going — one stuck customer must not block the rest */
+      }
+    }
+    toast(ok ? 'success' : 'error', `Reconnected ${ok} of ${unconnected.length}.`);
+    setReconnectingAll(false);
+    load();
+  };
+
   return (
     <div className="space-y-6 text-[#141414]">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -89,41 +116,74 @@ export default function TransactionsView() {
           they paid and got nothing. */}
       {unconnected.length > 0 && (
         <div className="border border-[#B26B00] bg-[#FFF8EC]">
-          <div className="flex items-center gap-2 px-3 py-2.5 border-b border-[#B26B00]/40">
-            <AlertTriangle className="h-4 w-4 text-[#B26B00]" />
-            <p className="text-xs font-bold font-mono uppercase text-[#B26B00]">
+          {/* Collapsible header — keeps the page tidy; the count is always visible so a
+              stuck-customer queue is never hidden, just folded away until needed. */}
+          <button
+            onClick={() => setQueueOpen((o) => !o)}
+            className="w-full flex items-center gap-2 px-3 py-2.5 text-left cursor-pointer hover:bg-[#FFF3DC] transition"
+            aria-expanded={queueOpen}
+          >
+            <AlertTriangle className="h-4 w-4 text-[#B26B00] shrink-0" />
+            <p className="text-xs font-bold font-mono uppercase text-[#B26B00] flex-1">
               {unconnected.length} paid customer{unconnected.length > 1 ? 's' : ''} not connected
             </p>
-          </div>
-          <div className="divide-y divide-[#B26B00]/15">
-            {unconnected.map((tx) => (
-              <div key={tx.id} className="flex items-center gap-3 px-3 py-2.5 text-xs">
-                <div className="flex-1 min-w-0">
-                  <p className="font-mono font-bold">{tx.phone}</p>
-                  <p className="text-[#141414]/60 font-mono">
-                    {tx.plan_name} · KSh {Number(tx.amount).toLocaleString()}
-                    {tx.mpesa_receipt && ` · ${tx.mpesa_receipt}`}
-                    {tx.status === 'reconciled' && ' · reconciled'}
-                  </p>
-                </div>
-                <button
-                  onClick={() => reconnect(tx)}
-                  disabled={reconnecting === tx.id}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 font-bold font-mono uppercase border border-[#228B22] bg-[#228B22] text-white hover:opacity-85 transition cursor-pointer disabled:opacity-40 shrink-0"
-                >
-                  {reconnecting === tx.id ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Wifi className="h-3.5 w-3.5" />
-                  )}
-                  Reconnect
-                </button>
+            <span className="text-[10px] font-mono text-[#B26B00]/70 uppercase hidden sm:inline">
+              {queueOpen ? 'Hide' : 'Review'}
+            </span>
+            <ChevronDown
+              className={`h-4 w-4 text-[#B26B00] shrink-0 transition-transform ${queueOpen ? 'rotate-180' : ''}`}
+            />
+          </button>
+
+          {queueOpen && (
+            <>
+              <div className="flex items-center justify-between gap-3 px-3 py-2 border-t border-[#B26B00]/25 bg-[#FFF3DC]/50">
+                <p className="text-[10px] font-mono text-[#141414]/55">
+                  Reconnecting starts their time over — they keep the full plan they paid for.
+                </p>
+                {unconnected.length > 1 && (
+                  <button
+                    onClick={reconnectAll}
+                    disabled={reconnectingAll || reconnecting !== null}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-bold font-mono uppercase border border-[#B26B00] text-[#B26B00] hover:bg-[#B26B00] hover:text-white transition cursor-pointer disabled:opacity-40 shrink-0"
+                  >
+                    {reconnectingAll ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Wifi className="h-3.5 w-3.5" />
+                    )}
+                    Reconnect all
+                  </button>
+                )}
               </div>
-            ))}
-          </div>
-          <p className="px-3 py-2 text-[10px] font-mono text-[#141414]/50 border-t border-[#B26B00]/15">
-            Reconnecting starts their time over from now — they keep the full plan they paid for.
-          </p>
+              <div className="divide-y divide-[#B26B00]/15">
+                {unconnected.map((tx) => (
+                  <div key={tx.id} className="flex items-center gap-3 px-3 py-2.5 text-xs">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-mono font-bold">{tx.phone}</p>
+                      <p className="text-[#141414]/60 font-mono">
+                        {tx.plan_name} · KSh {Number(tx.amount).toLocaleString()}
+                        {tx.mpesa_receipt && ` · ${tx.mpesa_receipt}`}
+                        {tx.status === 'reconciled' && ' · reconciled'}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => reconnect(tx)}
+                      disabled={reconnecting === tx.id || reconnectingAll}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 font-bold font-mono uppercase border border-[#228B22] bg-[#228B22] text-white hover:opacity-85 transition cursor-pointer disabled:opacity-40 shrink-0"
+                    >
+                      {reconnecting === tx.id || reconnectingAll ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Wifi className="h-3.5 w-3.5" />
+                      )}
+                      Reconnect
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       )}
 

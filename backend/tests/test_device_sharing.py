@@ -41,13 +41,15 @@ def test_device_allowance_is_general_plus_tv():
     assert plan.device_allowance == 4
 
 
-def test_activation_pushes_shared_users_to_the_router():
-    """The MikroTik payload must carry shared-users = allowance, or the router would only
-    ever let ONE device on no matter how many the plan sells."""
+def test_activation_puts_shared_users_on_the_profile_not_the_user():
+    """RouterOS rejects rate-limit/shared-users on the hotspot USER — they belong on the
+    PROFILE. So activation must upsert the profile with shared-users = allowance, and the
+    user payload must NOT carry shared-users (that was a real 400-on-every-activation bug)."""
     from apps.provisioning.adapters.mikrotik import MikroTikRestAdapter
 
     session = a_session(shared_users=3, tv_slots=1)
-    captured = {}
+    profile_payload = {}
+    user_payload = {}
 
     class FakeResp:
         def raise_for_status(self): ...
@@ -61,12 +63,13 @@ def test_activation_pushes_shared_users_to_the_router():
             return False
         def get(self, *a, **k):
             return _Empty()
+        def _capture(self, path, json):
+            (profile_payload if "profile" in path else user_payload).update(json or {})
+            return FakeResp()
         def put(self, path, json=None):
-            captured.update(json or {})
-            return FakeResp()
+            return self._capture(path, json)
         def patch(self, path, json=None):
-            captured.update(json or {})
-            return FakeResp()
+            return self._capture(path, json)
 
     class _Empty:
         def raise_for_status(self): ...
@@ -76,7 +79,12 @@ def test_activation_pushes_shared_users_to_the_router():
     adapter = MikroTikRestAdapter(session.router)
     adapter._client = lambda: FakeClient()
     adapter.activate_user(session)
-    assert captured["shared-users"] == "4"
+    # allowance = 3 + 1 = 4, on the PROFILE
+    assert profile_payload["shared-users"] == "4"
+    assert profile_payload["rate-limit"]  # speed lives on the profile too
+    # ...and NOT on the user (which is what RouterOS 400'd on)
+    assert "shared-users" not in user_payload
+    assert "rate-limit" not in user_payload
 
 
 # --- discovery --------------------------------------------------------------------------
@@ -230,9 +238,11 @@ def test_an_expired_session_token_stops_working(api_client):
     assert api_client.get(DEVICES, {"token": session.device_token}).status_code == 404
 
 
-def test_activation_records_the_paying_device():
-    """Going through the real activate() path must leave the paying phone listed as device
-    #1 (a general slot, un-removable), so the customer sees it and the allowance counts it."""
+def test_activation_records_and_logs_in_the_paying_device():
+    """Going through the real activate() path must (1) list the paying phone as device #1
+    (un-removable general slot) AND (2) actually LOG IT IN — creating the account is not
+    enough; the device has to be authenticated to the hotspot or the dashboard says
+    'online' while the customer has no internet (the exact bug reconnect hit)."""
     from apps.provisioning.services import activate
 
     session = a_session(shared_users=3, mac="AA:BB:CC:DD:EE:01")
@@ -243,6 +253,10 @@ def test_activation_records_the_paying_device():
     payer = SessionDevice.objects.get(session=session, is_paying_device=True)
     assert payer.mac_address == "AA:BB:CC:DD:EE:01"
     assert payer.kind == SessionDevice.Kind.PHONE
+    # The device was pushed online, not just recorded.
+    assert ("login_device", "AA:BB:CC:DD:EE:01", session.hotspot_username) in DummyAdapter.calls
+    # And activation upserted the profile (where shared-users/rate-limit belong).
+    assert any(c[0] == "ensure_hotspot_profile" for c in DummyAdapter.calls)
 
 
 def test_device_management_is_tenant_isolated():

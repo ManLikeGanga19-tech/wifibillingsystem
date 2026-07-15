@@ -194,15 +194,18 @@ def activate(session: Session) -> None:
         router=session.router.name,
         message=result.message,
     )
-    # Register the device that paid as the session's first device, so the tap-to-approve
-    # allowance counts it and the customer sees it listed. Best-effort — a hiccup here must
-    # never fail the activation they already paid for.
+    # Register the device that paid (so the tap-to-approve allowance counts it) AND put it
+    # actually online — creating the account is not the same as the device authenticating to
+    # the hotspot. This is what makes a manual reconnect connect a customer sitting at the
+    # captive portal, instead of the dashboard saying "online" while their device has nothing.
+    # Best-effort — a hiccup here must never fail the activation they already paid for.
     try:
-        from .devices import record_paying_device
+        from .devices import login_paying_device, record_paying_device
 
         record_paying_device(session)
+        login_paying_device(session)
     except Exception:
-        logger.exception("Could not record the paying device for session %s", session.pk)
+        logger.exception("Could not record/login the paying device for session %s", session.pk)
 
     # "You're online" — the receipt. Best-effort: a failed SMS must never fail the
     # activation the customer already paid for.
