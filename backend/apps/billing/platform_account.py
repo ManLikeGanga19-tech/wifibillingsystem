@@ -194,3 +194,7 @@ def credit_topup(topup) -> None:
         amount=str(topup.amount),
         credit=str(topup.credit),
     )
+    # If that cleared their debt, their outstanding statements are now paid.
+    from .invoicing import settle_outstanding_if_clear
+
+    settle_outstanding_if_clear(topup.operator)

@@ -8,6 +8,7 @@ import {
 } from '../../api/client';
 import { Btn, Field, inputCls, Panel, toast } from '../ui';
 import BalanceCard from './BalanceCard';
+import Statements from './Statements';
 
 /**
  * Communications — pick the gateway your messages leave on.
@@ -74,6 +75,7 @@ export default function CommsPanel({ channel }: { channel: ChannelId }) {
       </p>
 
       {channel === 'sms' && data.account && <BalanceCard account={data.account} onChanged={load} />}
+      {channel === 'sms' && <Statements />}
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {data.providers.map((p) => (

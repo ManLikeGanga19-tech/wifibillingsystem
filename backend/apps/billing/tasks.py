@@ -103,3 +103,11 @@ def warn_past_due_operators():
         warned += 1
 
     return warned
+
+
+@shared_task
+def issue_monthly_invoices():
+    """Beat (1st of the month): a platform statement per ISP for the prior month."""
+    from .invoicing import issue_monthly_invoices as run
+
+    return run()

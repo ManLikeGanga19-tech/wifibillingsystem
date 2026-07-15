@@ -561,6 +561,21 @@ export interface PlatformAccount {
   min_topup: string;
 }
 
+export interface PlatformInvoiceLine {
+  label: string;
+  amount: string;
+  /** False for the aggregator commission we already took — shown, but not owed. */
+  due: boolean;
+}
+export interface PlatformInvoice {
+  period: string;
+  issued_at: string;
+  status: 'outstanding' | 'paid';
+  paid_at: string | null;
+  total: string;
+  lines: PlatformInvoiceLine[];
+}
+
 export interface TopUpStarted {
   id: number;
   amount: string;
@@ -963,6 +978,9 @@ export const api = {
         method: 'PATCH',
         body: JSON.stringify(data),
       }),
+
+    /** Monthly statements — the itemised record of every fee WIFI.OS charged this ISP. */
+    invoices: () => request<{ invoices: PlatformInvoice[] }>('/billing/account/invoices/'),
   },
 
   domain: {

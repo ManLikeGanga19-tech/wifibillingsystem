@@ -113,9 +113,28 @@ function TenantList({ onOpen }: { onOpen: (id: number) => void }) {
                   {t.status === 'active' && (
                     <Btn
                       variant="danger"
-                      onClick={() => act(api.tenants.suspend(t.id), `${t.name} suspended.`)}
+                      onClick={() => {
+                        // A full lockout is the last resort — require a typed reason. It is
+                        // recorded and shown to the ISP, so a non-payer is told to settle
+                        // rather than left guessing at "contact support".
+                        const reason = window.prompt(
+                          `Suspend ${t.name}? This fully locks their console (they cannot ` +
+                            `self-cure). Enter a reason the ISP will see:`
+                        );
+                        if (reason && reason.trim()) {
+                          act(api.tenants.suspend(t.id, reason.trim()), `${t.name} suspended.`);
+                        }
+                      }}
                     >
                       <Ban className="h-3.5 w-3.5" /> Suspend
+                    </Btn>
+                  )}
+                  {t.status === 'suspended' && (
+                    <Btn
+                      variant="dark"
+                      onClick={() => act(api.tenants.restore(t.id), `${t.name} restored.`)}
+                    >
+                      <Check className="h-3.5 w-3.5" /> Restore
                     </Btn>
                   )}
                   {/* THE LOST PHONE. The only way back for an ISP owner who cannot

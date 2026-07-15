@@ -77,6 +77,46 @@ class PlatformAccountView(APIView):
         return Response(_summary(acting_tenant(request)))
 
 
+class PlatformInvoicesView(APIView):
+    """The ISP's monthly statements from WIFI.OS — an itemised record of every fee."""
+
+    permission_classes = [IsAdminUser, RequireTenant, TenantIsOperational, CanManageMoney]
+
+    @extend_schema(responses=OBJECT_RESPONSE, summary="This ISP's monthly platform statements")
+    def get(self, request):
+        from .models import PlatformInvoice
+
+        operator = acting_tenant(request)
+        invoices = PlatformInvoice.objects.filter(operator=operator)[:24]
+        return Response(
+            {
+                "invoices": [
+                    {
+                        "period": inv.period,
+                        "issued_at": inv.issued_at,
+                        "status": inv.status,
+                        "paid_at": inv.paid_at,
+                        "total": str(inv.total),
+                        "lines": [
+                            {"label": "Monthly subscription", "amount": str(inv.base_fee),
+                             "due": True},
+                            {"label": "PPPoE per-user fees", "amount": str(inv.pppoe_fee),
+                             "due": True},
+                            {"label": "One-time setup fee", "amount": str(inv.setup_fee),
+                             "due": True},
+                            {"label": "Commission on your own-gateway sales",
+                             "amount": str(inv.direct_commission), "due": True},
+                            {"label": "SMS", "amount": str(inv.sms), "due": True},
+                            {"label": "Commission on WIFI.OS-paybill sales (already deducted)",
+                             "amount": str(inv.withheld_commission), "due": False},
+                        ],
+                    }
+                    for inv in invoices
+                ]
+            }
+        )
+
+
 class TopUpSerializer(serializers.Serializer):
     phone = serializers.CharField(max_length=20)
     bundle = serializers.CharField(max_length=20, required=False, allow_blank=True)

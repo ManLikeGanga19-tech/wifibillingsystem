@@ -258,10 +258,41 @@ class PlatformTenantViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def suspend(self, request, pk=None):
+        """Full suspension — the LAST RESORT, and always a human's decision.
+
+        This is deliberately NOT part of the automatic ladder (which stops at read-only +
+        pay, so an ISP can always self-cure). A full suspension shuts the console entirely;
+        reinstatement is therefore also manual (restore, below). Used when an ISP has
+        ignored every warning, or for a trust/AML reason — the `reason` records which, so
+        the login gate and the audit trail tell the truth about why.
+        """
         operator = self.get_object()
+        reason = str(request.data.get("reason", "")).strip()[:200]
         operator.status = Operator.Status.SUSPENDED
-        operator.save(update_fields=["status", "updated_at"])
-        audit("tenant_suspended", operator=operator, actor=request.user, target=operator)
+        operator.suspension_reason = reason
+        operator.save(update_fields=["status", "suspension_reason", "updated_at"])
+        audit("tenant_suspended", operator=operator, actor=request.user, target=operator,
+              reason=reason)
+        return Response({"status": operator.status, "suspension_reason": reason})
+
+    @action(detail=True, methods=["post"])
+    def restore(self, request, pk=None):
+        """Reverse a suspension — the human's decision to let them back in. Goes through the
+        SAME activation service as approval, so a restored ISP is left in a consistent live
+        state (held payments released, audit written), never a half-on tenant hand-edited in
+        the admin."""
+        from .settlement import activate_operator
+
+        operator = self.get_object()
+        if operator.status != Operator.Status.SUSPENDED:
+            return Response(
+                {"detail": f"Tenant is {operator.status}, not suspended."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        operator.suspension_reason = ""
+        operator.save(update_fields=["suspension_reason", "updated_at"])
+        activate_operator(operator, actor=request.user, reason="restored by platform")
+        audit("tenant_restored", operator=operator, actor=request.user, target=operator)
         return Response({"status": operator.status})
 
 

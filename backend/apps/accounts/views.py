@@ -85,7 +85,9 @@ def _go_live_blockers(op) -> list[dict]:
             {
                 "key": "suspended",
                 "label": "Account suspended",
-                "detail": "Contact the platform administrator.",
+                # Tell them WHY when we know — a suspended-for-non-payment ISP should be
+                # told to settle, not left to guess at "contact support".
+                "detail": op.suspension_reason or "Contact the platform administrator.",
                 "done": False,
                 "actionable": False,
             }

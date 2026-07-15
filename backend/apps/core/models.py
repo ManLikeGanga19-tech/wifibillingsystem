@@ -54,6 +54,11 @@ class Operator(TimeStampedModel):
     # same discipline as the low-SMS-balance alert.
     billing_warned_at = models.DateTimeField(null=True, blank=True)
 
+    # Why a SUSPENDED tenant was suspended — set by the manual platform action so the login
+    # gate can tell the truth ("settle your balance to be reinstated" vs a trust matter),
+    # rather than a generic "contact support" that leaves a paying ISP guessing.
+    suspension_reason = models.CharField(max_length=200, blank=True, default="")
+
     # The secret in this ISP's payment webhook URL. It NAMES the operator (so an incoming
     # callback is attributed without trusting anything in the body) and AUTHENTICATES it
     # (so a random POST is a 404, not a free WiFi session). Per-tenant, because each ISP

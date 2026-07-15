@@ -290,7 +290,11 @@ export const api = {
     detail: (id: number) => get<TenantDetail>(`/platform/tenants/${id}/detail_stats/`),
     update: (id: number, body: Partial<Tenant>) => patch<Tenant>(`/platform/tenants/${id}/`, body),
     approve: (id: number) => post<unknown>(`/platform/tenants/${id}/approve/`),
-    suspend: (id: number) => post<unknown>(`/platform/tenants/${id}/suspend/`),
+    /** The last resort — a full lockout, always a person's decision. `reason` is recorded
+     *  and shown to the ISP (so a non-payer is told to settle, not left guessing). */
+    suspend: (id: number, reason: string) =>
+      post<unknown>(`/platform/tenants/${id}/suspend/`, { reason }),
+    restore: (id: number) => post<unknown>(`/platform/tenants/${id}/restore/`),
     chargeSetup: (id: number) =>
       post<{ charged: boolean; detail: string }>(`/platform/tenants/${id}/charge-setup/`),
     /** THE LOST PHONE. Clears an ISP owner's authenticator so they can enrol a new one.

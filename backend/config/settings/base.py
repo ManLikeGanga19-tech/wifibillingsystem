@@ -192,6 +192,12 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.billing.tasks.warn_past_due_operators",
         "schedule": crontab(minute=5),  # hourly; warns once per fall
     },
+    # Issue each ISP their monthly statement for the prior month. A record, not the
+    # enforcement clock — the ladder already ran all month on live exposure.
+    "issue-monthly-invoices": {
+        "task": "apps.billing.tasks.issue_monthly_invoices",
+        "schedule": crontab(minute=45, hour=0, day_of_month=1),
+    },
     "charge-monthly-base-fees": {
         "task": "apps.billing.tasks.charge_monthly_base_fees",
         "schedule": crontab(minute=30, hour=0, day_of_month=1),

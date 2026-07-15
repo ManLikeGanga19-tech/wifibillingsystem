@@ -10,6 +10,7 @@ from .report_views import (
 from .topup_views import (
     LowBalanceAlertView,
     PlatformAccountView,
+    PlatformInvoicesView,
     TopUpCallbackView,
     TopUpStatusView,
     TopUpView,
@@ -26,6 +27,7 @@ urlpatterns = [
     # The ISP's account WITH US: what they owe, and topping it up by STK.
     path("account/", PlatformAccountView.as_view(), name="platform-account"),
     path("account/alerts/", LowBalanceAlertView.as_view(), name="platform-account-alerts"),
+    path("account/invoices/", PlatformInvoicesView.as_view(), name="platform-invoices"),
     path("topup/", TopUpView.as_view(), name="topup"),
     path("topup/<int:pk>/", TopUpStatusView.as_view(), name="topup-status"),
     # Its OWN callback — this money flows the other way and must never be mistaken for a

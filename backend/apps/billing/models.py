@@ -294,3 +294,58 @@ class TopUp(OperatorOwnedModel):
 
     def __str__(self):
         return f"{self.operator.slug} top-up KSh {self.amount} [{self.status}]"
+
+
+class PlatformInvoice(OperatorOwnedModel):
+    """The ISP's monthly statement from WIFI.OS — what we charged THEM.
+
+    Not to be confused with pppoe.Invoice (what a broadband SUBSCRIBER owes the ISP). This
+    is the other direction: what the ISP owes US.
+
+    A STATEMENT, not a fresh charge. The fees were already accrued to the platform account
+    as they happened (billing.services), and enforcement already runs on the live balance.
+    This snapshots a month so the ISP has a formal, itemised record — every fee visible,
+    however the underlying sale settled, so nothing goes unnoticed.
+
+    `withheld_commission` is shown for completeness and marked "already deducted": on an
+    aggregator sale we took our cut at source, so it is not money owed — but it belongs on
+    the statement so the picture is whole.
+    """
+
+    class Status(models.TextChoices):
+        OUTSTANDING = "outstanding", "Outstanding"
+        PAID = "paid", "Paid"
+
+    period = models.CharField(max_length=7, help_text="YYYY-MM")
+    issued_at = models.DateTimeField(auto_now_add=True)
+
+    # The period's fees, itemised. All positive amounts (what we charged).
+    base_fee = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    pppoe_fee = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    setup_fee = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    #: Commission on the ISP's OWN-gateway sales — money DUE (we could not withhold it).
+    direct_commission = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    sms = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    #: Aggregator commission, ALREADY taken at source. Informational, not part of the total.
+    withheld_commission = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+
+    #: The fees this statement charges = everything except the already-withheld commission.
+    total = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+
+    status = models.CharField(
+        max_length=12, choices=Status.choices, default=Status.OUTSTANDING, db_index=True
+    )
+    paid_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-period"]
+        constraints = [
+            # One statement per operator per month, ever — a re-run of the beat task is a
+            # no-op, never a duplicate bill.
+            models.UniqueConstraint(
+                fields=["operator", "period"], name="one_platform_invoice_per_month"
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.operator.slug} statement {self.period} KSh {self.total} [{self.status}]"
