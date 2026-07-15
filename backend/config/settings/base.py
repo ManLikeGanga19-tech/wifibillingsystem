@@ -126,6 +126,9 @@ REST_FRAMEWORK = {
         "login": "10/min",
         "stk-push": "10/min",
         "voucher-redeem": "15/min",
+        # Tap-to-approve device management — token-gated, but bounded so a leaked token
+        # can't hammer the router.
+        "device-mgmt": "40/min",
         # The 5-step wizard makes several calls per applicant, so the old
         # 5/hour would have blocked a legitimate signup halfway through. The real
         # abuse control is PER-TARGET (SignupThrottle: 3 codes/email/hr,

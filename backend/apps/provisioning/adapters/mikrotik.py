@@ -12,11 +12,21 @@ import httpx
 from .base import (
     ActiveSession,
     DeviceInfo,
+    HostEntry,
     ProvisioningAdapter,
     ProvisioningAuthError,
     ProvisioningError,
     ProvisionResult,
 )
+
+
+def _safe_json(resp) -> dict:
+    """RouterOS command endpoints sometimes answer 200 with an empty body."""
+    try:
+        body = resp.json()
+    except ValueError:
+        return {}
+    return body if isinstance(body, dict) else {"result": body}
 
 # PPPoE profile a suspended (overdue) client is moved onto. The router should have
 # this profile firewalled to a walled garden that redirects http to a pay page.
@@ -64,6 +74,9 @@ class MikroTikRestAdapter(ProvisioningAdapter):
             # Enforce the plan's speed on the USER, so bandwidth is capped even if the
             # named profile on the router is misconfigured or missing. Belt and braces.
             "rate-limit": plan.rate_limit,
+            # How many of the customer's devices may share this ONE account (and so its one
+            # time+data budget): their phone plus the laptops/TV they add via tap-to-approve.
+            "shared-users": str(plan.device_allowance),
             "comment": f"wifi.os session #{session.pk}",
         }
         if plan.data_cap_mb:
@@ -130,6 +143,75 @@ class MikroTikRestAdapter(ProvisioningAdapter):
                 f"{self.router} rejected our API credentials (status {resp.status_code})"
             )
         return resp.status_code == 200
+
+    # -- Multi-device sharing (tap-to-approve) ----------------------------
+    def list_hosts(self) -> list[HostEntry]:
+        """Devices the router currently sees on the hotspot LAN, named from DHCP leases.
+
+        /ip/hotspot/host is the live table; a host is `authorized` once it has an
+        associated hotspot user (it belongs to a paid session already). We join DHCP
+        leases by MAC purely for a friendly name to show the customer.
+        """
+        try:
+            with self._client() as client:
+                resp = client.get("/ip/hotspot/host")
+                resp.raise_for_status()
+                hosts = resp.json()
+                leases = client.get("/ip/dhcp-server/lease").json()
+        except httpx.HTTPError as exc:
+            raise ProvisioningError(f"list_hosts failed on {self.router}: {exc}") from exc
+
+        names = {
+            (lease.get("mac-address") or "").upper(): lease.get("host-name", "")
+            for lease in leases
+        }
+        out = []
+        for h in hosts:
+            mac = (h.get("mac-address") or "").upper()
+            if not mac:
+                continue
+            out.append(
+                HostEntry(
+                    mac_address=mac,
+                    ip_address=h.get("address", ""),
+                    hostname=h.get("host-name") or names.get(mac, ""),
+                    # A host tied to a user, or explicitly bypassed, is already "on".
+                    authorized=bool(h.get("authorized") == "true" or h.get("bypassed") == "true"),
+                )
+            )
+        return out
+
+    def login_device(self, *, username, password, mac, ip="") -> ProvisionResult:
+        """Log a MAC into the hotspot as `username`, so it joins that account's shared
+        session. Uses the RouterOS hotspot login command.
+
+        NOTE: the exact REST shape of the login command is validated against real hardware
+        in the pilot (see docs); the call is isolated here so only this method changes if
+        RouterOS wants a different field set.
+        """
+        payload = {"user": username, "password": password, "mac-address": mac.upper()}
+        if ip:
+            payload["ip"] = ip
+        try:
+            with self._client() as client:
+                resp = client.post("/ip/hotspot/active/login", json=payload)
+                resp.raise_for_status()
+                return ProvisionResult(ok=True, message="device logged in", raw=_safe_json(resp))
+        except httpx.HTTPError as exc:
+            raise ProvisioningError(f"login_device failed on {self.router}: {exc}") from exc
+
+    def logout_device(self, mac) -> ProvisionResult:
+        """Drop just this MAC's live session, leaving the account's other devices online."""
+        mac = mac.upper()
+        try:
+            with self._client() as client:
+                resp = client.get("/ip/hotspot/active", params={"mac-address": mac})
+                resp.raise_for_status()
+                for active in resp.json():
+                    client.delete(f"/ip/hotspot/active/{active['.id']}").raise_for_status()
+                return ProvisionResult(ok=True, message="device logged out")
+        except httpx.HTTPError as exc:
+            raise ProvisioningError(f"logout_device failed on {self.router}: {exc}") from exc
 
     # -- PPPoE ------------------------------------------------------------
     def _find_id(self, client_http, path: str, **params) -> str | None:

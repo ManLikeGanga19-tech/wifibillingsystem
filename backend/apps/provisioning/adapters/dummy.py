@@ -1,12 +1,16 @@
 """No-op adapter for development and tests. Records calls so tests can assert on them."""
 
-from .base import ActiveSession, DeviceInfo, ProvisioningAdapter, ProvisionResult
+from .base import ActiveSession, DeviceInfo, HostEntry, ProvisioningAdapter, ProvisionResult
 
 
 class DummyAdapter(ProvisioningAdapter):
     calls: list[tuple] = []  # class-level, shared across instances (reset in tests)
     #: Tests set this to drive usage sync: {username: (bytes_in, bytes_out)}.
     usage: dict[str, tuple[int, int]] = {}
+    #: Tests set this to drive device discovery: {mac: (ip, hostname, authorized)}.
+    hosts: dict[str, tuple[str, str, bool]] = {}
+    #: MACs logged in via login_device — so tests (and discovery) know they're now on.
+    logged_in: set[str] = set()
 
     def activate_user(self, session) -> ProvisionResult:
         DummyAdapter.calls.append(("activate", session.hotspot_username))
@@ -73,6 +77,39 @@ class DummyAdapter(ProvisioningAdapter):
                 )
             )
         return out
+
+    # -- Multi-device sharing ---------------------------------------------
+    #: Tests set this to make the router refuse a device login, exercising the rollback.
+    login_fails: bool = False
+
+    def list_hosts(self) -> list[HostEntry]:
+        out = []
+        for mac, v in DummyAdapter.hosts.items():
+            ip, hostname = (v[0], v[1]) if len(v) > 1 else ("", "")
+            seeded_auth = v[2] if len(v) > 2 else False
+            out.append(
+                HostEntry(
+                    mac_address=mac,
+                    ip_address=ip,
+                    hostname=hostname,
+                    authorized=seeded_auth or mac in DummyAdapter.logged_in,
+                )
+            )
+        return out
+
+    def login_device(self, *, username, password, mac, ip="") -> ProvisionResult:
+        DummyAdapter.calls.append(("login_device", mac, username))
+        if DummyAdapter.login_fails:
+            from .base import ProvisioningError
+
+            raise ProvisioningError("dummy router refused the device login")
+        DummyAdapter.logged_in.add(mac)
+        return ProvisionResult(ok=True, message=f"dummy login {mac} as {username}")
+
+    def logout_device(self, mac) -> ProvisionResult:
+        DummyAdapter.calls.append(("logout_device", mac))
+        DummyAdapter.logged_in.discard(mac)
+        return ProvisionResult(ok=True, message=f"dummy logout {mac}")
 
     # -- Captive portal ---------------------------------------------------
     #: Tests set this to make a router refuse the new address, so the "one router did not

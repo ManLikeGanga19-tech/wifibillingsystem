@@ -96,6 +96,12 @@ class RedeemVoucherView(PublicAPIView):
                 "hotspot_username": session.hotspot_username,
                 "hotspot_password": session.hotspot_password,
                 "expires_at": session.expires_at,
+                # So a voucher customer can also add their laptop/TV to the same session.
+                "device_token": session.device_token,
+                "device_allowance": {
+                    "general": session.general_slots,
+                    "tv": session.tv_slots,
+                },
             },
             status=status.HTTP_201_CREATED,
         )

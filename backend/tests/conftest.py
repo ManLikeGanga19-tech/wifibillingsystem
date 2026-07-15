@@ -13,6 +13,9 @@ def _reset_dummies():
     DummyAdapter.usage = {}
     DummyAdapter.pppoe_active = {}
     DummyAdapter.portal_fails = False
+    DummyAdapter.hosts = {}
+    DummyAdapter.logged_in = set()
+    DummyAdapter.login_fails = False
     DummyProvider.sent = []
     yield
 

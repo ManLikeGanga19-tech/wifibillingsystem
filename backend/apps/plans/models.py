@@ -20,6 +20,10 @@ class Plan(OperatorOwnedModel):
     download_kbps = models.PositiveIntegerField()
     upload_kbps = models.PositiveIntegerField()
     shared_users = models.PositiveSmallIntegerField(default=1)
+    #: Dedicated device slots for a television, ON TOP of shared_users — so a TV-inclusive
+    #: plan lets the customer add their TV without it eating one of the phone/laptop slots.
+    #: 0 = no TV allowance. See the multi-device tap-to-approve flow.
+    tv_slots = models.PositiveSmallIntegerField(default=0)
     mikrotik_profile = models.CharField(
         max_length=60, default="default", help_text="Hotspot user profile name on the router"
     )
@@ -36,6 +40,13 @@ class Plan(OperatorOwnedModel):
     @property
     def duration_seconds(self) -> int:
         return int(self.duration.total_seconds())
+
+    @property
+    def device_allowance(self) -> int:
+        """Total devices that may share one paid session — phones/laptops plus the TV.
+        This is the shared-users value pushed to the router and the cap the tap-to-approve
+        flow enforces (per category: shared_users general + tv_slots for the TV)."""
+        return self.shared_users + self.tv_slots
 
     @property
     def rate_limit(self) -> str:

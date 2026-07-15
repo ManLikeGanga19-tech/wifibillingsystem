@@ -1,0 +1,253 @@
+"""Multi-device sharing: one payment, several of a customer's devices (tap-to-approve).
+
+The parts that carry weight and get the hard tests:
+  * ONE shared budget — the router account carries shared-users = the plan's allowance;
+  * per-CATEGORY slots — a TV draws on tv_slots, never a phone's shared_users slot;
+  * the token gate — only the paying device (holding device_token) can manage devices;
+  * ROLLBACK — a router that refuses a login must not silently burn a slot;
+  * idempotency — re-tapping a device is a no-op, not a second slot;
+  * the paying device is auto-recorded, and cannot be removed.
+"""
+
+import pytest
+from django.utils import timezone
+
+from apps.provisioning import devices as dev
+from apps.provisioning.adapters.dummy import DummyAdapter
+from apps.provisioning.models import Session, SessionDevice
+
+from .factories import PlanFactory, RouterFactory, SessionFactory
+
+pytestmark = pytest.mark.django_db
+
+DEVICES = "/api/v1/portal/devices/"
+
+
+def a_session(*, shared_users=1, tv_slots=0, mac="AA:BB:CC:00:00:01"):
+    router = RouterFactory(provisioning_backend="dummy")
+    plan = PlanFactory(operator=router.operator, shared_users=shared_users, tv_slots=tv_slots)
+    return SessionFactory(
+        operator=router.operator, router=router, plan=plan,
+        status=Session.Status.ACTIVE, mac_address=mac,
+        hotspot_username="254700123123", hotspot_password="secret",
+    )
+
+
+# --- allowance & the plan ---------------------------------------------------------------
+
+
+def test_device_allowance_is_general_plus_tv():
+    plan = PlanFactory(shared_users=3, tv_slots=1)
+    assert plan.device_allowance == 4
+
+
+def test_activation_pushes_shared_users_to_the_router():
+    """The MikroTik payload must carry shared-users = allowance, or the router would only
+    ever let ONE device on no matter how many the plan sells."""
+    from apps.provisioning.adapters.mikrotik import MikroTikRestAdapter
+
+    session = a_session(shared_users=3, tv_slots=1)
+    captured = {}
+
+    class FakeResp:
+        def raise_for_status(self): ...
+        def json(self):
+            return {}
+
+    class FakeClient:
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+        def get(self, *a, **k):
+            return _Empty()
+        def put(self, path, json=None):
+            captured.update(json or {})
+            return FakeResp()
+        def patch(self, path, json=None):
+            captured.update(json or {})
+            return FakeResp()
+
+    class _Empty:
+        def raise_for_status(self): ...
+        def json(self):
+            return []
+
+    adapter = MikroTikRestAdapter(session.router)
+    adapter._client = lambda: FakeClient()
+    adapter.activate_user(session)
+    assert captured["shared-users"] == "4"
+
+
+# --- discovery --------------------------------------------------------------------------
+
+
+def test_discovery_hides_authorized_and_already_added_devices():
+    session = a_session(shared_users=3)
+    dev.record_paying_device(session)  # the paying phone is on the session
+    DummyAdapter.hosts = {
+        "AA:BB:CC:00:00:01": ("10.5.0.2", "paying-phone", False),  # already ours
+        "AA:BB:CC:00:00:02": ("10.5.0.3", "her-laptop", False),  # addable
+        "AA:BB:CC:00:00:99": ("10.5.0.9", "someone-else", True),  # already authorised
+    }
+    found = {d["mac_address"] for d in dev.discover_devices(session)}
+    assert found == {"AA:BB:CC:00:00:02"}
+
+
+def test_discovery_on_an_unreachable_router_is_empty_not_an_error():
+    session = a_session()
+    from apps.provisioning import adapters
+
+    class Boom:
+        def list_hosts(self):
+            from apps.provisioning.adapters import ProvisioningError
+
+            raise ProvisioningError("down")
+
+    orig = adapters.get_adapter
+    adapters.get_adapter = lambda r: Boom()
+    try:
+        assert dev.discover_devices(session) == []
+    finally:
+        adapters.get_adapter = orig
+
+
+# --- approving --------------------------------------------------------------------------
+
+
+def test_approving_logs_the_device_in_and_records_it():
+    session = a_session(shared_users=3)
+    DummyAdapter.hosts = {"AA:BB:CC:00:00:02": ("10.5.0.3", "laptop", False)}
+
+    d = dev.approve_device(session, "aabbcc000002", kind="laptop")
+    assert d.mac_address == "AA:BB:CC:00:00:02"
+    assert ("login_device", "AA:BB:CC:00:00:02", "254700123123") in DummyAdapter.calls
+    assert "AA:BB:CC:00:00:02" in DummyAdapter.logged_in
+
+
+def test_re_approving_the_same_device_is_idempotent():
+    session = a_session(shared_users=3)
+    dev.approve_device(session, "AA:BB:CC:00:00:02", kind="laptop")
+    before = SessionDevice.objects.filter(session=session).count()
+    dev.approve_device(session, "aa:bb:cc:00:00:02", kind="laptop")  # same MAC, any format
+    assert SessionDevice.objects.filter(session=session).count() == before
+
+
+def test_a_full_general_allowance_is_refused():
+    session = a_session(shared_users=1)
+    dev.record_paying_device(session)  # the one general slot is taken by the payer
+    with pytest.raises(dev.DeviceError):
+        dev.approve_device(session, "AA:BB:CC:00:00:07", kind="phone")
+
+
+def test_a_tv_uses_its_own_slot_not_a_phone_slot():
+    session = a_session(shared_users=1, tv_slots=1)
+    dev.record_paying_device(session)  # fills the single general slot
+    # A phone would be refused...
+    with pytest.raises(dev.DeviceError):
+        dev.approve_device(session, "AA:BB:CC:00:00:08", kind="phone")
+    # ...but the TV has its own dedicated slot.
+    tv = dev.approve_device(session, "AA:BB:CC:00:00:09", kind="tv")
+    assert tv.kind == "tv"
+    assert session.tv_devices_used() == 1
+
+
+def test_a_router_that_refuses_the_login_rolls_the_slot_back():
+    from apps.provisioning.adapters import ProvisioningError
+
+    session = a_session(shared_users=2)
+    DummyAdapter.login_fails = True
+    with pytest.raises(ProvisioningError):
+        dev.approve_device(session, "AA:BB:CC:00:00:0A", kind="laptop")
+    # The record must NOT survive a failed push — the slot is free again.
+    assert SessionDevice.objects.filter(session=session).count() == 0
+
+
+# --- removing ---------------------------------------------------------------------------
+
+
+def test_removing_logs_the_device_out_and_frees_the_slot():
+    session = a_session(shared_users=3)
+    dev.approve_device(session, "AA:BB:CC:00:00:02", kind="laptop")
+    dev.remove_device(session, "AA:BB:CC:00:00:02")
+    assert SessionDevice.objects.filter(session=session).count() == 0
+    assert ("logout_device", "AA:BB:CC:00:00:02") in DummyAdapter.calls
+
+
+def test_the_paying_device_cannot_be_removed():
+    session = a_session(shared_users=3)
+    payer = dev.record_paying_device(session)
+    with pytest.raises(dev.DeviceError):
+        dev.remove_device(session, payer.mac_address)
+
+
+# --- the token gate (API) ---------------------------------------------------------------
+
+
+def test_the_api_needs_a_valid_token(api_client):
+    a_session(shared_users=3)  # a real session exists; the 404s are purely the token gate
+    # No token / wrong token -> 404, never a hint about which.
+    assert api_client.get(DEVICES).status_code == 404
+    assert api_client.get(DEVICES, {"token": "nope"}).status_code == 404
+
+
+def test_the_api_lists_slots_and_available_devices(api_client):
+    session = a_session(shared_users=3, tv_slots=1)
+    dev.record_paying_device(session)
+    DummyAdapter.hosts = {"AA:BB:CC:00:00:02": ("10.5.0.3", "laptop", False)}
+
+    body = api_client.get(DEVICES, {"token": session.device_token}).json()
+    assert body["allowance"] == {"general": 3, "tv": 1}
+    assert body["used"]["general"] == 1
+    assert body["devices"][0]["is_paying_device"] is True
+    assert body["available"][0]["mac_address"] == "AA:BB:CC:00:00:02"
+
+
+def test_the_api_adds_and_removes_a_device(api_client):
+    session = a_session(shared_users=3)
+    DummyAdapter.hosts = {"AA:BB:CC:00:00:02": ("10.5.0.3", "laptop", False)}
+
+    add = api_client.post(
+        DEVICES,
+        {"token": session.device_token, "mac": "AA:BB:CC:00:00:02", "kind": "laptop"},
+        format="json",
+    )
+    assert add.status_code == 201
+    assert any(d["mac_address"] == "AA:BB:CC:00:00:02" for d in add.json()["devices"])
+
+    rm = api_client.delete(
+        f"{DEVICES}?token={session.device_token}&mac=AA:BB:CC:00:00:02"
+    )
+    assert rm.status_code == 200
+    assert SessionDevice.objects.filter(session=session).count() == 0
+
+
+def test_an_expired_session_token_stops_working(api_client):
+    session = a_session(shared_users=3)
+    Session.objects.filter(pk=session.pk).update(
+        expires_at=timezone.now() - timezone.timedelta(minutes=1)
+    )
+    assert api_client.get(DEVICES, {"token": session.device_token}).status_code == 404
+
+
+def test_activation_records_the_paying_device():
+    """Going through the real activate() path must leave the paying phone listed as device
+    #1 (a general slot, un-removable), so the customer sees it and the allowance counts it."""
+    from apps.provisioning.services import activate
+
+    session = a_session(shared_users=3, mac="AA:BB:CC:DD:EE:01")
+    session.status = Session.Status.PENDING
+    session.save(update_fields=["status"])
+    activate(session)
+
+    payer = SessionDevice.objects.get(session=session, is_paying_device=True)
+    assert payer.mac_address == "AA:BB:CC:DD:EE:01"
+    assert payer.kind == SessionDevice.Kind.PHONE
+
+
+def test_device_management_is_tenant_isolated():
+    """A device row is stamped with the session's operator, so it can never leak across
+    tenants even though the endpoint is public."""
+    session = a_session(shared_users=3)
+    d = dev.approve_device(session, "AA:BB:CC:00:00:02", kind="laptop")
+    assert d.operator_id == session.operator_id

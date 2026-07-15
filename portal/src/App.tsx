@@ -16,6 +16,7 @@ import {
 } from './api/client';
 import { getCaptiveParams, readPending, submitRouterLogin, writePending } from './captive';
 import { resolveTemplate, templateVars } from './templates';
+import DevicePanel from './DevicePanel';
 import { formatCountdown, formatDuration, formatExpiry, formatKsh, formatSpeed, isValidKenyanPhone } from './format';
 
 const POLL_INTERVAL_MS = 3000;
@@ -342,6 +343,7 @@ export default function App() {
               </p>
               <CredentialBox session={stage.session} />
               {captive.loginUrl && <ConnectButton onClick={() => connectDevice(stage.session)} />}
+              <DevicePanel session={stage.session} />
             </div>
           </Card>
         )}
@@ -602,6 +604,7 @@ function SuccessCard({
             Use these details on the WiFi login page to connect other devices.
           </p>
         )}
+        <DevicePanel session={session} />
       </div>
     </Card>
   );

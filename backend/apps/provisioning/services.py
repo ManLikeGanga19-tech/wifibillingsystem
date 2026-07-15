@@ -194,6 +194,16 @@ def activate(session: Session) -> None:
         router=session.router.name,
         message=result.message,
     )
+    # Register the device that paid as the session's first device, so the tap-to-approve
+    # allowance counts it and the customer sees it listed. Best-effort — a hiccup here must
+    # never fail the activation they already paid for.
+    try:
+        from .devices import record_paying_device
+
+        record_paying_device(session)
+    except Exception:
+        logger.exception("Could not record the paying device for session %s", session.pk)
+
     # "You're online" — the receipt. Best-effort: a failed SMS must never fail the
     # activation the customer already paid for.
     try:

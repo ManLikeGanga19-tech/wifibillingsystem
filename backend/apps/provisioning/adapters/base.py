@@ -35,6 +35,19 @@ class ActiveSession:
 
 
 @dataclass
+class HostEntry:
+    """A device the router currently sees on the hotspot LAN — from /ip/hotspot/host,
+    named from the DHCP lease where possible. `authorized` is True once it has logged in
+    (so it belongs to someone's paid session already); the tap-to-approve discovery only
+    offers the ones that aren't."""
+
+    mac_address: str
+    ip_address: str = ""
+    hostname: str = ""
+    authorized: bool = False
+
+
+@dataclass
 class DeviceInfo:
     """A router's hardware identity (stable) + live health (transient)."""
 
@@ -70,6 +83,26 @@ class ProvisioningAdapter(ABC):
 
     @abstractmethod
     def get_device_info(self) -> DeviceInfo: ...
+
+    # -- Multi-device sharing (tap-to-approve) -----------------------------
+    # One paid session, several of a customer's devices. Default no-ops so an adapter that
+    # can't do it (or a future RADIUS one) degrades gracefully rather than breaking callers.
+    def list_hosts(self) -> list["HostEntry"]:
+        """Devices currently on the hotspot LAN — for the "add your devices" picker."""
+        return []
+
+    def login_device(
+        self, *, username: str, password: str, mac: str, ip: str = ""
+    ) -> ProvisionResult:
+        """Log a MAC into the hotspot AS the given account, so it shares that account's
+        one time+data budget (the account carries shared-users=N). This is what puts a
+        customer's laptop or TV online without a second payment or a portal login on it."""
+        return ProvisionResult(ok=True, message="noop")
+
+    def logout_device(self, mac: str) -> ProvisionResult:
+        """Drop a single device's live session, without touching the others sharing the
+        account — the customer removed it from their plan."""
+        return ProvisionResult(ok=True, message="noop")
 
     # -- PPPoE (broadband) -------------------------------------------------
     # Default no-op implementations so non-PPPoE adapters need not implement them.

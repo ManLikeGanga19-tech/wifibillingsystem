@@ -13,10 +13,18 @@ export interface StkPushResponse {
   checkout_request_id: string;
 }
 
+export interface DeviceAllowance {
+  general: number;
+  tv: number;
+}
+
 export interface SessionInfo {
   hotspot_username: string;
   hotspot_password: string;
   expires_at: string;
+  /** The secret this (paying) device uses to add its other devices to the same session. */
+  device_token?: string;
+  device_allowance?: DeviceAllowance;
 }
 
 export interface PaymentStatus {
@@ -43,6 +51,22 @@ export interface VoucherRedeemResponse {
   hotspot_username: string;
   hotspot_password: string;
   expires_at: string;
+  device_token?: string;
+  device_allowance?: DeviceAllowance;
+}
+
+export interface DeviceRow {
+  mac_address: string;
+  hostname: string;
+  kind: 'phone' | 'laptop' | 'tv' | 'other';
+  is_paying_device: boolean;
+}
+
+export interface DeviceState {
+  allowance: DeviceAllowance;
+  used: { general: number; tv: number };
+  devices: DeviceRow[];
+  available?: { mac_address: string; hostname: string }[];
 }
 
 const BASE = import.meta.env.VITE_API_BASE_URL ?? '';
@@ -93,6 +117,32 @@ export function getPaymentStatus(transactionId: string): Promise<PaymentStatus> 
  *  re-drives provisioning after a failure. */
 export function retryProvision(transactionId: string): Promise<{ detail: string }> {
   return request(`/payments/status/${transactionId}/retry/`, { method: 'POST' });
+}
+
+// --- multi-device sharing (tap-to-approve) --------------------------------------
+/** This session's devices + the ones on the Wi-Fi that could be added. Token is the
+ *  secret the paying device holds. */
+export function listDevices(token: string): Promise<DeviceState> {
+  return request(`/portal/devices/?token=${encodeURIComponent(token)}`);
+}
+
+export function addDevice(
+  token: string,
+  mac: string,
+  kind: DeviceRow['kind'],
+  hostname?: string
+): Promise<DeviceState> {
+  return request('/portal/devices/', {
+    method: 'POST',
+    body: JSON.stringify({ token, mac, kind, hostname }),
+  });
+}
+
+export function removeDevice(token: string, mac: string): Promise<DeviceState> {
+  return request(
+    `/portal/devices/?token=${encodeURIComponent(token)}&mac=${encodeURIComponent(mac)}`,
+    { method: 'DELETE' }
+  );
 }
 
 export interface DeviceStatus {

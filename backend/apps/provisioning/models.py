@@ -11,6 +11,13 @@ def _enrollment_token() -> str:
     return secrets.token_urlsafe(32)
 
 
+def _device_token() -> str:
+    """The bearer secret the PAYING device holds to manage the session's other devices.
+    Unguessable, so nobody else on an open hotspot can add devices to a session they did
+    not pay for."""
+    return secrets.token_urlsafe(24)
+
+
 class Router(OperatorOwnedModel):
     class Backend(models.TextChoices):
         MIKROTIK_REST = "mikrotik_rest", "MikroTik RouterOS v7 REST"
@@ -164,6 +171,8 @@ class Session(OperatorOwnedModel):
     # and the expiry sweep ignores held sessions. Existing sessions default TRUE, so nothing
     # about today's on-purchase behaviour changes.
     clock_started = models.BooleanField(default=True)
+    # The secret the paying device uses to manage this session's other devices (tap-to-approve).
+    device_token = models.CharField(max_length=64, default=_device_token, db_index=True)
     # When we sent the "expiring soon" SMS, so the beat task warns each session exactly
     # once instead of every time it runs.
     expiry_warned_at = models.DateTimeField(null=True, blank=True)
@@ -181,3 +190,53 @@ class Session(OperatorOwnedModel):
 
     def __str__(self):
         return f"{self.hotspot_username} on {self.router.name} [{self.status}]"
+
+    # -- Multi-device allowance -------------------------------------------
+    # The plan sets how many devices may share this one paid session: shared_users general
+    # slots (phones/laptops) plus tv_slots dedicated to a television. The tap-to-approve
+    # flow enforces each category separately, so adding a TV never costs a phone its slot.
+    @property
+    def general_slots(self) -> int:
+        return self.plan.shared_users
+
+    @property
+    def tv_slots(self) -> int:
+        return self.plan.tv_slots
+
+    def general_devices_used(self) -> int:
+        return self.devices.exclude(kind=SessionDevice.Kind.TV).count()
+
+    def tv_devices_used(self) -> int:
+        return self.devices.filter(kind=SessionDevice.Kind.TV).count()
+
+
+class SessionDevice(OperatorOwnedModel):
+    """A device the customer has put on ONE paid session — their paying phone, plus the
+    laptops/TV they add via tap-to-approve. Each logs into the hotspot as the session's
+    single account, so they share its one time+data budget; this row is our record of who
+    is on, and the cap we enforce against the plan's allowance."""
+
+    class Kind(models.TextChoices):
+        PHONE = "phone", "Phone"
+        LAPTOP = "laptop", "Laptop / computer"
+        TV = "tv", "TV"
+        OTHER = "other", "Other device"
+
+    session = models.ForeignKey(Session, on_delete=models.CASCADE, related_name="devices")
+    mac_address = models.CharField(max_length=17)
+    hostname = models.CharField(max_length=80, blank=True)
+    kind = models.CharField(max_length=8, choices=Kind.choices, default=Kind.OTHER)
+    #: The device that paid — added automatically, cannot be removed, holds a general slot.
+    is_paying_device = models.BooleanField(default=False)
+    approved_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["session", "mac_address"], name="one_device_row_per_session_mac"
+            )
+        ]
+        indexes = [models.Index(fields=["session", "kind"])]
+
+    def __str__(self):
+        return f"{self.mac_address} ({self.kind}) on session #{self.session_id}"

@@ -125,7 +125,11 @@ class TransactionStatusSerializer(serializers.ModelSerializer):
 
     def get_session(self, obj) -> dict | None:
         """Hotspot credentials for the paying device — the portal submits these to
-        the MikroTik link-login-only endpoint to connect the customer automatically."""
+        the MikroTik link-login-only endpoint to connect the customer automatically.
+
+        Also carries the device_token (the secret this device uses to add its OTHER
+        devices to the same paid session) and the plan's device allowance, so the portal
+        can offer "add your laptop / TV" straight after payment."""
         session = self._active_session(obj)
         if session is None:
             return None
@@ -133,6 +137,11 @@ class TransactionStatusSerializer(serializers.ModelSerializer):
             "hotspot_username": session.hotspot_username,
             "hotspot_password": session.hotspot_password,
             "expires_at": session.expires_at.isoformat(),
+            "device_token": session.device_token,
+            "device_allowance": {
+                "general": session.general_slots,
+                "tv": session.tv_slots,
+            },
         }
 
 
