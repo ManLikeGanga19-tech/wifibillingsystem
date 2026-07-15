@@ -63,6 +63,7 @@ export interface DeviceRow {
 }
 
 export interface DeviceState {
+  session?: { username: string; expires_at: string };
   allowance: DeviceAllowance;
   used: { general: number; tv: number };
   devices: DeviceRow[];
@@ -143,6 +144,18 @@ export function removeDevice(token: string, mac: string): Promise<DeviceState> {
     `/portal/devices/?token=${encodeURIComponent(token)}&mac=${encodeURIComponent(mac)}`,
     { method: 'DELETE' }
   );
+}
+
+/** Closed-the-tab recovery: ask us to SMS a 'manage devices' link to the phone that paid.
+ *  Always resolves the same way (no hint about whether the number has a plan). */
+export function recoverDevices(
+  phone: string,
+  routerId?: number | null
+): Promise<{ detail: string }> {
+  return request('/portal/devices/recover/', {
+    method: 'POST',
+    body: JSON.stringify({ phone, router: routerId ?? undefined }),
+  });
 }
 
 export interface DeviceStatus {

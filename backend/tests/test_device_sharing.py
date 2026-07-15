@@ -259,6 +259,45 @@ def test_activation_records_and_logs_in_the_paying_device():
     assert any(c[0] == "ensure_hotspot_profile" for c in DummyAdapter.calls)
 
 
+def test_devices_state_carries_a_session_summary(api_client):
+    """The recovery view (magic link / URL) needs 'online until X' without a second call."""
+    session = a_session(shared_users=3)
+    body = api_client.get(DEVICES, {"token": session.device_token}).json()
+    assert body["session"]["username"] == session.hotspot_username
+    assert body["session"]["expires_at"]
+
+
+# --- closed-the-tab recovery (SMS) ------------------------------------------------------
+
+RECOVER = "/api/v1/portal/devices/recover/"
+
+
+def test_recover_texts_a_link_to_the_paying_phone(api_client):
+    from apps.notifications.models import Message
+
+    session = a_session(shared_users=3)  # hotspot_username is the phone (M-Pesa)
+    resp = api_client.post(
+        RECOVER, {"phone": session.hotspot_username, "router": session.router.id}, format="json"
+    )
+    assert resp.status_code == 200
+    msg = Message.objects.filter(to_phone=session.hotspot_username).first()
+    assert msg is not None
+    # The link carries the token — the capability that unlocks their add-devices screen.
+    assert session.device_token in msg.body
+
+
+def test_recover_is_generic_and_silent_for_a_phone_with_no_session(api_client):
+    """Same 200 whether or not a plan exists (no enumeration), and no SMS goes out."""
+    from apps.notifications.models import Message
+
+    session = a_session(shared_users=3)
+    resp = api_client.post(
+        RECOVER, {"phone": "254799999999", "router": session.router.id}, format="json"
+    )
+    assert resp.status_code == 200
+    assert not Message.objects.filter(to_phone="254799999999").exists()
+
+
 def test_device_management_is_tenant_isolated():
     """A device row is stamped with the session's operator, so it can never leak across
     tenants even though the endpoint is public."""

@@ -1,5 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Laptop, Loader2, Plus, RefreshCw, Smartphone, Trash2, Tv, Wifi } from 'lucide-react';
+import {
+  Laptop,
+  Loader2,
+  Plus,
+  RefreshCw,
+  Smartphone,
+  Trash2,
+  Tv,
+  Wifi,
+  XCircle,
+} from 'lucide-react';
 import {
   addDevice,
   listDevices,
@@ -8,6 +18,7 @@ import {
   type DeviceState,
   type SessionInfo,
 } from './api/client';
+import { formatExpiry } from './format';
 
 /**
  * "Add your other devices" — the tap-to-approve surface a customer sees after paying.
@@ -202,6 +213,79 @@ export default function DevicePanel({ session }: { session: SessionInfo }) {
       )}
 
       {error && <p className="mt-2 text-[11px] text-[#B22222]">{error}</p>}
+    </div>
+  );
+}
+
+/**
+ * The full-screen "manage my devices" view a customer lands on from the recovery URL
+ * (?manage=<token>) or the SMS link — so closing the original tab no longer strands them.
+ * Validates the token, then shows their live plan + the same add/remove panel.
+ */
+export function ManageScreen({ token, onDone }: { token: string; onDone: () => void }) {
+  const [state, setState] = useState<DeviceState | null>(null);
+  const [status, setStatus] = useState<'loading' | 'ok' | 'gone'>('loading');
+
+  useEffect(() => {
+    listDevices(token)
+      .then((s) => {
+        setState(s);
+        setStatus('ok');
+      })
+      .catch(() => setStatus('gone'));
+  }, [token]);
+
+  if (status === 'loading') {
+    return (
+      <div className="flex items-center justify-center gap-2 py-10 text-sm text-[#141414]/50">
+        <Loader2 className="h-5 w-5 animate-spin" /> Loading your plan…
+      </div>
+    );
+  }
+
+  if (status === 'gone' || !state) {
+    return (
+      <div className="flex flex-col items-center text-center py-8 gap-3">
+        <XCircle className="h-10 w-10 text-[#B26B00]" />
+        <h2 className="font-bold text-lg">This link has expired</h2>
+        <p className="text-sm text-[#141414]/70 leading-relaxed">
+          Your plan may have ended, or the link is no longer valid.
+        </p>
+        <button
+          onClick={onDone}
+          className="mt-1 w-full bg-[#141414] text-[#E4E3E0] font-bold py-3 active:opacity-80"
+        >
+          See plans
+        </button>
+      </div>
+    );
+  }
+
+  // Construct the SessionInfo the panel needs from the recovered state.
+  const session: SessionInfo = {
+    hotspot_username: state.session?.username ?? '',
+    hotspot_password: '',
+    expires_at: state.session?.expires_at ?? '',
+    device_token: token,
+    device_allowance: state.allowance,
+  };
+
+  return (
+    <div className="flex flex-col items-center text-center py-2 gap-2">
+      <Wifi className="h-10 w-10 text-[#228B22]" />
+      <h2 className="font-bold text-lg">Your devices</h2>
+      {session.expires_at && (
+        <p className="text-sm text-[#141414]/70">
+          Online until <b>{formatExpiry(session.expires_at)}</b>
+        </p>
+      )}
+      <DevicePanel session={session} />
+      <button
+        onClick={onDone}
+        className="mt-3 w-full border border-[#141414] text-[#141414] font-bold py-2.5 text-sm active:opacity-70"
+      >
+        Done
+      </button>
     </div>
   );
 }

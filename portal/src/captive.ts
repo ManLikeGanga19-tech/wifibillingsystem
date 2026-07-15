@@ -33,6 +33,20 @@ export function getCaptiveParams(): CaptiveParams {
   };
 }
 
+/** The device-management token, kept in the URL (?manage=) so a refresh, Back, or reopening
+ *  from history returns the customer to their "add devices" screen — the token itself lives
+ *  only in memory otherwise (no browser storage). */
+export function getManageToken(): string {
+  return new URLSearchParams(window.location.search).get('manage') ?? '';
+}
+
+export function writeManage(token: string | null) {
+  const url = new URL(window.location.href);
+  if (token) url.searchParams.set('manage', token);
+  else url.searchParams.delete('manage');
+  window.history.replaceState({}, '', url.toString());
+}
+
 /** The in-flight payment, kept in the URL so a refresh resumes polling. */
 export interface PendingPayment {
   txId: string;

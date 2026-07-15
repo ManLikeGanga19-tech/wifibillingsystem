@@ -129,6 +129,8 @@ REST_FRAMEWORK = {
         # Tap-to-approve device management — token-gated, but bounded so a leaked token
         # can't hammer the router.
         "device-mgmt": "40/min",
+        # The "text me a link to manage my devices" recovery — sends SMS, so tight.
+        "device-recover": "5/min",
         # The 5-step wizard makes several calls per applicant, so the old
         # 5/hour would have blocked a legitimate signup halfway through. The real
         # abuse control is PER-TARGET (SignupThrottle: 3 codes/email/hr,

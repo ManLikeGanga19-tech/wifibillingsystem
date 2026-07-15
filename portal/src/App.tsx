@@ -14,9 +14,10 @@ import {
   type Plan,
   type SessionInfo,
 } from './api/client';
-import { getCaptiveParams, readPending, submitRouterLogin, writePending } from './captive';
+import { getCaptiveParams, getManageToken, readPending, submitRouterLogin, writeManage, writePending } from './captive';
 import { resolveTemplate, templateVars } from './templates';
-import DevicePanel from './DevicePanel';
+import DevicePanel, { ManageScreen } from './DevicePanel';
+import { recoverDevices } from './api/client';
 import { formatCountdown, formatDuration, formatExpiry, formatKsh, formatSpeed, isValidKenyanPhone } from './format';
 
 const POLL_INTERVAL_MS = 3000;
@@ -35,7 +36,9 @@ type Stage =
   // state — the thing that replaces the infinite spinner.
   | { kind: 'paid-not-connected'; txId: string; status: PaymentStatus }
   | { kind: 'failed'; reason: string; planName?: string }
-  | { kind: 'voucher-ok'; session: SessionInfo };
+  | { kind: 'voucher-ok'; session: SessionInfo }
+  // Recovered from a ?manage=<token> URL / SMS link — straight to device management.
+  | { kind: 'manage'; token: string };
 
 export default function App() {
   const captive = getCaptiveParams();
@@ -53,6 +56,10 @@ export default function App() {
   // returning phone numbers would be a PII leak on an open hotspot.
   const [lastPhone, setLastPhone] = useState('');
   const [stage, setStage] = useState<Stage>(() => {
+    // A recovery link (they closed the add-devices tab, then reopened via history or SMS)
+    // takes priority — it carries the token straight to device management.
+    const manageToken = getManageToken();
+    if (manageToken) return { kind: 'manage', token: manageToken };
     // Resume polling if the customer refreshed mid-payment. The in-flight payment
     // lives in the URL, not in storage — so a refresh (or a deploy) can never
     // leave them holding a stale object, and they never lose a payment they made.
@@ -114,6 +121,9 @@ export default function App() {
         // real outcomes.
         if (status.provisioning === 'active') {
           writePending(null);
+          // Keep the session recoverable: ?manage=<token> means a refresh/Back/history
+          // reopen returns them to the add-devices screen instead of a cold plan list.
+          writeManage(status.session?.device_token ?? null);
           setStage({ kind: 'paid', status });
         } else if (
           status.provisioning === 'failed' ||
@@ -260,11 +270,15 @@ export default function App() {
             )}
             {tab === 'voucher' && (
               <VoucherForm
-                onRedeemed={(session) => setStage({ kind: 'voucher-ok', session })}
+                onRedeemed={(session) => {
+                  writeManage(session.device_token ?? null);
+                  setStage({ kind: 'voucher-ok', session });
+                }}
                 mac={captive.mac}
                 routerId={captive.routerId}
               />
             )}
+            <RecoverPrompt routerId={captive.routerId} />
           </>
         )}
 
@@ -330,6 +344,18 @@ export default function App() {
                 the WiFi operator — your receipt above proves your payment.
               </p>
             </div>
+          </Card>
+        )}
+
+        {stage.kind === 'manage' && (
+          <Card>
+            <ManageScreen
+              token={stage.token}
+              onDone={() => {
+                writeManage(null);
+                setStage({ kind: 'browse' });
+              }}
+            />
           </Card>
         )}
 
@@ -633,6 +659,72 @@ function CredentialBox({ session }: { session: SessionInfo }) {
     <div className="w-full border border-[#141414]/30 bg-[#f8f8f6] p-3 font-mono text-sm space-y-1">
       <div className="flex justify-between"><span className="text-[#141414]/50">Username</span><b>{session.hotspot_username}</b></div>
       <div className="flex justify-between"><span className="text-[#141414]/50">Password</span><b>{session.hotspot_password}</b></div>
+    </div>
+  );
+}
+
+/** "Already paid? Add another device" — for a customer who closed the add-devices tab. They
+ *  give the number they paid with and we SMS a link back to it (the response is the same
+ *  either way, so it never reveals who has a plan). */
+function RecoverPrompt({ routerId }: { routerId: number | null }) {
+  const [open, setOpen] = useState(false);
+  const [phone, setPhone] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState(false);
+
+  const submit = async () => {
+    if (busy || !isValidKenyanPhone(phone)) return;
+    setBusy(true);
+    try {
+      await recoverDevices(phone, routerId);
+    } catch {
+      /* same generic outcome either way */
+    } finally {
+      setBusy(false);
+      setSent(true);
+    }
+  };
+
+  if (sent) {
+    return (
+      <p className="mt-5 pt-4 border-t border-[#141414]/10 text-center text-xs text-[#141414]/60 leading-relaxed">
+        If that number has an active plan, we&apos;ve texted it a link to add your devices.
+      </p>
+    );
+  }
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className="mt-5 pt-4 border-t border-[#141414]/10 w-full text-center text-xs text-[#141414]/55 underline underline-offset-2"
+      >
+        Already paid? Add another device
+      </button>
+    );
+  }
+
+  return (
+    <div className="mt-5 pt-4 border-t border-[#141414]/10">
+      <p className="text-xs text-[#141414]/60 mb-2 leading-relaxed">
+        Enter the number you paid with — we&apos;ll text you a link to add your other devices.
+      </p>
+      <div className="flex gap-2">
+        <input
+          value={phone}
+          onChange={(e) => setPhone(e.target.value)}
+          placeholder="07XX XXX XXX"
+          inputMode="tel"
+          className="flex-1 border border-[#141414] p-2.5 text-sm bg-white outline-none"
+        />
+        <button
+          onClick={submit}
+          disabled={busy || !isValidKenyanPhone(phone)}
+          className="bg-[#141414] text-[#E4E3E0] px-4 font-bold text-xs disabled:opacity-40"
+        >
+          {busy ? '…' : 'Send'}
+        </button>
+      </div>
     </div>
   );
 }
