@@ -114,6 +114,10 @@ export interface Branding {
   accent_color: string;
   support_phone: string;
   support_email: string;
+  portal_template: string;
+  background_image: string;
+  portal_language: string;
+  post_purchase_redirect: string;
 }
 
 /** The ISP's brand for this router/subdomain — so the portal wears their name, logo and

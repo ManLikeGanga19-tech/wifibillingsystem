@@ -206,6 +206,22 @@ def sync_hotspot_usage():
             live = actives.get(session.hotspot_username)
             if live is None:
                 continue
+
+            # First Wi-Fi login for a held (on-login) clock: the subscriber is connected
+            # now, so start their window from this moment. Claim it with a filtered UPDATE
+            # so two overlapping syncs can't start the clock twice.
+            if not session.clock_started:
+                now = timezone.now()
+                started = Session.objects.filter(
+                    pk=session.pk, clock_started=False
+                ).update(
+                    clock_started=True, starts_at=now, expires_at=now + session.plan.duration
+                )
+                if started:
+                    session.clock_started = True
+                    session.starts_at = now
+                    session.expires_at = now + session.plan.duration
+
             used_mb = (live.bytes_in + live.bytes_out) // (1024 * 1024)
             if used_mb != session.data_used_mb:
                 session.data_used_mb = used_mb
@@ -229,7 +245,9 @@ def expire_sessions():
     expired = 0
     ids = list(
         Session.objects.filter(
-            status=Session.Status.ACTIVE, expires_at__lte=timezone.now()
+            status=Session.Status.ACTIVE,
+            clock_started=True,  # a held (on-login) clock hasn't begun — never expire it
+            expires_at__lte=timezone.now(),
         ).values_list("id", flat=True)
     )
     for session_id in ids:
@@ -304,3 +322,21 @@ def sync_all_routers():
     for router in Router.objects.filter(is_active=True, status=Router.Status.ONLINE):
         if router.is_reachable:
             sync_router.delay(router.id)
+
+
+@shared_task
+def prune_dormant_hotspot_subscribers():
+    """Beat task: delete hotspot customers unseen past the ISP's chosen window.
+    Opt-in per operator (Settings > Hotspot); safe for the books — see hotspot_lifecycle."""
+    from .hotspot_lifecycle import prune_dormant_subscribers
+
+    return prune_dormant_subscribers()
+
+
+@shared_task
+def expire_unused_hotspot_vouchers():
+    """Beat task: invalidate prepaid vouchers never sold inside the ISP's window.
+    Opt-in per operator (voucher_expiry_days > 0); redeemed vouchers are never touched."""
+    from apps.vouchers.services import expire_unused_vouchers
+
+    return expire_unused_vouchers()

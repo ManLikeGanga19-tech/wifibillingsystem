@@ -3,6 +3,7 @@ import { ViewHeader } from './ui';
 import BrandingPanel from './settings/BrandingPanel';
 import CommsPanel from './settings/CommsPanel';
 import DomainPanel from './settings/DomainPanel';
+import HotspotPanel from './settings/HotspotPanel';
 import EmailPanel from './settings/EmailPanel';
 import PaymentsPanel from './settings/PaymentsPanel';
 import PppoePanel from './settings/PppoePanel';
@@ -168,9 +169,7 @@ export default function SettingsView({
 
           {active === 'domain' && <DomainPanel />}
           {active === 'pppoe' && <PppoePanel />}
-          {active === 'hotspot' && (
-            <Placeholder title="Hotspot" blurb="Captive-portal instructions, voucher defaults and hotspot behaviour." />
-          )}
+          {active === 'hotspot' && <HotspotPanel />}
           {active === 'sms' && <CommsPanel channel="sms" />}
           {active === 'email' && <EmailPanel />}
           {active === 'whatsapp' && <CommsPanel channel="whatsapp" />}

@@ -18,6 +18,13 @@ MAX_UPLOAD_BYTES = 3 * 1024 * 1024  # generous for the source file
 MAX_DIMENSION = 512  # px — the longest side after resize
 HEX = ("0123456789abcdefABCDEF")
 
+# A portal background is a full-bleed backdrop, so it gets a larger budget than the logo —
+# but still bounded, and still re-encoded, because it is customer-supplied bytes we serve
+# on to the public. The stored image is capped well below the upload limit so the portal
+# payload stays reasonable.
+MAX_BACKGROUND_UPLOAD_BYTES = 5 * 1024 * 1024
+MAX_BACKGROUND_DIMENSION = 1600  # px — the longest side after resize
+
 
 class BrandingError(Exception):
     """Safe to show the user."""
@@ -49,6 +56,38 @@ def process_logo(raw: bytes) -> str:
     img.save(out, format="PNG", optimize=True)  # re-encode: drops anything non-pixel
     encoded = base64.b64encode(out.getvalue()).decode()
     return f"data:image/png;base64,{encoded}"
+
+
+def process_background(raw: bytes) -> str:
+    """Validate + normalise a portal background image, returning a data URI.
+
+    Same hostile-until-proven treatment as the logo — open with Pillow, cap size, resize,
+    RE-ENCODE — so nothing non-pixel survives. Backgrounds are photos, so we flatten to RGB
+    and store JPEG: a full-bleed image as PNG would bloat the portal payload needlessly.
+    """
+    if not raw:
+        raise BrandingError("No image was uploaded.")
+    if len(raw) > MAX_BACKGROUND_UPLOAD_BYTES:
+        raise BrandingError("That image is too large. Keep it under 5 MB.")
+
+    try:
+        img = Image.open(io.BytesIO(raw))
+        img.verify()  # cheap structural check; must reopen after verify()
+        img = Image.open(io.BytesIO(raw))
+    except (UnidentifiedImageError, OSError) as exc:
+        raise BrandingError("That file is not an image we can read.") from exc
+
+    # A backdrop has no need for transparency; flatten onto white so a PNG with alpha does
+    # not turn black behind the login card.
+    if img.mode != "RGB":
+        img = img.convert("RGB")
+
+    img.thumbnail((MAX_BACKGROUND_DIMENSION, MAX_BACKGROUND_DIMENSION))  # in place
+
+    out = io.BytesIO()
+    img.save(out, format="JPEG", quality=82, optimize=True)  # re-encode: drops non-pixel
+    encoded = base64.b64encode(out.getvalue()).decode()
+    return f"data:image/jpeg;base64,{encoded}"
 
 
 def clean_hex_color(value: str, *, field: str) -> str:

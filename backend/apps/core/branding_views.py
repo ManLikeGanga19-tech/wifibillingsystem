@@ -12,9 +12,10 @@ from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .branding import BrandingError, clean_hex_color, process_logo
+from .branding import BrandingError, clean_hex_color, process_background, process_logo
 from .models import Branding
 from .permissions import CanManageMoney, RequireTenant, TenantIsOperational
+from .portal_templates import DEFAULT_TEMPLATE, PORTAL_TEMPLATES, is_valid_template
 from .public import PublicAPIView
 from .schema import OBJECT_RESPONSE
 from .services import audit
@@ -36,6 +37,13 @@ def _as_dict(b: Branding) -> dict:
         "accent_color": b.accent_color,
         "support_phone": b.support_phone,
         "support_email": b.support_email,
+        # Captive-portal look
+        "portal_template": b.portal_template,
+        "background_image": b.background_image,
+        "portal_language": b.portal_language,
+        "post_purchase_redirect": b.post_purchase_redirect,
+        # The catalogue the console renders its picker from — [id, label] pairs.
+        "portal_templates": [list(t) for t in PORTAL_TEMPLATES],
     }
 
 
@@ -46,6 +54,14 @@ class BrandingSerializer(serializers.Serializer):
     accent_color = serializers.CharField(max_length=9, required=False, allow_blank=True)
     support_phone = serializers.CharField(max_length=20, required=False, allow_blank=True)
     support_email = serializers.EmailField(required=False, allow_blank=True)
+    portal_template = serializers.CharField(max_length=32, required=False, allow_blank=True)
+    portal_language = serializers.CharField(max_length=8, required=False, allow_blank=True)
+    post_purchase_redirect = serializers.URLField(required=False, allow_blank=True)
+
+    def validate_portal_template(self, value):
+        if value and not is_valid_template(value):
+            raise serializers.ValidationError("Unknown portal template.")
+        return value
 
 
 class BrandingView(APIView):
@@ -77,7 +93,10 @@ class BrandingView(APIView):
         except BrandingError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
-        for field in ("display_name", "tagline", "support_phone", "support_email"):
+        for field in (
+            "display_name", "tagline", "support_phone", "support_email",
+            "portal_template", "portal_language", "post_purchase_redirect",
+        ):
             if field in data:
                 setattr(branding, field, data[field])
         branding.save()
@@ -124,6 +143,46 @@ class BrandingLogoView(APIView):
         return Response({"logo": ""})
 
 
+class BrandingBackgroundView(APIView):
+    """The captive-portal background, uploaded as a file. Same hostile-until-proven
+    handling as the logo — validated and re-encoded server-side (branding.process_background)
+    before it is ever stored or served to the public."""
+
+    permission_classes = [IsAdminUser, RequireTenant, TenantIsOperational, CanManageMoney]
+    parser_classes = [MultiPartParser, FormParser]
+
+    @extend_schema(
+        request={"multipart/form-data": {"type": "object",
+                 "properties": {"background": {"type": "string", "format": "binary"}}}},
+        responses=OBJECT_RESPONSE,
+        summary="Upload a portal background (PNG/JPG/WebP up to 5 MB, re-encoded on the server)")
+    def post(self, request):
+        upload = request.FILES.get("background")
+        if upload is None:
+            return Response(
+                {"detail": "Attach a background image."}, status=status.HTTP_400_BAD_REQUEST
+            )
+        try:
+            data_uri = process_background(upload.read())
+        except BrandingError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        branding = _branding_for(acting_tenant(request))
+        branding.background_image = data_uri
+        branding.save(update_fields=["background_image", "updated_at"])
+        audit(
+            "branding_background_set", operator=branding.operator,
+            actor=request.user, target=branding.operator,
+        )
+        return Response({"background_image": data_uri})
+
+    @extend_schema(responses=OBJECT_RESPONSE, summary="Remove the portal background")
+    def delete(self, request):
+        branding = _branding_for(acting_tenant(request))
+        branding.background_image = ""
+        branding.save(update_fields=["background_image", "updated_at"])
+        return Response({"background_image": ""})
+
+
 @extend_schema(responses=OBJECT_RESPONSE,
                summary="Public: the branding the captive portal should wear")
 class PublicBrandingView(PublicAPIView):
@@ -151,6 +210,10 @@ class PublicBrandingView(PublicAPIView):
                     "accent_color": "#228B22",
                     "support_phone": "",
                     "support_email": "",
+                    "portal_template": DEFAULT_TEMPLATE,
+                    "background_image": "",
+                    "portal_language": "en",
+                    "post_purchase_redirect": "",
                 }
             )
         b = _branding_for(operator)
@@ -163,5 +226,9 @@ class PublicBrandingView(PublicAPIView):
                 "accent_color": b.accent_color,
                 "support_phone": b.support_phone,
                 "support_email": b.support_email,
+                "portal_template": b.portal_template,
+                "background_image": b.background_image,
+                "portal_language": b.portal_language,
+                "post_purchase_redirect": b.post_purchase_redirect,
             }
         )

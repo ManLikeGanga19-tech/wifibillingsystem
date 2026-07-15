@@ -43,12 +43,22 @@ class VoucherViewSet(TenantReadOnlyViewSet):
             )
         from apps.vouchers.services import VoucherError
 
+        # An explicit per-batch prefix wins; otherwise fall back to the ISP's default
+        # username prefix from Settings > Hotspot, so their vouchers are consistently named.
+        prefix = serializer.validated_data["prefix"]
+        if not prefix:
+            from apps.core.models import HotspotSettings
+
+            row = HotspotSettings.objects.filter(operator=operator).first()
+            if row:
+                prefix = row.username_prefix
+
         try:
             created = generate_batch(
                 operator=operator,
                 plan=plan,
                 count=serializer.validated_data["count"],
-                prefix=serializer.validated_data["prefix"],
+                prefix=prefix,
                 created_by=request.user,
             )
         except VoucherError as exc:

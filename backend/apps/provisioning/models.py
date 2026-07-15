@@ -158,6 +158,12 @@ class Session(OperatorOwnedModel):
     ip_address = models.GenericIPAddressField(null=True, blank=True)
     data_used_mb = models.PositiveIntegerField(default=0)
     provision_error = models.CharField(max_length=255, blank=True)
+    # The subscription clock. TRUE (the default) means the window in expires_at is live.
+    # FALSE means the ISP set timer_start_mode="on_login": the session is provisioned but
+    # its clock is HELD until the subscriber first connects — the usage sync starts it then,
+    # and the expiry sweep ignores held sessions. Existing sessions default TRUE, so nothing
+    # about today's on-purchase behaviour changes.
+    clock_started = models.BooleanField(default=True)
     # When we sent the "expiring soon" SMS, so the beat task warns each session exactly
     # once instead of every time it runs.
     expiry_warned_at = models.DateTimeField(null=True, blank=True)

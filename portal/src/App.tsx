@@ -15,6 +15,7 @@ import {
   type SessionInfo,
 } from './api/client';
 import { getCaptiveParams, readPending, submitRouterLogin, writePending } from './captive';
+import { resolveTemplate, templateVars } from './templates';
 import { formatCountdown, formatDuration, formatExpiry, formatKsh, formatSpeed, isValidKenyanPhone } from './format';
 
 const POLL_INTERVAL_MS = 3000;
@@ -170,7 +171,10 @@ export default function App() {
 
   const connectDevice = (session: SessionInfo) => {
     if (captive.loginUrl) {
-      submitRouterLogin(captive.loginUrl, session.hotspot_username, session.hotspot_password, captive.origUrl);
+      // Where to land after the router authenticates them: the ISP's configured
+      // post-purchase redirect wins over wherever they were originally headed.
+      const dest = brand?.post_purchase_redirect || captive.origUrl;
+      submitRouterLogin(captive.loginUrl, session.hotspot_username, session.hotspot_password, dest);
     }
   };
 
@@ -191,15 +195,24 @@ export default function App() {
   const brandTagline = brand?.tagline || 'Fast WiFi. Lipa na M-Pesa.';
   const primary = brand?.primary_color || '#141414';
 
+  // The chosen captive-portal look. Its tokens theme the backdrop, header and card via CSS
+  // custom properties; the card surface stays light so all the inner content below is
+  // legible under every template without knowing which one is active.
+  const template = resolveTemplate(brand?.portal_template);
+  const themeVars = {
+    ...templateVars(template, brand),
+    // Keep the legacy accent var the inner components already read.
+    ['--brand-accent']: brand?.accent_color || '#228B22',
+  } as React.CSSProperties;
+
   return (
     <div
       className="min-h-screen flex flex-col items-center px-4 py-6"
-      // The ISP's accent themes the branded bits (see index.css --brand-accent usage).
-      style={{ ['--brand-accent' as string]: brand?.accent_color || '#228B22' }}
+      style={{ ...themeVars, background: 'var(--pt-bg)' }}
     >
       {/* Brand header — the ISP's logo/name, not ours */}
-      <header className="w-full max-w-md flex items-center gap-2.5 mb-6">
-        <div className="w-9 h-9 flex items-center justify-center overflow-hidden" style={{ background: brand?.logo ? 'transparent' : primary }}>
+      <header className="w-full max-w-md flex items-center gap-2.5 mb-6" style={{ color: 'var(--pt-header-fg)' }}>
+        <div className="w-9 h-9 flex items-center justify-center overflow-hidden rounded" style={{ background: brand?.logo ? 'transparent' : primary }}>
           {brand?.logo ? (
             <img src={brand.logo} alt={brandName} className="max-h-9 max-w-9 object-contain" />
           ) : (
@@ -207,12 +220,23 @@ export default function App() {
           )}
         </div>
         <div className="min-w-0">
-          <h1 className="font-bold text-lg leading-none tracking-tight truncate" style={{ color: primary }}>{brandName}</h1>
-          <p className="text-xs text-[#141414]/60 truncate">{brandTagline}</p>
+          <h1 className="font-bold text-lg leading-none tracking-tight truncate">{brandName}</h1>
+          <p className="text-xs opacity-70 truncate">{brandTagline}</p>
         </div>
       </header>
 
-      <main className="w-full max-w-md flex-1">
+      <main
+        className="w-full max-w-md flex-1 p-5"
+        style={{
+          background: 'var(--pt-card-bg)',
+          border: 'var(--pt-card-border)',
+          borderRadius: 'var(--pt-card-radius)',
+          boxShadow: 'var(--pt-card-shadow)',
+          backdropFilter: 'var(--pt-card-blur)',
+          WebkitBackdropFilter: 'var(--pt-card-blur)',
+          alignSelf: 'center',
+        }}
+      >
         {stage.kind === 'browse' && (
           <>
             <div className="flex border border-[#141414] mb-5">
@@ -339,9 +363,9 @@ export default function App() {
         )}
       </main>
 
-      <footer className="w-full max-w-md text-center text-xs text-[#141414]/40 mt-8">
+      <footer className="w-full max-w-md text-center text-xs mt-8 opacity-60" style={{ color: 'var(--pt-header-fg)' }}>
         {brand?.support_phone || brand?.support_email ? (
-          <>Need help? Call <b className="text-[#141414]/60">{brand.support_phone || brand.support_email}</b></>
+          <>Need help? Call <b>{brand.support_phone || brand.support_email}</b></>
         ) : (
           'Need help? Talk to the site attendant or call your provider.'
         )}

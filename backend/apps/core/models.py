@@ -345,6 +345,24 @@ class Branding(models.Model):
     support_phone = models.CharField(max_length=20, blank=True)
     support_email = models.EmailField(blank=True)
 
+    # --- Captive-portal look -------------------------------------------------------------
+    # Which of the built-in portal templates the login page wears. The visual presets
+    # (background, card style, layout) live in the frontends; the backend only stores and
+    # validates the id against core.portal_templates.TEMPLATE_IDS. Default "lumen" is the
+    # light, neutral look — a portal an ISP never touches still renders intentionally.
+    portal_template = models.CharField(max_length=32, default="lumen")
+    # A background image shown behind the login card on templates that support it. Stored
+    # like the logo — a Pillow-validated, re-encoded data URI (see branding.process_background)
+    # — because the production containers have no object storage. Larger budget than the
+    # logo since it is a full-bleed backdrop.
+    background_image = models.TextField(blank=True)
+    # The portal's language. English only today; the field is the seam i18n slots into,
+    # so an ISP's choice survives the day we add Swahili.
+    portal_language = models.CharField(max_length=8, default="en")
+    # Where to send a subscriber after a successful purchase — an ISP's own site, a
+    # promo, anywhere. Blank keeps them on the portal's own success screen.
+    post_purchase_redirect = models.URLField(blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -357,6 +375,52 @@ class Branding(models.Model):
     @property
     def name_for_customers(self) -> str:
         return self.display_name or self.operator.name
+
+
+class HotspotSettings(models.Model):
+    """How an ISP runs their captive-hotspot business: when the subscription clock starts,
+    how dormant accounts are cleaned up, how auto-generated logins are named, and how long
+    an unsold voucher stays valid.
+
+    One row per operator, created on demand with safe defaults — an ISP who never opens
+    this page gets the conservative behaviour (clock on purchase, no pruning, vouchers
+    never expire).
+    """
+
+    # Allowed values, enforced by the serializer AND surfaced to the UI as the chip choices.
+    PRUNE_CHOICES = (7, 14, 30, 60, 90, 180, 365)
+
+    class TimerStart(models.TextChoices):
+        ON_PURCHASE = "on_purchase", "On successful purchase"
+        ON_LOGIN = "on_login", "On first Wi-Fi login"
+
+    operator = models.OneToOneField(
+        Operator, on_delete=models.CASCADE, related_name="hotspot_settings"
+    )
+
+    # --- Lifecycle -----------------------------------------------------------------------
+    #: When a subscription's timer begins. "on_purchase" (default) starts the clock the
+    #: moment they pay — simple, predictable, what most prepaid ISPs want. "on_login" holds
+    #: the clock until the subscriber first connects, so a bundle bought at noon and used at
+    #: night gives its full run from first use.
+    timer_start_mode = models.CharField(
+        max_length=16, choices=TimerStart.choices, default=TimerStart.ON_PURCHASE
+    )
+    #: Delete hotspot accounts unseen this many days. NULL = never prune (the default —
+    #: deletion is destructive, so an ISP opts in).
+    inactive_prune_days = models.PositiveSmallIntegerField(null=True, blank=True)
+    #: Prepended to auto-generated logins ("sm" -> sm4837). Up to 8 chars.
+    username_prefix = models.CharField(max_length=8, blank=True)
+
+    # --- Voucher defaults ----------------------------------------------------------------
+    #: Days an UNUSED voucher stays valid before it is auto-invalidated. 0 = never expire.
+    voucher_expiry_days = models.PositiveSmallIntegerField(default=0)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Hotspot settings for {self.operator.slug}"
 
 
 class OperatorOwnedModel(TimeStampedModel):

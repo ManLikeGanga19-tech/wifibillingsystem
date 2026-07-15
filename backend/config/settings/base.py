@@ -229,6 +229,15 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.pppoe.tasks.poll_pppoe_usage",
         "schedule": 300.0,
     },
+    # Captive-hotspot lifecycle (Settings > Hotspot). Both no-op for an ISP on the defaults.
+    "prune-dormant-hotspot": {
+        "task": "apps.provisioning.tasks.prune_dormant_hotspot_subscribers",
+        "schedule": crontab(minute=50, hour=3),
+    },
+    "expire-unused-hotspot-vouchers": {
+        "task": "apps.provisioning.tasks.expire_unused_hotspot_vouchers",
+        "schedule": crontab(minute=55, hour=3),
+    },
     "expire-sessions": {
         "task": "apps.provisioning.tasks.expire_sessions",
         "schedule": 60.0,

@@ -490,7 +490,27 @@ export interface Branding {
   accent_color: string;
   support_phone: string;
   support_email: string;
+  // Captive-portal look
+  portal_template: string;
+  background_image: string;
+  portal_language: string;
+  post_purchase_redirect: string;
+  /** [id, label] pairs — the catalogue the portal-template picker renders. */
+  portal_templates: [string, string][];
 }
+
+export interface HotspotSettings {
+  timer_start_mode: 'on_purchase' | 'on_login';
+  inactive_prune_days: number | null;
+  username_prefix: string;
+  voucher_expiry_days: number;
+  choices: {
+    timer_start_modes: { value: string; label: string }[];
+    prune_days: number[];
+  };
+}
+
+export type HotspotSettingsUpdate = Omit<HotspotSettings, 'choices'>;
 
 export interface OperatorSettings {
   name: string;
@@ -999,6 +1019,32 @@ export const api = {
     },
     deleteLogo: () =>
       request<{ logo: string }>('/operator/branding/logo/', { method: 'DELETE' }),
+    uploadBackground: async (file: File): Promise<{ background_image: string }> => {
+      const form = new FormData();
+      form.append('background', file);
+      const resp = await fetch(`${BASE}/api/v1/operator/branding/background/`, {
+        ...withCookies,
+        method: 'POST',
+        headers: { 'X-CSRFToken': readCsrfToken() },
+        body: form,
+      });
+      const body = await resp.json().catch(() => null);
+      if (!resp.ok) throw new ApiError(resp.status, body);
+      return body as { background_image: string };
+    },
+    deleteBackground: () =>
+      request<{ background_image: string }>('/operator/branding/background/', {
+        method: 'DELETE',
+      }),
+  },
+
+  hotspotSettings: {
+    get: () => request<HotspotSettings>('/operator/hotspot/'),
+    update: (data: Partial<HotspotSettingsUpdate>) =>
+      request<HotspotSettings>('/operator/hotspot/', {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      }),
   },
 
   account: {

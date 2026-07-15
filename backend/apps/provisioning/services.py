@@ -15,6 +15,16 @@ def _hotspot_password() -> str:
     return f"{secrets.randbelow(1_000_000):06d}"
 
 
+def _clock_held(operator) -> bool:
+    """True when this ISP starts the subscription clock at first Wi-Fi login, not at
+    purchase. Reads Settings > Hotspot; the safe default (on purchase) means a held clock
+    is strictly opt-in, so nothing changes for an ISP who never touches the setting."""
+    from apps.core.models import HotspotSettings
+
+    row = HotspotSettings.objects.filter(operator=operator).first()
+    return bool(row and row.timer_start_mode == HotspotSettings.TimerStart.ON_LOGIN)
+
+
 def refresh_device_identity(router) -> "object":
     """Fetch the router's device info and persist its stable identity fields.
     Returns the DeviceInfo (with live metrics) for the caller to surface.
@@ -57,6 +67,7 @@ def create_session_for_transaction(tx) -> Session:
     if existing:
         return existing
     now = timezone.now()
+    held = _clock_held(tx.operator)
     return Session.objects.create(
         operator=tx.operator,
         subscriber=tx.subscriber,
@@ -66,8 +77,12 @@ def create_session_for_transaction(tx) -> Session:
         hotspot_username=tx.phone,
         hotspot_password=_hotspot_password(),
         starts_at=now,
+        # A held clock still records a provisional window (so the portal has something to
+        # show); the real one is stamped at first login. The expiry sweep ignores held
+        # sessions, so this value never cuts anyone off early.
         expires_at=now + tx.plan.duration,
         mac_address=tx.mac_address,
+        clock_started=not held,
     )
 
 
@@ -77,6 +92,7 @@ def create_session_for_voucher(voucher, mac: str = "", router=None) -> Session:
     if existing:
         return existing
     now = timezone.now()
+    held = _clock_held(voucher.operator)
     return Session.objects.create(
         operator=voucher.operator,
         subscriber=voucher.redeemed_by,
@@ -88,6 +104,7 @@ def create_session_for_voucher(voucher, mac: str = "", router=None) -> Session:
         starts_at=now,
         expires_at=now + voucher.plan.duration,
         mac_address=mac,
+        clock_started=not held,
     )
 
 

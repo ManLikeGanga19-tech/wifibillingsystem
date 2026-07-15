@@ -1,11 +1,15 @@
+import logging
 import secrets
 import uuid
 
 from django.db import transaction as db_transaction
+from django.utils import timezone
 
 from apps.core.services import audit
 
 from .models import Voucher
+
+logger = logging.getLogger(__name__)
 
 # No 0/O/1/I — codes get read from paper cards over the phone
 CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
@@ -19,6 +23,32 @@ class VoucherError(Exception):
 def _generate_code(prefix: str = "") -> str:
     body = "".join(secrets.choice(CODE_ALPHABET) for _ in range(CODE_LENGTH))
     return f"{prefix}{body}"[:20].upper()
+
+
+def expire_unused_vouchers() -> int:
+    """Invalidate prepaid vouchers that were never sold in time — the "unused voucher
+    expiry" default in Settings > Hotspot.
+
+    Only touches UNUSED vouchers older than the operator's window; a redeemed voucher is a
+    financial record and is never rewritten. voucher_expiry_days == 0 means "never expire",
+    so this is opt-in per ISP.
+    """
+    from apps.core.models import HotspotSettings
+
+    now = timezone.now()
+    expired = 0
+    configured = HotspotSettings.objects.filter(
+        voucher_expiry_days__gt=0
+    ).select_related("operator")
+    for cfg in configured:
+        cutoff = now - timezone.timedelta(days=cfg.voucher_expiry_days)
+        count = Voucher.objects.filter(
+            operator=cfg.operator, status=Voucher.Status.UNUSED, created_at__lt=cutoff
+        ).update(status=Voucher.Status.EXPIRED)
+        if count:
+            expired += count
+            logger.info("Expired %d unused vouchers for %s", count, cfg.operator.slug)
+    return expired
 
 
 def generate_batch(*, operator, plan, count: int, prefix: str = "", created_by=None):

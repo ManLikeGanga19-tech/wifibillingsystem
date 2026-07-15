@@ -7,7 +7,12 @@ from .analytics_views import (
     PlatformTimeseriesView,
     TenantPnlView,
 )
-from .branding_views import BrandingLogoView, BrandingView, PublicBrandingView
+from .branding_views import (
+    BrandingBackgroundView,
+    BrandingLogoView,
+    BrandingView,
+    PublicBrandingView,
+)
 from .domain_views import ChangeDomainView, DomainCheckView, DomainView
 from .governance_views import (
     AuditLogViewSet,
@@ -16,6 +21,7 @@ from .governance_views import (
     StartImpersonationView,
 )
 from .health_views import PlatformHealthView
+from .hotspot_settings_views import HotspotSettingsView
 from .settlement_views import ConfirmPayoutView, SettlementView
 from .tenant_views import (
     OperatorSettingsView,
@@ -42,6 +48,13 @@ urlpatterns = [
     # Branding: how the ISP's business looks to its customers.
     path("operator/branding/", BrandingView.as_view(), name="operator-branding"),
     path("operator/branding/logo/", BrandingLogoView.as_view(), name="operator-branding-logo"),
+    path(
+        "operator/branding/background/",
+        BrandingBackgroundView.as_view(),
+        name="operator-branding-background",
+    ),
+    # Hotspot: the captive-portal subscriber lifecycle (clock start, prune, prefix, vouchers).
+    path("operator/hotspot/", HotspotSettingsView.as_view(), name="operator-hotspot-settings"),
     # Domain: the address customers reach this ISP at. Changing it re-pushes the captive
     # portal to their routers — see domain_views.
     path("operator/domain/", DomainView.as_view(), name="operator-domain"),
