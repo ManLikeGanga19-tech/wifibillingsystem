@@ -5,6 +5,7 @@ import CommsPanel from './settings/CommsPanel';
 import DomainPanel from './settings/DomainPanel';
 import EmailPanel from './settings/EmailPanel';
 import PaymentsPanel from './settings/PaymentsPanel';
+import PppoePanel from './settings/PppoePanel';
 import ProfilePanel from './settings/ProfilePanel';
 import Placeholder from './settings/Placeholder';
 
@@ -166,9 +167,7 @@ export default function SettingsView({
           {active === 'profile' && <ProfilePanel onOpenWallet={onOpenWallet} />}
 
           {active === 'domain' && <DomainPanel />}
-          {active === 'pppoe' && (
-            <Placeholder title="PPPoE" blurb="Fair-use policy, suspension rules and payment reminders for fixed-line subscribers." />
-          )}
+          {active === 'pppoe' && <PppoePanel />}
           {active === 'hotspot' && (
             <Placeholder title="Hotspot" blurb="Captive-portal instructions, voucher defaults and hotspot behaviour." />
           )}

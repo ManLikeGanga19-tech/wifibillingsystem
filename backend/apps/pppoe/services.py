@@ -95,7 +95,11 @@ def restore_client(client: Client) -> None:
 
 
 def _invoice_number(operator, period_start) -> str:
-    return f"INV-{operator.id}-{period_start:%Y%m}-{secrets.randbelow(10000):04d}"
+    from .models import PppoeSettings
+
+    row = PppoeSettings.objects.filter(operator=operator).first()
+    prefix = (row.invoice_prefix if row and row.invoice_prefix else "INV").strip() or "INV"
+    return f"{prefix}-{operator.id}-{period_start:%Y%m}-{secrets.randbelow(10000):04d}"
 
 
 def issue_invoice(client: Client, period_start, *, grace_days: int = 3) -> Invoice | None:

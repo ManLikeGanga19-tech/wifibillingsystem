@@ -33,21 +33,48 @@ def restore_client_task(self, client_id: int):
 @shared_task
 def issue_due_invoices():
     """Daily: issue this month's invoice for every active client whose billing day
-    is today. Anniversary billing."""
-    from .models import Client
+    is today. Anniversary billing.
+
+    Skips operators who have turned auto-generation OFF — they issue invoices by hand.
+    The set of such operators is tiny (it is off by exception), so we resolve it once and
+    filter, rather than checking per client."""
+    from .models import Client, PppoeSettings
     from .services import issue_invoice
 
     today = timezone.localdate()
+    manual = set(
+        PppoeSettings.objects.filter(auto_generate_invoices=False).values_list(
+            "operator_id", flat=True
+        )
+    )
     issued = 0
-    clients = Client.objects.filter(
-        status__in=Client.ACTIVE_STATUSES, billing_day=today.day
-    ).select_related("plan", "operator")
+    clients = (
+        Client.objects.filter(status__in=Client.ACTIVE_STATUSES, billing_day=today.day)
+        .exclude(operator_id__in=manual)
+        .select_related("plan", "operator")
+    )
     for client in clients.iterator():
         if issue_invoice(client, today):
             issued += 1
     if issued:
         logger.info("Issued %d PPPoE invoices", issued)
     return issued
+
+
+@shared_task
+def prune_dormant_pppoe_clients():
+    """Daily: delete dormant DISABLED accounts for ISPs who opted in (see lifecycle)."""
+    from .lifecycle import prune_dormant_clients
+
+    return prune_dormant_clients()
+
+
+@shared_task
+def remind_pppoe_expiry():
+    """Hourly: SMS subscribers ahead of renewal, per each ISP's chosen lead times."""
+    from .lifecycle import remind_expiring_clients
+
+    return remind_expiring_clients()
 
 
 @shared_task

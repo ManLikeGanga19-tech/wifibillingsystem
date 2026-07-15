@@ -171,6 +171,10 @@ class Client(OperatorOwnedModel):
     )
     next_due_date = models.DateField(null=True, blank=True)
     installed_at = models.DateField(null=True, blank=True)
+    # The next_due_date we last sent a pre-expiry reminder for. Stored (not a bool) so a
+    # RENEWAL — which moves next_due_date forward — automatically re-arms the reminder,
+    # while a second run in the same cycle stays silent.
+    expiry_reminded_on = models.DateField(null=True, blank=True)
     notes = models.TextField(blank=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL
@@ -274,3 +278,48 @@ def month_period(anchor):
     day = min(anchor.day, 28)
     end = anchor.replace(year=ny, month=nm, day=day) - timedelta(days=1)
     return anchor, end
+
+
+class PppoeSettings(models.Model):
+    """How an ISP runs their fixed-line business: when dormant accounts are pruned, when
+    subscribers are reminded, and how invoices are numbered.
+
+    One row per operator, created on demand with sensible defaults, so an ISP who never
+    opens this page still gets the safe behaviour (invoices auto-issued, no pruning).
+    """
+
+    # Allowed values, enforced by the serializer AND surfaced to the UI as the chip choices.
+    PRUNE_CHOICES = (7, 14, 30, 60, 90, 180, 365)
+    REMINDER_HOUR_CHOICES = (2, 4, 12, 24, 48, 72)
+    FUP_PERCENT_CHOICES = (50, 80, 95, 100)
+
+    operator = models.OneToOneField(
+        "core.Operator", on_delete=models.CASCADE, related_name="pppoe_settings"
+    )
+
+    # --- Lifecycle -------------------------------------------------------------------
+    #: Delete DISABLED accounts dormant this many days. NULL = never prune (the default —
+    #: deletion is destructive, so an ISP opts in).
+    inactive_prune_days = models.PositiveSmallIntegerField(null=True, blank=True)
+
+    # --- Reminders & alerts ----------------------------------------------------------
+    #: SMS a subscriber this many hours before their renewal falls due. A list, because an
+    #: ISP may want both a 72h heads-up and a 24h nudge.
+    pre_expiry_reminder_hours = models.JSONField(default=list, blank=True)
+    #: FUP usage thresholds (percent of the plan's data cap). STORED now; the alerts go live
+    #: once per-client PPPoE usage metering is built — until then these are inert, and the
+    #: console says so rather than pretending.
+    fup_alert_percents = models.JSONField(default=list, blank=True)
+
+    # --- Invoicing -------------------------------------------------------------------
+    #: Auto-mint the monthly invoice on each client's billing anniversary. On by default —
+    #: an ISP who turns it off issues invoices by hand.
+    auto_generate_invoices = models.BooleanField(default=True)
+    #: Prefix for invoice numbers: "INV" -> INV-000123.
+    invoice_prefix = models.CharField(max_length=8, default="INV")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"PPPoE settings for {self.operator.slug}"

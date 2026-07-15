@@ -657,6 +657,19 @@ export interface DomainRouter {
   on_current_domain: boolean;
 }
 
+/** Settings > PPPoE. The `choices` drive the chip options; `fup_metering_ready` lets the
+ *  UI be honest that FUP thresholds are stored but not yet firing. */
+export interface PppoeSettings {
+  inactive_prune_days: number | null;
+  pre_expiry_reminder_hours: number[];
+  fup_alert_percents: number[];
+  auto_generate_invoices: boolean;
+  invoice_prefix: string;
+  choices: { prune_days: number[]; reminder_hours: number[]; fup_percents: number[] };
+  fup_metering_ready: boolean;
+}
+export type PppoeSettingsUpdate = Omit<PppoeSettings, 'choices' | 'fup_metering_ready'>;
+
 export interface DomainState {
   slug: string;
   domain: string;
@@ -981,6 +994,15 @@ export const api = {
 
     /** Monthly statements — the itemised record of every fee WIFI.OS charged this ISP. */
     invoices: () => request<{ invoices: PlatformInvoice[] }>('/billing/account/invoices/'),
+  },
+
+  pppoeSettings: {
+    get: () => request<PppoeSettings>('/pppoe/settings/'),
+    update: (data: Partial<PppoeSettingsUpdate>) =>
+      request<PppoeSettings>('/pppoe/settings/', {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      }),
   },
 
   domain: {

@@ -1,6 +1,7 @@
 from django.urls import path
 from rest_framework.routers import SimpleRouter
 
+from .settings_views import PppoeSettingsView
 from .views import (
     AccessPointViewSet,
     ClientViewSet,
@@ -19,6 +20,7 @@ router.register("towers", TowerViewSet, basename="pppoe-tower")
 router.register("access-points", AccessPointViewSet, basename="pppoe-ap")
 
 urlpatterns = [
+    path("settings/", PppoeSettingsView.as_view(), name="pppoe-settings"),
     path("suspended-notice/", SuspendedNoticeView.as_view(), name="pppoe-suspended-notice"),
     path("account-lookup/", account_lookup, name="pppoe-account-lookup"),
     *router.urls,
