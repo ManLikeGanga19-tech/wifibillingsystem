@@ -70,13 +70,12 @@ class TestPortalIsAnonymous:
         network blipped — a red build that says nothing about our code is worse than no
         test at all.
         """
-        from apps.payments import services as payment_services
-        from apps.payments.daraja import DarajaError
+        from apps.payments.daraja import DarajaClient, DarajaError
 
         def no_network(*args, **kwargs):
             raise DarajaError("stubbed — no network in tests")
 
-        monkeypatch.setattr(payment_services.DarajaClient, "stk_push", no_network)
+        monkeypatch.setattr(DarajaClient, "stk_push", no_network)
 
         op = OperatorFactory()
         router = RouterFactory(operator=op)

@@ -1,8 +1,15 @@
+import secrets
 from decimal import Decimal
 
 from django.conf import settings
 from django.db import models
 from django.db.models.functions import Lower
+
+
+def _webhook_token() -> str:
+    """The secret in an ISP's payment callback URL. Long enough that guessing it is not a
+    strategy — a correct guess would let somebody forge a paid session."""
+    return secrets.token_urlsafe(18)[:24]
 
 
 class TimeStampedModel(models.Model):
@@ -30,6 +37,19 @@ class Operator(TimeStampedModel):
     # moment the ISP hits save.
     previous_slug = models.SlugField(blank=True, default="", db_index=True)
     slug_changed_at = models.DateTimeField(null=True, blank=True)
+
+    # Which payment gateway their subscribers pay through. Defaults to OUR paybill so a
+    # brand-new ISP can sell today — Safaricom takes weeks to approve a shortcode, and an
+    # ISP who cannot take money while they wait is an ISP who signs up with somebody else.
+    payment_gateway = models.CharField(max_length=20, default="wifios")
+
+    # The secret in this ISP's payment webhook URL. It NAMES the operator (so an incoming
+    # callback is attributed without trusting anything in the body) and AUTHENTICATES it
+    # (so a random POST is a 404, not a free WiFi session). Per-tenant, because each ISP
+    # registers their own callback URL with Safaricom.
+    webhook_token = models.CharField(
+        max_length=32, unique=True, default=_webhook_token, editable=False
+    )
     status = models.CharField(
         max_length=10, choices=Status.choices, default=Status.PENDING, db_index=True
     )

@@ -10,7 +10,6 @@ from apps.accounts.models import Subscriber
 from apps.core.phone import normalize_msisdn
 from apps.core.services import audit
 
-from .daraja import DarajaClient
 from .models import Transaction
 
 logger = logging.getLogger(__name__)
@@ -54,6 +53,14 @@ def initiate_stk_push(*, phone: str, plan, mac: str = "", router=None) -> Transa
             "operator, or try again shortly."
         )
 
+    # WHOSE gateway takes this money. Stamped on the transaction at birth, not looked up
+    # later: an ISP who switches gateway tomorrow must not have today's in-flight payments
+    # verified against the wrong account, and a sale must stay settled the way it was
+    # actually taken.
+    from .gateways import get_gateway
+
+    gateway = get_gateway(operator)
+
     subscriber, _ = Subscriber.get_or_create_for(operator, phone)
     tx = Transaction.objects.create(
         operator=operator,
@@ -63,25 +70,31 @@ def initiate_stk_push(*, phone: str, plan, mac: str = "", router=None) -> Transa
         phone=phone,
         amount=plan.price,
         mac_address=mac or "",
+        gateway=gateway.id,
+        # THE flag that keeps the wallet honest: a `direct` sale is money we never held,
+        # so it can never become withdrawable from us (billing.services).
+        settlement=gateway.settlement,
         # Tenant tag on Danamo's paybill statement (AccountReference max 12 chars)
         account_reference=operator.slug[:12].upper(),
     )
     try:
-        resp = DarajaClient(operator).stk_push(
-            phone=phone,
-            amount=int(plan.price),
-            account_reference=tx.account_reference,
-            description=plan.name,
-        )
+        result = gateway.charge(tx)
     except Exception:
         tx.status = Transaction.Status.FAILED
         tx.result_desc = "STK push initiation failed"
         tx.save(update_fields=["status", "result_desc", "updated_at"])
         raise
-    tx.checkout_request_id = resp.get("CheckoutRequestID")
-    tx.merchant_request_id = resp.get("MerchantRequestID", "")
+    tx.checkout_request_id = result.reference
+    tx.merchant_request_id = result.raw.get("MerchantRequestID", "")
     tx.save(update_fields=["checkout_request_id", "merchant_request_id", "updated_at"])
-    audit("stk_push_initiated", operator=operator, target=tx, phone=phone, plan=plan.name)
+    audit(
+        "stk_push_initiated",
+        operator=operator,
+        target=tx,
+        phone=phone,
+        plan=plan.name,
+        gateway=gateway.id,
+    )
     return tx
 
 
@@ -145,7 +158,10 @@ def process_stk_callback(payload: dict) -> Transaction | None:
             from apps.billing.services import credit_sale
             from apps.provisioning.tasks import provision_transaction
 
-            credit_sale(tx)
+            # Settled the way it was TAKEN. A sale on the ISP's own gateway is money we
+            # never received; crediting it as platform-held would let them withdraw it
+            # from us.
+            credit_sale(tx, settlement=tx.settlement)
             db_transaction.on_commit(lambda: provision_transaction.delay(tx.id))
     return tx
 
@@ -167,5 +183,5 @@ def mark_reconciled_success(tx: Transaction, query_response: dict) -> None:
         from apps.billing.services import credit_sale
         from apps.provisioning.tasks import provision_transaction
 
-        credit_sale(tx)
+        credit_sale(tx, settlement=tx.settlement)
         db_transaction.on_commit(lambda: provision_transaction.delay(tx.id))

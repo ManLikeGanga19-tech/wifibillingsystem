@@ -578,6 +578,46 @@ export interface ProvidersResponse {
   note?: string;
 }
 
+/** A field on a payment-gateway credential form. Same shape as ProviderField, plus the
+ *  M-Pesa specifics (choices for paybill-vs-till, help text). */
+export interface GatewayField {
+  key: string;
+  label: string;
+  secret: boolean;
+  placeholder: string;
+  required: boolean;
+  help: string;
+  choices: { value: string; label: string }[];
+  /** Echoed for plain fields so the form is editable; always "" for a secret. */
+  value: string;
+  set: boolean;
+}
+
+/** A payment gateway an ISP can collect through. The `settlement` flag is the whole
+ *  finance refactor: `platform` money lands with us (we withhold 3%, they withdraw);
+ *  `direct` lands in their own account instantly and we invoice our fee. */
+export interface PaymentGatewayCard {
+  id: string;
+  name: string;
+  region: string;
+  methods: string[];
+  settles: string;
+  settlement: 'platform' | 'direct';
+  managed: boolean;
+  note: string;
+  available: boolean;
+  active: boolean;
+  configured: boolean;
+  fields: GatewayField[];
+  /** The URL the ISP must register with Safaricom. Empty for the managed gateway. */
+  webhook_url: string;
+}
+
+export interface PaymentGatewaysState {
+  active: string;
+  gateways: PaymentGatewayCard[];
+}
+
 /** A router, and whether it is actually sending customers to the ISP's CURRENT address.
  *  An offline router keeps redirecting to the old one — which is exactly the thing the
  *  ISP needs to see rather than assume. */
@@ -923,6 +963,33 @@ export const api = {
       request<DomainState>('/operator/domain/change/', {
         method: 'POST',
         body: JSON.stringify({ slug }),
+      }),
+  },
+
+  paymentGateways: {
+    /** Every gateway an ISP can collect through, and where they stand with each. */
+    get: () => request<PaymentGatewaysState>('/payments/gateways/'),
+
+    /** Store credentials for a gateway. Secrets left blank keep their stored value. */
+    configure: (gatewayId: string, credentials: Record<string, string>, activate = false) =>
+      request<PaymentGatewaysState>(`/payments/gateways/${gatewayId}/`, {
+        method: 'POST',
+        body: JSON.stringify({ credentials, activate }),
+      }),
+
+    /** Make this the gateway subscribers pay through. One at a time. */
+    activate: (gatewayId: string) =>
+      request<PaymentGatewaysState>(`/payments/gateways/${gatewayId}/activate/`, {
+        method: 'POST',
+        body: '{}',
+      }),
+
+    /** Prove the credentials work by charging KSh 1 to the ISP's own phone — wrong keys
+     *  fail SILENTLY in production, at a customer, so surface them now. */
+    test: (gatewayId: string, phone: string) =>
+      request<{ detail: string }>(`/payments/gateways/${gatewayId}/test/`, {
+        method: 'POST',
+        body: JSON.stringify({ phone }),
       }),
   },
 

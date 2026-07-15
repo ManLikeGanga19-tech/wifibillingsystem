@@ -36,10 +36,10 @@ STK = "/api/v1/payments/stk-push/"
 
 def _stk_ok(mocker):
     mocker.patch(
-        "apps.payments.services.DarajaClient.stk_push",
+        "apps.payments.daraja.DarajaClient.stk_push",
         return_value={"CheckoutRequestID": "ws_CO_test", "MerchantRequestID": "m-1"},
     )
-    mocker.patch("apps.payments.services.DarajaClient.__init__", return_value=None)
+    mocker.patch("apps.payments.daraja.DarajaClient.__init__", return_value=None)
 
 
 def _callback(checkout_id, result_code=0):

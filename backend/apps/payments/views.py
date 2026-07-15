@@ -23,6 +23,7 @@ from apps.provisioning.models import Session
 from apps.provisioning.services import ReprovisionError, reprovision_transaction
 
 from .daraja import DarajaError
+from .gateways import GatewayError
 from .models import Transaction
 from .serializers import (
     STKPushRequestSerializer,
@@ -62,7 +63,10 @@ class STKPushView(PublicAPIView):
                 {"detail": str(exc), "reason": "no_router"},
                 status=status.HTTP_409_CONFLICT,
             )
-        except DarajaError as exc:
+        except (DarajaError, GatewayError) as exc:
+            # GatewayError covers the ISP's OWN gateway being misconfigured or refusing.
+            # Without it, a bad Daraja key on one ISP's shortcode would 500 at a customer
+            # standing in front of a hotspot, instead of a message they can act on.
             logger.error("STK push failed: %s", exc)
             return Response(
                 {"detail": "Could not reach M-Pesa. Please try again."},

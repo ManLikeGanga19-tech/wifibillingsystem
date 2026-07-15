@@ -30,7 +30,8 @@ def reconcile_pending_transactions():
     ~25s by asking Daraja directly. That window is deliberately inside the portal's
     polling window, so a lost callback costs the customer seconds, not a failed
     connection."""
-    from .daraja import DarajaClient, DarajaError
+    from .daraja import DarajaError
+    from .gateways import GatewayError, gateway_for_transaction
     from .models import Transaction
     from .services import mark_reconciled_success
 
@@ -45,16 +46,23 @@ def reconcile_pending_transactions():
     settled = 0
     for tx in stale.iterator():
         try:
-            resp = DarajaClient(tx.operator).stk_query(tx.checkout_request_id)
-        except DarajaError as exc:
+            # The gateway it was TAKEN on — not whatever the ISP has active now. Querying
+            # an ISP's own shortcode for a payment made on ours (or vice versa) would come
+            # back "unknown" and we would fail a payment that actually succeeded.
+            event = gateway_for_transaction(tx).verify(tx)
+        except (DarajaError, GatewayError) as exc:
             if any(code in str(exc) for code in _STILL_PROCESSING_ERRORS):
                 continue  # user still has the PIN prompt open
-            logger.warning("stk_query failed for %s: %s", tx.checkout_request_id, exc)
+            logger.warning("verify failed for %s: %s", tx.checkout_request_id, exc)
             tx.reconcile_attempts += 1
             tx.save(update_fields=["reconcile_attempts", "updated_at"])
             continue
 
-        result_code = str(resp.get("ResultCode", ""))
+        if event is None or event.pending:
+            continue  # the gateway cannot say yet; try again next sweep
+
+        resp = event.raw
+        result_code = "0" if event.paid else str(resp.get("ResultCode", "1"))
         tx.reconcile_attempts += 1
         if result_code == "0":
             mark_reconciled_success(tx, resp)

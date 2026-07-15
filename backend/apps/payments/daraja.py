@@ -19,21 +19,57 @@ class DarajaError(Exception):
     pass
 
 
-class DarajaClient:
-    """All payments run on the platform's (Danamo Tech Ltd) paybill — the
-    aggregator model. Tenant attribution happens in the ledger, not at Safaricom.
-    The `operator` argument is accepted for call-site compatibility but ignored."""
+#: Paybill and Till are DIFFERENT Daraja transaction types. Sending a till payment as
+#: CustomerPayBillOnline does not fail loudly — Safaricom rejects it in a way that looks
+#: like a customer cancellation, so the ISP would blame their subscribers.
+PAYBILL = "paybill"
+TILL = "till"
+TRANSACTION_TYPES = {
+    PAYBILL: "CustomerPayBillOnline",
+    TILL: "CustomerBuyGoodsOnline",
+}
 
-    def __init__(self, operator=None):
-        self.base_url = settings.DARAJA_BASE_URL.rstrip("/")
-        self.consumer_key = settings.DARAJA_CONSUMER_KEY
-        self.consumer_secret = settings.DARAJA_CONSUMER_SECRET
-        self.shortcode = settings.DARAJA_SHORTCODE
-        self.passkey = settings.DARAJA_PASSKEY
+
+class DarajaClient:
+    """Safaricom Daraja, on WHOEVER's shortcode.
+
+    Credentials are passed IN. The platform's own paybill (the aggregator path) and an
+    ISP's own shortcode (instant settlement to them) are the same API with different keys,
+    so they are the same class — a client that reached for `settings` could only ever
+    collect money into one account, which is the very thing this refactor exists to end.
+    """
+
+    def __init__(
+        self,
+        *,
+        consumer_key: str = "",
+        consumer_secret: str = "",
+        shortcode: str = "",
+        passkey: str = "",
+        collection_method: str = PAYBILL,
+        base_url: str = "",
+    ):
+        self.base_url = (base_url or settings.DARAJA_BASE_URL).rstrip("/")
+        self.consumer_key = consumer_key
+        self.consumer_secret = consumer_secret
+        self.shortcode = shortcode
+        self.passkey = passkey
+        self.collection_method = collection_method
         if not (self.consumer_key and self.consumer_secret):
-            raise DarajaError(
-                "Daraja credentials missing. Set DARAJA_CONSUMER_KEY / DARAJA_CONSUMER_SECRET."
-            )
+            raise DarajaError("Daraja consumer key/secret are not configured.")
+        if not (self.shortcode and self.passkey):
+            raise DarajaError("Daraja shortcode/passkey are not configured.")
+
+    @classmethod
+    def for_platform(cls) -> "DarajaClient":
+        """Danamo's own paybill — the aggregator path, and how ISPs top us up."""
+        return cls(
+            consumer_key=settings.DARAJA_CONSUMER_KEY,
+            consumer_secret=settings.DARAJA_CONSUMER_SECRET,
+            shortcode=settings.DARAJA_SHORTCODE,
+            passkey=settings.DARAJA_PASSKEY,
+            collection_method=PAYBILL,
+        )
 
     # -- auth -------------------------------------------------------------
     def _token(self) -> str:
@@ -97,7 +133,10 @@ class DarajaClient:
             "BusinessShortCode": self.shortcode,
             "Password": self._password(timestamp),
             "Timestamp": timestamp,
-            "TransactionType": "CustomerPayBillOnline",
+            # Paybill vs Till is not cosmetic — see TRANSACTION_TYPES.
+            "TransactionType": TRANSACTION_TYPES.get(
+                self.collection_method, TRANSACTION_TYPES[PAYBILL]
+            ),
             "Amount": int(amount),
             "PartyA": phone,
             "PartyB": self.shortcode,

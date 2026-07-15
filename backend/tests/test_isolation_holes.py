@@ -131,10 +131,10 @@ class TestHole5StkPushArbitraryPlan:
         plan_a = PlanFactory(operator=op_a, price=Decimal("20.00"))
         router_a = RouterFactory(operator=op_a)
         mocker.patch(
-            "apps.payments.services.DarajaClient.stk_push",
+            "apps.payments.daraja.DarajaClient.stk_push",
             return_value={"CheckoutRequestID": "ws_CO_iso", "MerchantRequestID": "m"},
         )
-        mocker.patch("apps.payments.services.DarajaClient.__init__", return_value=None)
+        mocker.patch("apps.payments.daraja.DarajaClient.__init__", return_value=None)
         resp = APIClient().post(
             "/api/v1/payments/stk-push/",
             {"phone": "0712345678", "plan_id": plan_a.id, "router_id": router_a.id},

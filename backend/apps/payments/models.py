@@ -1,7 +1,9 @@
+import json
 import uuid
 
 from django.db import models
 
+from apps.core.fields import EncryptedTextField
 from apps.core.models import OperatorOwnedModel
 from apps.plans.models import Plan
 
@@ -31,6 +33,19 @@ class Transaction(OperatorOwnedModel):
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     account_reference = models.CharField(max_length=20, blank=True)
     mac_address = models.CharField(max_length=17, blank=True)
+
+    # WHICH gateway took this money, and therefore WHERE it landed. Recorded on the
+    # transaction rather than read from the operator, because an ISP who switches gateway
+    # must not have their in-flight payments verified against the wrong account — and a
+    # sale must be settled the way it was actually taken, forever, not the way the ISP is
+    # configured today.
+    gateway = models.CharField(max_length=20, default="wifios", db_index=True)
+    settlement = models.CharField(
+        max_length=8,
+        choices=[("platform", "Held by WIFI.OS"), ("direct", "Paid straight to the ISP")],
+        default="platform",
+        db_index=True,
+    )
 
     checkout_request_id = models.CharField(max_length=100, unique=True, null=True, blank=True)
     merchant_request_id = models.CharField(max_length=100, blank=True)
@@ -104,3 +119,53 @@ class C2BPayment(models.Model):
 
     def __str__(self):
         return f"C2B {self.trans_id} {self.bill_ref} KSh {self.amount} [{self.status}]"
+
+
+class GatewayCredential(models.Model):
+    """One ISP's credentials for ONE payment gateway.
+
+    Kept per-gateway (not on Operator) so switching away from M-Pesa does not destroy the
+    keys — an ISP trialling their own shortcode against our paybill should be able to
+    switch back and forth without re-pasting a Daraja secret.
+
+    The whole set is a single encrypted JSON blob, for the same reason as the SMS
+    providers: gateways disagree about what a credential even IS (shortcode+key+secret+
+    passkey, or a bearer token, or an API key + IPN id), and a column per field would be a
+    migration tax on every gateway added.
+
+    These are the most dangerous secrets in the system. A stolen Daraja consumer secret
+    lets somebody collect money in the ISP's name. They are Fernet-encrypted at rest and
+    NEVER returned by the API — a read reports which fields are set, not what they are.
+    """
+
+    operator = models.ForeignKey(
+        "core.Operator", on_delete=models.CASCADE, related_name="gateway_credentials"
+    )
+    gateway = models.CharField(max_length=20)
+    secrets = EncryptedTextField(blank=True, default="")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["operator", "gateway"], name="one_credential_per_gateway"
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.operator.slug} {self.gateway}"
+
+    @property
+    def values(self) -> dict:
+        if not self.secrets:
+            return {}
+        try:
+            return json.loads(self.secrets)
+        except ValueError:
+            return {}
+
+    @values.setter
+    def values(self, data: dict):
+        self.secrets = json.dumps(data)

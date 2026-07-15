@@ -4,9 +4,9 @@ import BrandingPanel from './settings/BrandingPanel';
 import CommsPanel from './settings/CommsPanel';
 import DomainPanel from './settings/DomainPanel';
 import EmailPanel from './settings/EmailPanel';
+import PaymentsPanel from './settings/PaymentsPanel';
 import ProfilePanel from './settings/ProfilePanel';
 import Placeholder from './settings/Placeholder';
-import SettlementSetup from './SettlementSetup';
 
 /**
  * The settings SHELL. One frame, an inner sidebar of every setting an ISP has, and a
@@ -53,7 +53,7 @@ const NAV: Group[] = [
   {
     title: 'Billing & messaging',
     items: [
-      { id: 'payments', label: 'Payments', sub: 'Payout account & credentials' },
+      { id: 'payments', label: 'Payments', sub: 'How subscribers pay you' },
       { id: 'sms', label: 'SMS', sub: 'Providers & balance', under: 'Communications' },
       { id: 'email', label: 'Email', sub: 'SMTP gateway' },
       { id: 'whatsapp', label: 'WhatsApp', sub: 'WhatsApp providers' },
@@ -162,11 +162,7 @@ export default function SettingsView({
           </div>
 
           {active === 'branding' && <BrandingPanel />}
-          {active === 'payments' && (
-            <div className="border border-[#141414] bg-white p-5">
-              <SettlementSetup onWentLive={() => {}} />
-            </div>
-          )}
+          {active === 'payments' && <PaymentsPanel />}
           {active === 'profile' && <ProfilePanel onOpenWallet={onOpenWallet} />}
 
           {active === 'domain' && <DomainPanel />}
