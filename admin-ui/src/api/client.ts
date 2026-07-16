@@ -164,6 +164,13 @@ export interface ApiMessage {
   created_at: string;
 }
 
+export interface ApiSessionDevice {
+  mac_address: string;
+  hostname: string;
+  kind: 'phone' | 'laptop' | 'tv' | 'other';
+  is_paying_device: boolean;
+}
+
 export interface ApiSession {
   id: number;
   phone: string;
@@ -177,6 +184,8 @@ export interface ApiSession {
   ip_address: string | null;
   data_used_mb: number;
   provision_error: string;
+  devices: ApiSessionDevice[];
+  device_allowance: { general: number; tv: number };
 }
 
 export interface ApiVoucher {

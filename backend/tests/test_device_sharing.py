@@ -332,6 +332,33 @@ def test_recover_is_generic_and_silent_for_a_phone_with_no_session(api_client):
     assert not Message.objects.filter(to_phone="254799999999").exists()
 
 
+def test_the_isp_sessions_list_shows_a_sessions_devices():
+    """An ISP viewing Active Users can see the devices on a multi-device paid session."""
+    from rest_framework.test import APIClient
+
+    from apps.accounts.models import Role
+
+    from .factories import UserFactory
+
+    session = a_session(shared_users=3, tv_slots=1)
+    dev.record_paying_device(session)  # the paying phone
+    dev.approve_device(session, "AA:BB:CC:00:00:0F", kind="tv")  # the TV
+
+    client = APIClient()
+    client.force_authenticate(
+        UserFactory(operator=session.operator, is_staff=True, role=Role.TENANT_OWNER)
+    )
+    body = client.get("/api/v1/sessions/?status=active").json()
+    row = next(r for r in body["results"] if r["id"] == session.id)
+
+    assert row["device_allowance"] == {"general": 3, "tv": 1}
+    macs = {d["mac_address"] for d in row["devices"]}
+    assert session.mac_address in macs
+    assert "AA:BB:CC:00:00:0F" in macs
+    assert any(d["kind"] == "tv" for d in row["devices"])
+    assert any(d["is_paying_device"] for d in row["devices"])
+
+
 def test_device_management_is_tenant_isolated():
     """A device row is stamped with the session's operator, so it can never leak across
     tenants even though the endpoint is public."""

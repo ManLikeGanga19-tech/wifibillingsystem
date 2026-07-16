@@ -53,6 +53,10 @@ class SessionSerializer(serializers.ModelSerializer):
     plan_name = serializers.CharField(source="plan.name", read_only=True)
     router_name = serializers.CharField(source="router.name", read_only=True)
     phone = serializers.CharField(source="subscriber.phone", read_only=True, default="")
+    # The devices sharing this ONE paid session (tap-to-approve): the paying phone plus any
+    # laptops/TV the customer added. So the ISP can see who is on a multi-device session.
+    devices = serializers.SerializerMethodField()
+    device_allowance = serializers.SerializerMethodField()
 
     class Meta:
         model = Session
@@ -69,4 +73,20 @@ class SessionSerializer(serializers.ModelSerializer):
             "ip_address",
             "data_used_mb",
             "provision_error",
+            "devices",
+            "device_allowance",
         ]
+
+    def get_devices(self, obj) -> list:
+        return [
+            {
+                "mac_address": d.mac_address,
+                "hostname": d.hostname,
+                "kind": d.kind,
+                "is_paying_device": d.is_paying_device,
+            }
+            for d in obj.devices.all().order_by("-is_paying_device", "approved_at")
+        ]
+
+    def get_device_allowance(self, obj) -> dict:
+        return {"general": obj.plan.shared_users, "tv": obj.plan.tv_slots}
