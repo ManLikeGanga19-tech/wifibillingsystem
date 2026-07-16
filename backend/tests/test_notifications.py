@@ -58,3 +58,22 @@ def test_campaign_api_queues_dispatch(
     assert resp.status_code == 201, resp.content
     campaign = Campaign.objects.get(pk=resp.json()["id"])
     assert campaign.total_recipients == 2
+
+
+def test_audience_preview_matches_dispatch(admin_client, operator, router):
+    """The console shows a real recipient count/cost before sending — it must match how
+    dispatch actually resolves the audience (active = has a live session; all = reachable)."""
+    from apps.accounts.models import Subscriber
+
+    active = SubscriberFactory(operator=operator)
+    SessionFactory(subscriber=active, operator=operator, router=router)  # active session
+    SubscriberFactory(operator=operator)  # reachable, but no session
+
+    body = admin_client.get("/api/v1/notifications/campaigns/audience/?channel=sms").json()
+    reachable = (
+        Subscriber.objects.filter(operator=operator, is_blocked=False)
+        .exclude(phone="").values("phone").distinct().count()
+    )
+    assert body["all"] == reachable
+    assert body["active"] == 1  # only the subscriber with a live session
+    assert body["expired"] == 0

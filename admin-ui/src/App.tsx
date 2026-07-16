@@ -284,22 +284,7 @@ export default function App() {
     }
   };
 
-  // ---- campaigns -------------------------------------------------------------
-  const handleSendCampaign = async (campaign: Omit<OutboundCampaign, 'id' | 'sentAt' | 'status'>) => {
-    try {
-      await api.campaigns.create({
-        name: campaign.name,
-        channel: campaign.channel.toLowerCase(),
-        audience: campaign.audience.toLowerCase(),
-        body: campaign.body,
-      });
-      const r = await api.campaigns.list();
-      setCampaigns(r.results.map(campaignToUi).reverse());
-      toast('success', `${campaign.channel} broadcast "${campaign.name}" queued.`);
-    } catch {
-      toast('error', 'Failed to queue the broadcast.');
-    }
-  };
+  // Campaigns are self-contained in MessagingView (its own fetch/create + live progress).
 
   if (checking) {
     return (
@@ -581,14 +566,7 @@ export default function App() {
             {activeTab === 'expenses' && <ExpensesView />}
             {activeTab === 'messages' && <MessagesView />}
             {activeTab === 'emails' && <EmailsView />}
-            {activeTab === 'campaigns' && (
-              <MessagingView
-                campaigns={campaigns}
-                subscribers={liveSubscribers}
-                onSendCampaign={handleSendCampaign}
-                onAddLog={addLog}
-              />
-            )}
+            {activeTab === 'campaigns' && <MessagingView />}
             {activeTab === 'mikrotik' && <RoutersView />}
             {activeTab === 'equipment' && <EquipmentView />}
             {activeTab === 'settings' && (

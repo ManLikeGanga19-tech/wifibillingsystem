@@ -1290,6 +1290,10 @@ export const api = {
     list: () => request<Paginated<ApiCampaign>>('/notifications/campaigns/'),
     create: (data: { name: string; channel: string; audience: string; body: string; subject?: string }) =>
       request<ApiCampaign>('/notifications/campaigns/', { method: 'POST', body: JSON.stringify(data) }),
+    audience: (channel = 'sms') =>
+      request<{ all: number; active: number; expired: number }>(
+        `/notifications/campaigns/audience/?channel=${channel}`
+      ),
   },
 
   messages: {
