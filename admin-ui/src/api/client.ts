@@ -538,6 +538,20 @@ export interface MessageTemplatesResponse {
   templates: MessageTemplate[];
 }
 
+export interface LoyaltySettings {
+  is_enabled: boolean;
+  spend_per_point: number;
+  points_per_threshold: number;
+  min_redeem_points: number;
+  value_per_point: string;
+}
+
+export interface LoyaltySummary {
+  accounts: number;
+  points_outstanding: number;
+  top: { phone: string; points: number }[];
+}
+
 export interface OperatorSettings {
   name: string;
   slug: string;
@@ -1105,6 +1119,16 @@ export const api = {
         method: 'PATCH',
         body: JSON.stringify(data),
       }),
+  },
+
+  loyalty: {
+    get: () => request<LoyaltySettings>('/loyalty/settings/'),
+    update: (data: Partial<LoyaltySettings>) =>
+      request<LoyaltySettings>('/loyalty/settings/', {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      }),
+    summary: (q = '') => request<LoyaltySummary>(`/loyalty/summary/${q ? `?q=${encodeURIComponent(q)}` : ''}`),
   },
 
   domain: {

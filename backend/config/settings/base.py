@@ -31,6 +31,7 @@ INSTALLED_APPS = [
     "apps.ops",
     "apps.billing",
     "apps.pppoe",
+    "apps.loyalty",
     "apps.signup",
 ]
 

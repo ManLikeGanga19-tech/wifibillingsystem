@@ -80,10 +80,10 @@ class TestRender:
 
 
 class TestTemplatesApi:
-    def test_get_returns_all_eight_grouped_with_variables(self):
+    def test_get_returns_all_templates_grouped_with_variables(self):
         body = owner(OperatorFactory()).get(TEMPLATES_URL).json()
-        assert len(body["templates"]) == 8
-        assert body["groups"] == ["Hotspot", "PPPoE", "Voucher"]
+        assert len(body["templates"]) == 9  # 8 + loyalty points-earned
+        assert body["groups"] == ["Hotspot", "PPPoE", "Voucher", "Loyalty"]
         one = next(t for t in body["templates"] if t["key"] == "voucher_issued")
         assert any(v["name"] == "code" for v in one["variables"])
         assert one["variables"][0]["sample"]  # samples power the live preview

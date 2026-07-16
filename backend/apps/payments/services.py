@@ -169,12 +169,14 @@ def process_stk_callback(payload: dict) -> Transaction | None:
 
         if tx.status == Transaction.Status.SUCCESS:
             from apps.billing.services import credit_sale
+            from apps.loyalty.services import award_for_transaction
             from apps.provisioning.tasks import provision_transaction
 
             # Settled the way it was TAKEN. A sale on the ISP's own gateway is money we
             # never received; crediting it as platform-held would let them withdraw it
             # from us.
             credit_sale(tx, settlement=tx.settlement)
+            award_for_transaction(tx)  # loyalty points; idempotent, no-op if programme off
             db_transaction.on_commit(lambda: provision_transaction.delay(tx.id))
     return tx
 
@@ -194,7 +196,9 @@ def mark_reconciled_success(tx: Transaction, query_response: dict) -> None:
         audit("mpesa_reconciled", operator=tx.operator, target=tx)
 
         from apps.billing.services import credit_sale
+        from apps.loyalty.services import award_for_transaction
         from apps.provisioning.tasks import provision_transaction
 
         credit_sale(tx, settlement=tx.settlement)
+        award_for_transaction(tx)  # loyalty points; idempotent, no-op if programme off
         db_transaction.on_commit(lambda: provision_transaction.delay(tx.id))

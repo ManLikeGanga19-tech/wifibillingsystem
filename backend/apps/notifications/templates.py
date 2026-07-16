@@ -147,6 +147,23 @@ TEMPLATES = {
         ),
         variables=[_FIRST, _USERNAME, _PCT, _REMAIN, _PACKAGE, _COMPANY],
     ),
+    # --- Loyalty ------------------------------------------------------------------------
+    "points_earned": Template(
+        key="points_earned",
+        group="Loyalty",
+        label="Points earned",
+        description="Sent when a subscriber earns loyalty points on a payment (if the "
+                    "loyalty programme is on).",
+        category="other",
+        default_body=(
+            "You earned @points points with @company_name. Balance: @points_balance points."
+        ),
+        variables=[
+            ("points", "10"),
+            ("points_balance", "250"),
+            _COMPANY,
+        ],
+    ),
     # --- Voucher ------------------------------------------------------------------------
     "voucher_issued": Template(
         key="voucher_issued",
@@ -168,7 +185,7 @@ TEMPLATES = {
     ),
 }
 
-GROUP_ORDER = ["Hotspot", "PPPoE", "Voucher"]
+GROUP_ORDER = ["Hotspot", "PPPoE", "Voucher", "Loyalty"]
 
 
 def get_template(key: str) -> Template | None:

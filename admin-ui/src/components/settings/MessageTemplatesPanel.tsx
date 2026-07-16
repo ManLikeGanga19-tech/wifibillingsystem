@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
-import { Loader2, Check, RotateCcw } from 'lucide-react';
+import { Loader2, Check, RotateCcw, MessageSquare, AlertTriangle, ArrowRight } from 'lucide-react';
 import { api, MessageTemplate } from '../../api/client';
 import { Btn, toast } from '../ui';
 
@@ -14,6 +14,9 @@ import { Btn, toast } from '../ui';
 export default function MessageTemplatesPanel() {
   const [groups, setGroups] = useState<string[]>([]);
   const [templates, setTemplates] = useState<MessageTemplate[] | null>(null);
+  // The gateway these SMS actually leave on — so this page is tied to the comms module,
+  // not a silo. Null while loading; { name } when a gateway is live; false when none is.
+  const [gateway, setGateway] = useState<{ name: string } | null | false>(null);
 
   useEffect(() => {
     api.messageTemplates
@@ -23,6 +26,13 @@ export default function MessageTemplatesPanel() {
         setTemplates(r.templates);
       })
       .catch(() => toast('error', 'Could not load your message templates.'));
+    api.messaging
+      .providers('sms')
+      .then((r) => {
+        const active = r.providers.find((p) => p.active);
+        setGateway(active ? { name: active.name } : false);
+      })
+      .catch(() => setGateway(false));
   }, []);
 
   if (!templates) {
@@ -42,6 +52,36 @@ export default function MessageTemplatesPanel() {
           falls back to the default; switch one off to stop sending it.
         </p>
       </div>
+
+      {/* Which gateway these messages leave on — the link to the communications module. */}
+      {gateway === false ? (
+        <a
+          href="#/settings/sms"
+          className="flex items-center gap-2.5 border border-[#B26B00] bg-[#FFF8EC] px-3 py-2.5 text-xs hover:bg-[#FFF3DC] transition"
+        >
+          <AlertTriangle className="h-4 w-4 text-[#B26B00] shrink-0" />
+          <span className="flex-1 text-[#141414]/75">
+            <b className="text-[#B26B00]">No SMS gateway is active.</b> These messages won&apos;t
+            send until you set one up in Communications → SMS.
+          </span>
+          <span className="inline-flex items-center gap-1 font-mono uppercase text-[10px] text-[#B26B00] font-bold shrink-0">
+            Set up <ArrowRight className="h-3 w-3" />
+          </span>
+        </a>
+      ) : gateway ? (
+        <a
+          href="#/settings/sms"
+          className="flex items-center gap-2.5 border border-[#141414]/15 bg-[#f4f4f2] px-3 py-2.5 text-xs hover:border-[#141414]/40 transition"
+        >
+          <MessageSquare className="h-4 w-4 text-[#228B22] shrink-0" />
+          <span className="flex-1 text-[#141414]/70">
+            Sending on <b>{gateway.name}</b>. Manage the gateway and balance in Communications.
+          </span>
+          <span className="inline-flex items-center gap-1 font-mono uppercase text-[10px] text-[#141414]/50 shrink-0">
+            SMS settings <ArrowRight className="h-3 w-3" />
+          </span>
+        </a>
+      ) : null}
 
       {groups.map((group) => {
         const rows = templates.filter((t) => t.group === group);
