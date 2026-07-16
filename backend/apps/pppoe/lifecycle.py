@@ -60,8 +60,7 @@ def remind_expiring_clients() -> int:
     Once per cycle: expiry_reminded_on records the next_due_date we last reminded for, so a
     renewal (which moves next_due_date) re-arms it and a second run the same day stays quiet.
     """
-    from apps.notifications.models import Message
-    from apps.notifications.services import send_sms
+    from apps.notifications.services import notify_pppoe_expiring
 
     now = timezone.now()
     today = timezone.localdate()
@@ -92,17 +91,7 @@ def remind_expiring_clients() -> int:
         )
 
         for client in clients.iterator():
-            if client.phone:
-                days = (client.next_due_date - today).days
-                when = "today" if days == 0 else f"in {days} day{'s' if days != 1 else ''}"
-                send_sms(
-                    cfg.operator,
-                    client.phone,
-                    f"Hi {client.full_name.split(' ')[0]}, your {cfg.operator.name} "
-                    f"internet renews {when} ({client.next_due_date:%d %b}). "
-                    f"Pay to account {client.account_number} to stay connected.",
-                    category=Message.Category.PPPOE,
-                )
+            notify_pppoe_expiring(client)  # uses the ISP's editable template
             client.expiry_reminded_on = client.next_due_date
             client.save(update_fields=["expiry_reminded_on", "updated_at"])
             reminded += 1

@@ -67,6 +67,37 @@ class VoucherViewSet(TenantReadOnlyViewSet):
             VoucherSerializer(created, many=True).data, status=status.HTTP_201_CREATED
         )
 
+    @extend_schema(request=OBJECT_REQUEST, responses=OBJECT_RESPONSE,
+                   summary="Text this voucher's code to a customer's phone")
+    @action(detail=True, methods=["post"], url_path="send-sms")
+    def send_sms(self, request, pk=None):
+        """Deliver a voucher code by SMS, using the ISP's editable voucher template. Only an
+        UNUSED voucher can be sent — texting a redeemed code would be a support headache."""
+        from apps.core.phone import InvalidPhoneError, normalize_msisdn
+        from apps.notifications.services import notify_voucher
+
+        voucher = self.get_object()  # tenant-scoped
+        if voucher.status != Voucher.Status.UNUSED:
+            return Response(
+                {"detail": "Only an unused voucher can be sent."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        try:
+            phone = normalize_msisdn(str(request.data.get("phone", "")))
+        except InvalidPhoneError:
+            phone = ""
+        if not phone or not phone.isdigit():
+            return Response(
+                {"detail": "Enter a valid phone number."}, status=status.HTTP_400_BAD_REQUEST
+            )
+        sent = notify_voucher(voucher, phone)
+        if not sent:
+            return Response(
+                {"detail": "The voucher message is switched off in Settings > Message templates."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response({"detail": f"Voucher {voucher.code} sent to {phone}."})
+
 
 @extend_schema(request=OBJECT_REQUEST, responses=OBJECT_RESPONSE,
                summary="Portal: redeem a voucher code")

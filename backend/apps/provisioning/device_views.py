@@ -12,7 +12,7 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 
-from apps.core.phone import normalize_msisdn
+from apps.core.phone import InvalidPhoneError, normalize_msisdn
 from apps.core.public import PublicAPIView
 from apps.core.schema import OBJECT_RESPONSE
 
@@ -151,7 +151,10 @@ class RecoverDevicesView(PublicAPIView):
     @extend_schema(request=None, responses=OBJECT_RESPONSE,
                    summary="Portal: SMS a 'manage devices' link to the phone that paid")
     def post(self, request):
-        phone = normalize_msisdn(str(request.data.get("phone", "")))
+        try:
+            phone = normalize_msisdn(str(request.data.get("phone", "")))
+        except InvalidPhoneError:
+            phone = ""
         operator = self._operator_for(request)
         if not phone or operator is None:
             return Response(self.GENERIC)  # never reveal which part was missing

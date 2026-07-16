@@ -122,18 +122,10 @@ def check_fup(client, usage, config: PppoeSettings) -> int:
 def _send_fup_sms(client, pct: int, used_gb: Decimal, cap_gb: int) -> None:
     if not client.phone:
         return
-    from apps.notifications.models import Message
-    from apps.notifications.services import send_sms
+    from apps.notifications.services import notify_pppoe_data_low
 
-    name = client.full_name.split(" ")[0] if client.full_name else "there"
-    over = pct >= 100
-    body = (
-        f"Hi {name}, you have used {used_gb:.1f}GB of your {cap_gb}GB "
-        f"{client.operator.name} plan"
-        + (". You've reached your fair-use limit — speeds may be managed until your next "
-           "cycle." if over else f" ({pct}%). Top up or upgrade to avoid slowdowns.")
-    )
-    send_sms(client.operator, client.phone, body, category=Message.Category.PPPOE)
+    remaining_mb = int(max(0, (cap_gb - float(used_gb))) * 1024)
+    notify_pppoe_data_low(client, percent_used=pct, remaining_mb=remaining_mb)
 
 
 # --- the poll ---------------------------------------------------------------------------

@@ -9,6 +9,7 @@ from .messaging_views import (
     MessagingTestView,
     ProvidersView,
 )
+from .template_views import MessageTemplatesView
 from .views import CampaignViewSet, MessageViewSet
 
 router = SimpleRouter()
@@ -16,6 +17,9 @@ router.register("campaigns", CampaignViewSet, basename="campaign")
 router.register("messages", MessageViewSet, basename="message")
 
 urlpatterns = [
+    # Settings > Message templates: the body of each automated customer SMS. MUST precede
+    # the greedy settings/<channel>/ route below, or "templates" is read as a channel.
+    path("settings/templates/", MessageTemplatesView.as_view(), name="messaging-templates"),
     # Settings > Communications: which gateway this ISP's messages leave on.
     path("settings/email/", EmailSettingsView.as_view(), name="messaging-email"),
     path("settings/test/", MessagingTestView.as_view(), name="messaging-test"),

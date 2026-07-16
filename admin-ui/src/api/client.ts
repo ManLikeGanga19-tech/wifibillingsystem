@@ -521,6 +521,23 @@ export interface HotspotSettings {
 
 export type HotspotSettingsUpdate = Omit<HotspotSettings, 'choices'>;
 
+export interface MessageTemplate {
+  key: string;
+  group: string;
+  label: string;
+  description: string;
+  default_body: string;
+  body: string;
+  is_customized: boolean;
+  is_enabled: boolean;
+  variables: { name: string; sample: string }[];
+}
+
+export interface MessageTemplatesResponse {
+  groups: string[];
+  templates: MessageTemplate[];
+}
+
 export interface OperatorSettings {
   name: string;
   slug: string;
@@ -1268,6 +1285,20 @@ export const api = {
     list: (query = '') => request<Paginated<ApiVoucher>>(`/vouchers/${query}`),
     generate: (data: { plan_id: number; count: number; prefix?: string }) =>
       request<ApiVoucher[]>('/vouchers/generate/', { method: 'POST', body: JSON.stringify(data) }),
+    sendSms: (id: number, phone: string) =>
+      request<{ detail: string }>(`/vouchers/${id}/send-sms/`, {
+        method: 'POST',
+        body: JSON.stringify({ phone }),
+      }),
+  },
+
+  messageTemplates: {
+    get: () => request<MessageTemplatesResponse>('/notifications/settings/templates/'),
+    update: (data: { key: string; body?: string; is_enabled?: boolean }) =>
+      request<MessageTemplatesResponse>('/notifications/settings/templates/', {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      }),
   },
 
   routers: {

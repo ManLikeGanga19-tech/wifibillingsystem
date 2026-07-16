@@ -242,3 +242,31 @@ class Message(OperatorOwnedModel):
 
     def __str__(self):
         return f"{self.channel} to {self.recipient} [{self.status}]"
+
+
+class MessageTemplate(OperatorOwnedModel):
+    """An ISP's OVERRIDE of an automated message body. No row for a (key) means the ISP gets
+    the built-in default from notifications.templates — so customising is opt-in and nothing
+    changes for an ISP who never opens Settings > Message templates.
+
+    `is_enabled=False` switches the message off entirely (some ISPs don't want, say, a data
+    warning). A blank body while enabled falls back to the default: we never send an empty SMS.
+    """
+
+    key = models.CharField(max_length=40, db_index=True)  # matches templates.TEMPLATES
+    channel = models.CharField(max_length=10, choices=Channel.choices, default=Channel.SMS)
+    body = models.TextField(max_length=640, blank=True)  # ~4 SMS segments; the editor warns
+    is_enabled = models.BooleanField(default=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["operator", "key", "channel"], name="one_template_per_operator_key_channel"
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.key} template for {self.operator.slug}"

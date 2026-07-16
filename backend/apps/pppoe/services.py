@@ -65,12 +65,22 @@ def provision_client(client: Client) -> None:
     adapter = get_adapter(client.router)
     adapter.ensure_pppoe_profile(client.plan)
     adapter.create_pppoe_user(client)
-    if client.status == Client.Status.PENDING_INSTALL:
+    first_activation = client.status == Client.Status.PENDING_INSTALL
+    if first_activation:
         client.status = Client.Status.ACTIVE
         if not client.installed_at:
             client.installed_at = timezone.localdate()
         client.save(update_fields=["status", "installed_at", "updated_at"])
     audit("pppoe_client_provisioned", operator=client.operator, target=client)
+    # Welcome + login details on FIRST activation only. Best-effort — a failed SMS must
+    # never fail a provisioning the ISP just did.
+    if first_activation:
+        try:
+            from apps.notifications.services import notify_pppoe_welcome
+
+            notify_pppoe_welcome(client)
+        except Exception:
+            logger.exception("Could not queue the PPPoE welcome SMS for client %s", client.pk)
 
 
 def suspend_client(client: Client, *, reason: str = "overdue") -> None:
@@ -80,6 +90,13 @@ def suspend_client(client: Client, *, reason: str = "overdue") -> None:
     client.status = Client.Status.SUSPENDED
     client.save(update_fields=["status", "updated_at"])
     audit("pppoe_client_suspended", operator=client.operator, target=client, reason=reason)
+    # "Your package has expired — pay to reconnect." Best-effort.
+    try:
+        from apps.notifications.services import notify_pppoe_expired
+
+        notify_pppoe_expired(client)
+    except Exception:
+        logger.exception("Could not queue the PPPoE expired SMS for client %s", client.pk)
 
 
 def restore_client(client: Client) -> None:

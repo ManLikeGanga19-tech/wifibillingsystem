@@ -4,6 +4,7 @@ import BrandingPanel from './settings/BrandingPanel';
 import CommsPanel from './settings/CommsPanel';
 import DomainPanel from './settings/DomainPanel';
 import HotspotPanel from './settings/HotspotPanel';
+import MessageTemplatesPanel from './settings/MessageTemplatesPanel';
 import EmailPanel from './settings/EmailPanel';
 import PaymentsPanel from './settings/PaymentsPanel';
 import PppoePanel from './settings/PppoePanel';
@@ -173,9 +174,7 @@ export default function SettingsView({
           {active === 'sms' && <CommsPanel channel="sms" />}
           {active === 'email' && <EmailPanel />}
           {active === 'whatsapp' && <CommsPanel channel="whatsapp" />}
-          {active === 'templates' && (
-            <Placeholder title="Message templates" blurb="Customise the wording of receipts, expiry warnings and reminders." />
-          )}
+          {active === 'templates' && <MessageTemplatesPanel />}
           {active === 'loyalty' && (
             <Placeholder title="Loyalty points" blurb="Reward subscribers for paying — points they can redeem against WiFi." />
           )}

@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { Ticket, Plus, Printer } from 'lucide-react';
+import { Ticket, Plus, Printer, Send } from 'lucide-react';
 import { api, ApiVoucher, ApiPlan } from '../api/client';
 import {
   Badge, Btn, Field, FilterChips, inputCls, Panel, RefreshBtn, TableShell, tdCls, toast, useList, ViewHeader, fmtDateTime,
@@ -43,6 +43,17 @@ export default function VouchersView({ plans }: { plans: ApiPlan[] }) {
       toast('error', 'Failed to generate vouchers.');
     } finally {
       setBusy(false);
+    }
+  };
+
+  const smsVoucher = async (v: ApiVoucher) => {
+    const phone = window.prompt(`Text voucher ${v.code} to which number?`, '07');
+    if (!phone) return;
+    try {
+      const r = await api.vouchers.sendSms(v.id, phone);
+      toast('success', r.detail);
+    } catch (e) {
+      toast('error', e instanceof Error ? e.message : 'Could not send the voucher.');
     }
   };
 
@@ -109,7 +120,7 @@ export default function VouchersView({ plans }: { plans: ApiPlan[] }) {
       <FilterChips options={FILTERS} value={filter} onChange={setFilter} right={<span className="text-[11px] font-mono text-[#141414]/50">{count} vouchers</span>} />
 
       <TableShell
-        headers={['Code', 'Plan', 'Status', 'Redeemed', 'Created']}
+        headers={['Code', 'Plan', 'Status', 'Redeemed', 'Created', '']}
         loading={rows === null}
         error={error}
         empty="No vouchers in this list. Generate a batch to get started."
@@ -121,6 +132,13 @@ export default function VouchersView({ plans }: { plans: ApiPlan[] }) {
             <td className={tdCls}><Badge color={STATUS_COLOR[v.status]}>{v.status}</Badge></td>
             <td className={`${tdCls} font-mono whitespace-nowrap`}>{fmtDateTime(v.redeemed_at)}</td>
             <td className={`${tdCls} font-mono whitespace-nowrap`}>{fmtDateTime(v.created_at)}</td>
+            <td className={tdCls}>
+              {v.status === 'unused' && (
+                <Btn variant="outline" onClick={() => smsVoucher(v)} title="Text this code to a customer">
+                  <Send className="h-3.5 w-3.5" /> SMS
+                </Btn>
+              )}
+            </td>
           </tr>
         ))}
       </TableShell>
