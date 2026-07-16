@@ -160,6 +160,40 @@ def test_a_tv_uses_its_own_slot_not_a_phone_slot():
     assert session.tv_devices_used() == 1
 
 
+def test_login_device_treats_already_logged_in_as_success():
+    """RouterOS answers 400 '... is already logged in' when the device is ALREADY online —
+    which is exactly the goal, not a failure. login_device must return ok, so a reconnect of
+    an already-connected customer doesn't error."""
+    from apps.provisioning.adapters.mikrotik import MikroTikRestAdapter
+
+    session = a_session()
+
+    class Resp:
+        status_code = 400
+        text = '{"detail":"IP 10.5.50.254 is already logged in","error":400}'
+
+        def raise_for_status(self):
+            raise AssertionError("should not reach raise_for_status for already-logged-in")
+
+        def json(self):
+            return {}
+
+    class FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def post(self, path, json=None):
+            return Resp()
+
+    adapter = MikroTikRestAdapter(session.router)
+    adapter._client = lambda: FakeClient()
+    result = adapter.login_device(username="u", password="p", mac="AA:BB:CC:DD:EE:FF")
+    assert result.ok is True
+
+
 def test_a_router_that_refuses_the_login_rolls_the_slot_back():
     from apps.provisioning.adapters import ProvisioningError
 

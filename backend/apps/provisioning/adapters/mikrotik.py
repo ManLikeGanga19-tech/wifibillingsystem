@@ -222,6 +222,11 @@ class MikroTikRestAdapter(ProvisioningAdapter):
         try:
             with self._client() as client:
                 resp = client.post("/ip/hotspot/active/login", json=payload)
+                # Idempotent: if the device is already authenticated, that IS the goal — the
+                # router answers 400 "... is already logged in", which is a success for us, not
+                # a failure to surface.
+                if resp.status_code == 400 and "already logged in" in resp.text.lower():
+                    return ProvisionResult(ok=True, message="already online")
                 resp.raise_for_status()
                 return ProvisionResult(ok=True, message="device logged in", raw=_safe_json(resp))
         except httpx.HTTPError as exc:
