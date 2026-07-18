@@ -6,6 +6,7 @@ import {
   Globe,
   Loader2,
   Search as SearchIcon,
+  ShieldAlert,
   ShieldCheck,
   TrendingUp,
 } from 'lucide-react';
@@ -103,6 +104,19 @@ export default function App() {
     return (
       <>
         <LoginView onLoggedIn={loadMe} />
+        <ToastHost />
+      </>
+    );
+  }
+
+  // Signed in, but NOT Danamo platform staff (e.g. an ISP-owner session — cookies are
+  // shared across localhost ports, so a login on the ISP console lands here too). Without
+  // this gate the platform shell rendered and every /platform/ call 403'd ("Could not load
+  // this data"). Tell them plainly instead of showing a broken dashboard.
+  if (!me.is_platform_staff) {
+    return (
+      <>
+        <NotPlatformView me={me} onSignOut={signOut} />
         <ToastHost />
       </>
     );
@@ -254,6 +268,37 @@ export default function App() {
       </main>
 
       <ToastHost />
+    </div>
+  );
+}
+
+/**
+ * The signed-in-but-not-platform-staff screen. Platform Control is Danamo-only; an ISP
+ * account that lands here (usually a session shared from the ISP console on another
+ * localhost port) gets told plainly and offered a clean re-login — instead of a dashboard
+ * that 403s on every panel.
+ */
+function NotPlatformView({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
+  return (
+    <div className="min-h-screen bg-[#E4E3E0] flex items-center justify-center p-4">
+      <div className="bg-white border border-[#141414] max-w-md w-full p-8 text-center">
+        <ShieldAlert className="h-8 w-8 mx-auto text-[#B26B00]" />
+        <h1 className="font-bold text-lg mt-3">Not a platform account</h1>
+        <p className="text-sm text-[#141414]/70 mt-2 leading-relaxed">
+          You&apos;re signed in as <b>{me.name || me.phone}</b>
+          {me.operator ? ` (${me.operator.name})` : ''} — an ISP account, not Danamo platform
+          staff. Platform Control is for Danamo Tech only.
+        </p>
+        <p className="text-xs text-[#141414]/50 mt-2">
+          If you run an ISP, use your own console instead.
+        </p>
+        <button
+          onClick={onSignOut}
+          className="mt-5 w-full bg-[#141414] text-[#E4E3E0] font-bold py-3 uppercase text-xs font-mono hover:bg-[#B26B00] transition"
+        >
+          Sign in with a platform account
+        </button>
+      </div>
     </div>
   );
 }
