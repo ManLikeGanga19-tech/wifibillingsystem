@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { Users, Plus, Ban, RotateCcw, Zap, Printer, X, Loader2, Wifi, WifiOff } from 'lucide-react';
-import { api, PppoeClient, PppoePlan, ApiRouter, AccessPoint, PppoeUsageSummary } from '../api/client';
+import { Users, Plus, Ban, RotateCcw, Zap, Printer, X, Loader2, Wifi, WifiOff, AlertTriangle } from 'lucide-react';
+import { api, ApiError, PppoeClient, PppoePlan, ApiRouter, AccessPoint, PppoeUsageSummary, CapacityWarning } from '../api/client';
 import {
   Badge, Btn, Field, FilterChips, inputCls, Panel, RefreshBtn, TableShell, tdCls, toast, useList, ViewHeader, fmtDateTime, fmtKsh,
 } from './ui';
@@ -138,8 +138,11 @@ export default function PppoeClientsView() {
 
   const isWireless = form.delivery_method.startsWith('wireless');
 
-  const create = async (e: FormEvent) => {
-    e.preventDefault();
+  // When the chosen sector is full the server answers 409 with a warning; we surface it as
+  // a card and let the ISP over-subscribe on purpose (force=true), which the server audits.
+  const [capWarn, setCapWarn] = useState<CapacityWarning | null>(null);
+
+  const submit = async (force: boolean) => {
     if (busy) return;
     setBusy(true);
     try {
@@ -153,7 +156,9 @@ export default function PppoeClientsView() {
         delivery_method: form.delivery_method as PppoeClient['delivery_method'],
         access_point: isWireless && form.access_point ? Number(form.access_point) : null,
         billing_day: Number(form.billing_day),
+        ...(force ? { force: true } : {}),
       });
+      setCapWarn(null);
       toast('success', `Client ${client.account_number} created. Provisioning to router…`);
       try {
         await api.pppoe.clients.provision(client.id);
@@ -166,10 +171,22 @@ export default function PppoeClientsView() {
       reload();
       setSheetFor(client);
     } catch (err) {
-      toast('error', err instanceof Error ? err.message : 'Failed to create client.');
+      if (
+        err instanceof ApiError && err.status === 409 &&
+        (err.body as CapacityWarning)?.code === 'sector_at_capacity'
+      ) {
+        setCapWarn(err.body as CapacityWarning); // show the over-capacity card
+      } else {
+        toast('error', err instanceof Error ? err.message : 'Failed to create client.');
+      }
     } finally {
       setBusy(false);
     }
+  };
+
+  const create = (e: FormEvent) => {
+    e.preventDefault();
+    submit(false);
   };
 
   const act = async (c: PppoeClient, fn: () => Promise<unknown>, label: string) => {
@@ -291,6 +308,63 @@ export default function PppoeClientsView() {
       </TableShell>
 
       {sheetFor && <AccountSheet client={sheetFor} onClose={() => setSheetFor(null)} />}
+      {capWarn && (
+        <CapacityWarningModal
+          warning={capWarn}
+          busy={busy}
+          onCancel={() => setCapWarn(null)}
+          onContinue={() => submit(true)}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * The over-subscription warning. The sector the ISP chose is already full; adding more
+ * degrades service for everyone on it. This is their call, not ours — so we warn clearly,
+ * let them continue anyway, and the server records that they did.
+ */
+function CapacityWarningModal({
+  warning, busy, onCancel, onContinue,
+}: {
+  warning: CapacityWarning;
+  busy: boolean;
+  onCancel: () => void;
+  onContinue: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 bg-[#141414]/60 flex items-center justify-center p-4" onClick={onCancel}>
+      <div className="bg-white border border-[#B26B00] w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-2 px-4 py-3 border-b border-[#B26B00]/40 bg-[#FFF8EC]">
+          <AlertTriangle className="h-4.5 w-4.5 text-[#B26B00]" />
+          <h3 className="font-bold font-mono uppercase text-sm text-[#B26B00]">Sector at full capacity</h3>
+        </div>
+        <div className="p-5 space-y-3">
+          <p className="text-sm text-[#141414]/80 leading-relaxed">
+            <b>{warning.sector}</b> is carrying <b>{warning.count} of {warning.capacity}</b> clients —
+            it&apos;s at capacity. Adding another over-subscribes the sector, which can cause
+            congestion, slower speeds and packet loss for <b>everyone</b> on it.
+          </p>
+          <div className="text-xs font-mono text-[#141414]/55 border border-[#141414]/15 bg-[#faf9f7] p-2.5 space-y-0.5">
+            <div>Tower: <b>{warning.tower}</b>{warning.tower_utilization != null && <> · {warning.tower_utilization}% across its sectors</>}</div>
+            <div>Sector load: <b>{warning.count}/{warning.capacity}</b></div>
+          </div>
+          <p className="text-[11px] text-[#141414]/50 leading-relaxed">
+            You can add them anyway — this is your call, and WIFI.OS will record that you
+            proceeded past the capacity limit.
+          </p>
+          <div className="flex items-center gap-2 pt-1">
+            <Btn variant="danger" onClick={onContinue} disabled={busy}>
+              {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <AlertTriangle className="h-3.5 w-3.5" />}
+              Continue anyway
+            </Btn>
+            <Btn variant="outline" onClick={onCancel} disabled={busy}>
+              <X className="h-3.5 w-3.5" /> Cancel
+            </Btn>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

@@ -251,3 +251,89 @@ class TestSupportRoleReadOnly:
             format="json",
         )
         assert resp.status_code == 403
+
+
+class TestSectorCapacity:
+    """Adding a client to a full sector warns (409) but never blocks: force=true proceeds and
+    is audited, so an over-subscription is recorded as the ISP's own call."""
+
+    def _full_sector(self, op, capacity=2, tower_name="Nyeri Hill", sector="Sector A"):
+        tower = Tower.objects.create(operator=op, name=tower_name)
+        ap = AccessPoint.objects.create(operator=op, tower=tower, name=sector, capacity=capacity)
+        PppoeClientFactory.create_batch(capacity, operator=op, access_point=ap, status="active")
+        return ap
+
+    def _payload(self, op, ap=None, **extra):
+        d = {
+            "full_name": "New Client",
+            "plan": ServicePlanFactory(operator=op).id,
+            "router": RouterFactory(operator=op).id,
+        }
+        if ap is not None:
+            d["access_point"] = ap.id
+        d.update(extra)
+        return d
+
+    def test_adding_to_a_full_sector_warns_with_409(self):
+        op = OperatorFactory()
+        ap = self._full_sector(op, capacity=2)
+        resp = staff(op).post("/api/v1/pppoe/clients/", self._payload(op, ap), format="json")
+        assert resp.status_code == 409, resp.content
+        body = resp.json()
+        assert body["code"] == "sector_at_capacity"
+        assert body["count"] == 2 and body["capacity"] == 2
+        assert body["sector"] == "Sector A" and body["tower"] == "Nyeri Hill"
+
+    def test_the_warning_creates_no_client(self):
+        op = OperatorFactory()
+        ap = self._full_sector(op, capacity=2)
+        before = Client.objects.filter(operator=op).count()
+        staff(op).post("/api/v1/pppoe/clients/", self._payload(op, ap), format="json")
+        assert Client.objects.filter(operator=op).count() == before
+
+    def test_force_adds_over_capacity_and_audits(self):
+        from apps.core.models import AuditLog
+
+        op = OperatorFactory()
+        ap = self._full_sector(op, capacity=2)
+        resp = staff(op).post(
+            "/api/v1/pppoe/clients/", self._payload(op, ap, force=True), format="json"
+        )
+        assert resp.status_code == 201, resp.content
+        assert AuditLog.objects.filter(operator=op, action="pppoe_over_capacity_add").exists()
+
+    def test_room_available_creates_without_warning(self):
+        op = OperatorFactory()
+        tower = Tower.objects.create(operator=op, name="T")
+        ap = AccessPoint.objects.create(operator=op, tower=tower, name="S", capacity=5)
+        PppoeClientFactory.create_batch(2, operator=op, access_point=ap, status="active")
+        resp = staff(op).post("/api/v1/pppoe/clients/", self._payload(op, ap), format="json")
+        assert resp.status_code == 201, resp.content
+
+    def test_unset_capacity_never_warns(self):
+        op = OperatorFactory()
+        tower = Tower.objects.create(operator=op, name="T")
+        ap = AccessPoint.objects.create(operator=op, tower=tower, name="S", capacity=0)
+        PppoeClientFactory.create_batch(9, operator=op, access_point=ap, status="active")
+        resp = staff(op).post("/api/v1/pppoe/clients/", self._payload(op, ap), format="json")
+        assert resp.status_code == 201, resp.content
+
+    def test_no_access_point_never_warns(self):
+        op = OperatorFactory()
+        resp = staff(op).post("/api/v1/pppoe/clients/", self._payload(op), format="json")
+        assert resp.status_code == 201, resp.content
+
+    def test_moving_a_client_onto_a_full_sector_warns_then_forces(self):
+        op = OperatorFactory()
+        full = self._full_sector(op, capacity=2)
+        client = PppoeClientFactory(operator=op, status="active")  # not on any sector
+        c = staff(op)
+        blocked = c.patch(
+            f"/api/v1/pppoe/clients/{client.id}/", {"access_point": full.id}, format="json"
+        )
+        assert blocked.status_code == 409, blocked.content
+        forced = c.patch(
+            f"/api/v1/pppoe/clients/{client.id}/",
+            {"access_point": full.id, "force": True}, format="json",
+        )
+        assert forced.status_code == 200, forced.content

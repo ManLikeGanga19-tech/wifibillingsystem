@@ -16,10 +16,12 @@ from rest_framework.views import APIView
 from apps.core.permissions import RequireTenant, TenantCanTransact, TenantIsOperational
 from apps.core.public import PublicAPIView
 from apps.core.schema import OBJECT_RESPONSE
+from apps.core.services import audit
 from apps.core.tenancy import acting_tenant
 from apps.core.viewsets import TenantModelViewSet, TenantReadOnlyViewSet
 from apps.provisioning.adapters import ProvisioningError, get_adapter
 
+from .capacity import capacity_warning
 from .models import AccessPoint, Client, Invoice, ServicePlan, Tower
 from .serializers import (
     AccessPointSerializer,
@@ -88,6 +90,51 @@ class ClientViewSet(TenantModelViewSet):
         if status_param:
             qs = qs.filter(status=status_param)
         return qs
+
+    # --- sector capacity: a soft, audited over-subscription gate ------------------------
+    @staticmethod
+    def _forced(request) -> bool:
+        return str(request.data.get("force", "")).lower() in ("1", "true", "yes")
+
+    def _ap_from(self, request):
+        ap_id = request.data.get("access_point")
+        if not ap_id:
+            return None
+        return AccessPoint.objects.filter(operator=self.get_operator(), pk=ap_id).first()
+
+    def create(self, request, *args, **kwargs):
+        # Adding a client to a full sector over-subscribes it. Warn once (409); a re-submit
+        # with force=true proceeds and is recorded, so the choice is on the ISP's books.
+        warning = capacity_warning(self.get_operator(), self._ap_from(request))
+        if warning and not self._forced(request):
+            return Response(warning, status=status.HTTP_409_CONFLICT)
+        resp = super().create(request, *args, **kwargs)
+        if warning and resp.status_code == status.HTTP_201_CREATED:
+            audit(
+                "pppoe_over_capacity_add", operator=self.get_operator(), actor=request.user,
+                sector=warning["sector"], count=warning["count"],
+                capacity=warning["capacity"], account_number=resp.data.get("account_number"),
+            )
+        return resp
+
+    def update(self, request, *args, **kwargs):
+        # Only a MOVE onto a DIFFERENT full sector adds load; editing a client in place does
+        # not, so it never warns.
+        instance = self.get_object()
+        ap = self._ap_from(request)
+        warning = None
+        if ap is not None and ap.pk != instance.access_point_id:
+            warning = capacity_warning(self.get_operator(), ap, exclude_pk=instance.pk)
+        if warning and not self._forced(request):
+            return Response(warning, status=status.HTTP_409_CONFLICT)
+        resp = super().update(request, *args, **kwargs)
+        if warning and resp.status_code == status.HTTP_200_OK:
+            audit(
+                "pppoe_over_capacity_move", operator=self.get_operator(), actor=request.user,
+                sector=warning["sector"], count=warning["count"],
+                capacity=warning["capacity"], account_number=resp.data.get("account_number"),
+            )
+        return resp
 
     def perform_create(self, serializer):
         operator = self.get_operator()

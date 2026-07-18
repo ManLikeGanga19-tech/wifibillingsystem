@@ -552,6 +552,17 @@ export interface LoyaltySummary {
   top: { phone: string; points: number }[];
 }
 
+/** Returned as a 409 when adding/moving a client onto a full sector. */
+export interface CapacityWarning {
+  code: 'sector_at_capacity';
+  detail: string;
+  sector: string;
+  count: number;
+  capacity: number;
+  tower: string;
+  tower_utilization: number | null;
+}
+
 export interface OperatorSettings {
   name: string;
   slug: string;
@@ -1349,6 +1360,12 @@ export const api = {
     plans: crud<PppoePlan>('/pppoe/plans'),
     clients: {
       ...crud<PppoeClient>('/pppoe/clients'),
+      // create/update accept `force` — the sector-capacity gate returns 409 unless the ISP
+      // chooses to over-subscribe on purpose (force: true), which the server then audits.
+      create: (data: Partial<PppoeClient> & { force?: boolean }) =>
+        request<PppoeClient>('/pppoe/clients/', { method: 'POST', body: JSON.stringify(data) }),
+      update: (id: number, data: Partial<PppoeClient> & { force?: boolean }) =>
+        request<PppoeClient>(`/pppoe/clients/${id}/`, { method: 'PATCH', body: JSON.stringify(data) }),
       provision: (id: number) =>
         request<PppoeClient>(`/pppoe/clients/${id}/provision/`, { method: 'POST' }),
       suspend: (id: number) =>
