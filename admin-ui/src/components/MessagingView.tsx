@@ -3,7 +3,7 @@ import {
   Megaphone, Send, Users, CheckCircle2, Clock, Loader2, AlertTriangle,
   MessageSquare, ArrowRight, X, Wallet,
 } from 'lucide-react';
-import { api, ApiCampaign, MessageTemplate, PlatformAccount } from '../api/client';
+import { api, ApiCampaign, PlatformAccount } from '../api/client';
 import { Badge, Btn, Panel, RefreshBtn, ViewHeader, fmtDateTime, toast } from './ui';
 
 type Channel = 'sms' | 'whatsapp';
@@ -31,7 +31,6 @@ export default function MessagingView() {
 
   const [campaigns, setCampaigns] = useState<ApiCampaign[] | null>(null);
   const [counts, setCounts] = useState<{ all: number; active: number; expired: number } | null>(null);
-  const [templates, setTemplates] = useState<MessageTemplate[]>([]);
   const [account, setAccount] = useState<PlatformAccount | null>(null);
   const [gateway, setGateway] = useState<{ name: string; managed: boolean } | null | false>(null);
   const pollRef = useRef<number | undefined>(undefined);
@@ -47,7 +46,6 @@ export default function MessagingView() {
 
   useEffect(() => {
     loadCampaigns();
-    api.messageTemplates.get().then((r) => setTemplates(r.templates)).catch(() => {});
     api.account.get().then(setAccount).catch(() => {});
     api.messaging.providers('sms')
       .then((r) => {
@@ -160,29 +158,7 @@ export default function MessagingView() {
               className="w-full bg-white border border-[#141414] p-2 text-xs outline-none mb-4"
             />
 
-            <div className="flex items-center justify-between mb-1">
-              <label className="text-xs font-bold font-mono uppercase text-[#141414]/60">Message</label>
-              {templates.length > 0 && (
-                <select
-                  value=""
-                  onChange={(e) => {
-                    const t = templates.find((x) => x.key === e.target.value);
-                    if (t) setBody(t.body);
-                  }}
-                  className="bg-white border border-[#141414] px-2 py-1 text-[11px] font-mono outline-none max-w-[14rem]"
-                  title="Load the wording from one of your message templates"
-                >
-                  <option value="">Start from a template…</option>
-                  {Array.from(new Set(templates.map((t) => t.group))).map((g) => (
-                    <optgroup key={g} label={g}>
-                      {templates.filter((t) => t.group === g).map((t) => (
-                        <option key={t.key} value={t.key}>{t.label}</option>
-                      ))}
-                    </optgroup>
-                  ))}
-                </select>
-              )}
-            </div>
+            <label className="text-xs font-bold font-mono uppercase text-[#141414]/60 block mb-1">Message</label>
             <textarea
               value={body}
               onChange={(e) => setBody(e.target.value)}
