@@ -28,6 +28,8 @@ class OperatorFactory(factory.django.DjangoModelFactory):
     # A test that wants an unverified ISP passes settlement_verified_at=None.
     settlement_method = Operator.Settlement.PAYBILL
     settlement_paybill = factory.Sequence(lambda n: f"{600000 + n}")
+    # A paybill destination needs the account to credit at it too (B2B AccountReference).
+    settlement_paybill_account = factory.Sequence(lambda n: f"ACC{n:05d}")
     settlement_name = factory.LazyAttribute(lambda o: o.name)
     settlement_verified_at = factory.LazyFunction(timezone.now)
 

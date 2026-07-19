@@ -42,7 +42,10 @@ WITHDRAW = "/api/v1/billing/payouts/withdraw/"
 SETTLEMENT = "/api/v1/operator/settlement/"
 RESET_MFA = "/api/v1/platform/reset-mfa/"
 
-PAYBILL = {"method": "paybill", "settlement_paybill": "555777", "settlement_name": "Acme Ltd"}
+PAYBILL = {
+    "method": "paybill", "settlement_paybill": "555777",
+    "settlement_paybill_account": "ACME01", "settlement_name": "Acme Ltd",
+}
 
 
 def live_isp():
@@ -51,6 +54,7 @@ def live_isp():
         status=Operator.Status.ACTIVE,
         settlement_method="paybill",
         settlement_paybill="555777",
+        settlement_paybill_account="ACME01",
         settlement_name="Acme Ltd",
     )
     owner = UserFactory(

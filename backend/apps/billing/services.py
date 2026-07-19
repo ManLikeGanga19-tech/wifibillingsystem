@@ -255,6 +255,15 @@ def request_payout(*, operator, amount: Decimal, user, method="mpesa", destinati
             bank_account_name=destination.get("bank_account_name", ""),
         )
         dest_label = f"{fields['bank_name']} {fields['bank_account_number']}"
+    elif method == Payout.Method.PAYBILL:
+        if not (destination.get("paybill") and destination.get("paybill_account")):
+            raise WalletError(
+                "A paybill number and account number are required for a paybill withdrawal."
+            )
+        fields.update(
+            paybill=destination["paybill"], paybill_account=destination["paybill_account"]
+        )
+        dest_label = f"Paybill {fields['paybill']} acct {fields['paybill_account']}"
     else:
         if not destination.get("phone"):
             raise WalletError("An M-Pesa number is required.")
@@ -262,6 +271,12 @@ def request_payout(*, operator, amount: Decimal, user, method="mpesa", destinati
         dest_label = fields["phone"]
 
     from .tariffs import payout_cost
+
+    # The transfer cost the ISP bears. They receive amount MINUS this; the wallet is still
+    # debited the full amount, and we remit the cost to the rail (Safaricom / the bank).
+    cost = payout_cost(amount, method)
+    if cost >= amount:
+        raise WalletError("That amount is too small to cover the transfer cost. Withdraw more.")
 
     with db_transaction.atomic():
         op_locked = type(operator).objects.select_for_update().get(pk=operator.pk)
@@ -275,7 +290,7 @@ def request_payout(*, operator, amount: Decimal, user, method="mpesa", destinati
             operator=op_locked,
             amount=amount,
             requested_by=user,
-            platform_cost=payout_cost(amount, method),
+            platform_cost=cost,
             # An unconfirmed destination gets a code riding along with the money.
             # Free to send, and it proves the payout actually landed.
             confirmation_code=(
@@ -288,11 +303,34 @@ def request_payout(*, operator, amount: Decimal, user, method="mpesa", destinati
             entry_type=LedgerEntry.Type.PAYOUT,
             amount=-amount,
             payout=payout,
-            memo=f"Withdrawal ({method}) to {dest_label}",
+            memo=(
+                f"Withdrawal ({method}) to {dest_label} — KSh {amount} "
+                f"(KSh {cost} transfer cost, KSh {payout.net_amount} received)"
+            ),
         )
     audit("payout_requested", operator=operator, actor=user, target=payout,
-          amount=str(amount), method=method)
+          amount=str(amount), cost=str(cost), net=str(payout.net_amount), method=method)
     return payout
+
+
+def payout_quote(operator, amount: Decimal, method: str = "mpesa") -> dict:
+    """What a withdrawal WOULD cost, for the console to show before the ISP commits: the amount,
+    the transfer cost they'll bear, and what actually reaches them. No money moves."""
+    from .tariffs import payout_cost
+
+    amount = Decimal(amount or 0).quantize(Decimal("0.01"))
+    cost = payout_cost(amount, method) if amount > 0 else Decimal("0.00")
+    where = "your bank" if method == "bank" else "Safaricom"
+    return {
+        "amount": str(amount),
+        "cost": str(cost),
+        "net": str(max(Decimal("0.00"), amount - cost)),
+        "cost_destination": where,
+        "note": (
+            f"The KSh {cost} transfer cost is charged by {where} to move the money — it is not a "
+            "WIFI.OS charge. You receive the amount minus this cost."
+        ),
+    }
 
 
 def mark_payout_paid(payout: Payout, *, by, mpesa_reference: str) -> Payout:

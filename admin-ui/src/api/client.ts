@@ -325,6 +325,12 @@ export interface GoLiveBlocker {
 export interface Settlement {
   method: 'paybill' | 'bank' | null;
   destination: string | null;
+  /** Raw registered destination, so the withdrawal form can pre-fill it. */
+  paybill: string;
+  paybill_account: string;
+  bank_name: string;
+  bank_account_number: string;
+  bank_account_name: string;
   has_account: boolean;
   /** The first payout's code has been read back — payouts are unlocked for good. */
   confirmed: boolean;
@@ -447,10 +453,23 @@ export interface ApiPayout {
   processed_at: string | null;
 }
 
+/** Preview of a withdrawal's transfer cost, before committing. */
+export interface PayoutQuote {
+  amount: string;
+  /** The transfer cost the ISP bears (charged by the rail, not WIFI.OS). */
+  cost: string;
+  /** What actually reaches them: amount − cost. */
+  net: string;
+  cost_destination: string;
+  note: string;
+}
+
 export interface WithdrawPayload {
   amount: string;
-  method: 'mpesa' | 'bank';
+  method: 'mpesa' | 'paybill' | 'bank';
   phone?: string;
+  paybill?: string;
+  paybill_account?: string;
   bank_name?: string;
   bank_account_number?: string;
   bank_account_name?: string;
@@ -1363,6 +1382,11 @@ export const api = {
     ledger: () => request<Paginated<ApiLedgerEntry>>('/billing/ledger/'),
     payouts: {
       list: () => request<Paginated<ApiPayout>>('/billing/payouts/'),
+      /** Preview the transfer cost before committing (no money moves). */
+      quote: (amount: string, method: string) =>
+        request<PayoutQuote>(
+          `/billing/payouts/quote/?amount=${encodeURIComponent(amount)}&method=${method}`
+        ),
       withdraw: (data: WithdrawPayload) =>
         request<ApiPayout>('/billing/payouts/withdraw/', { method: 'POST', body: JSON.stringify(data) }),
     },

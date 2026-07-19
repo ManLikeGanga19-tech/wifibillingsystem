@@ -32,6 +32,9 @@ class SettlementSerializer(serializers.Serializer):
     method = serializers.ChoiceField(choices=Operator.Settlement.choices)
     # paybill
     settlement_paybill = serializers.CharField(max_length=20, required=False, allow_blank=True)
+    settlement_paybill_account = serializers.CharField(
+        max_length=40, required=False, allow_blank=True
+    )
     settlement_name = serializers.CharField(max_length=120, required=False, allow_blank=True)
     # bank
     payout_bank_name = serializers.CharField(max_length=80, required=False, allow_blank=True)
@@ -87,6 +90,12 @@ def _state(op: Operator) -> dict:
     return {
         "method": op.settlement_method or None,
         "destination": op.settlement_destination or None,
+        # Raw fields so the withdrawal walkthrough can pre-fill the registered destination.
+        "paybill": op.settlement_paybill or "",
+        "paybill_account": op.settlement_paybill_account or "",
+        "bank_name": op.payout_bank_name or "",
+        "bank_account_number": op.payout_bank_account_number or "",
+        "bank_account_name": op.payout_bank_account_name or "",
         "has_account": op.has_settlement_account,
         "confirmed": op.settlement_verified_at is not None,
         "confirmed_at": op.settlement_verified_at,
@@ -109,8 +118,9 @@ def _state(op: Operator) -> dict:
         # Said out loud, because every ISP asks.
         "explainer": (
             "Your customers always pay WIFI.OS, never you directly. We hold that "
-            "money, attribute every shilling to you in a ledger you can see, absorb "
-            "the M-Pesa and bank charges, and settle it to this account on request."
+            "money, attribute every shilling to you in a ledger you can see, and "
+            "absorb the cost of collecting it. When you withdraw, the transfer fee "
+            "(M-Pesa or bank) is charged by the rail and comes off what you receive."
         ),
     }
 

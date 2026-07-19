@@ -115,6 +115,12 @@ class Operator(TimeStampedModel):
     settlement_paybill = models.CharField(
         max_length=20, blank=True, help_text="Their OWN paybill — we send money TO it"
     )
+    # A B2B PayBill transfer needs the account number to credit at that shortcode (the
+    # AccountReference), the same way a customer pays a paybill. Without it we know the
+    # paybill but not which account, so the money can't be sent.
+    settlement_paybill_account = models.CharField(
+        max_length=40, blank=True, help_text="Account number to credit at that paybill"
+    )
     settlement_name = models.CharField(
         max_length=120, blank=True, help_text="Registered name on the account"
     )
@@ -265,7 +271,9 @@ class Operator(TimeStampedModel):
     @property
     def has_settlement_account(self) -> bool:
         if self.settlement_method == self.Settlement.PAYBILL:
-            return bool(self.settlement_paybill)
+            # A paybill destination is only complete with BOTH the shortcode and the
+            # account number to credit at it.
+            return bool(self.settlement_paybill and self.settlement_paybill_account)
         if self.settlement_method == self.Settlement.BANK:
             return bool(self.payout_bank_name and self.payout_bank_account_number)
         return False
@@ -273,7 +281,9 @@ class Operator(TimeStampedModel):
     @property
     def settlement_destination(self) -> str:
         if self.settlement_method == self.Settlement.PAYBILL:
-            return f"Paybill {self.settlement_paybill} ({self.settlement_name})"
+            acct = self.settlement_paybill_account
+            suffix = f" acct {acct}" if acct else ""
+            return f"Paybill {self.settlement_paybill}{suffix} ({self.settlement_name})"
         if self.settlement_method == self.Settlement.BANK:
             return (
                 f"{self.payout_bank_name} · {self.payout_bank_account_number} "

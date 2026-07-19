@@ -2,6 +2,8 @@
 credits the ISP's wallet with commission withheld at source. Balance is the sum
 of signed ledger amounts — no stored balance to drift out of sync."""
 
+from decimal import Decimal
+
 from django.conf import settings
 from django.db import models
 
@@ -109,8 +111,9 @@ class Payout(OperatorOwnedModel):
     method = models.CharField(max_length=8, choices=Method.choices, default=Method.MPESA)
     # M-Pesa destination
     phone = models.CharField(max_length=12, blank=True, help_text="M-Pesa number to pay")
-    # Paybill destination (B2B) — the ISP's own shortcode
+    # Paybill destination (B2B) — the ISP's own shortcode + the account to credit at it
     paybill = models.CharField(max_length=20, blank=True)
+    paybill_account = models.CharField(max_length=40, blank=True)
     # Bank destination (paid manually now; the I&M H2H integration will execute
     # bank-method payouts automatically later)
     bank_name = models.CharField(max_length=80, blank=True)
@@ -148,11 +151,19 @@ class Payout(OperatorOwnedModel):
         return f"{self.operator.slug} payout KSh {self.amount} [{self.status}]"
 
     @property
+    def net_amount(self) -> Decimal:
+        """What actually reaches the ISP: the requested amount MINUS the transfer cost the ISP
+        bears. The wallet is debited the full `amount`; the cost is remitted to the rail
+        (Safaricom / the bank), so this is the figure the payout transfer sends."""
+        return self.amount - (self.platform_cost or Decimal("0"))
+
+    @property
     def destination(self) -> str:
         if self.method == self.Method.BANK:
             return f"{self.bank_name} · {self.bank_account_number} ({self.bank_account_name})"
         if self.method == self.Method.PAYBILL:
-            return f"Paybill {self.paybill}"
+            acct = f" acct {self.paybill_account}" if self.paybill_account else ""
+            return f"Paybill {self.paybill}{acct}"
         return self.phone
 
 

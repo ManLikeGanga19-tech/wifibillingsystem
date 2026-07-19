@@ -1,3 +1,5 @@
+from decimal import Decimal, InvalidOperation
+
 from django.db.models import Sum
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema
@@ -106,6 +108,18 @@ class MyPayoutsViewSet(TenantReadOnlyViewSet):
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return super().handle_exception(exc)
 
+    @action(detail=False, methods=["get"])
+    def quote(self, request):
+        """Preview a withdrawal's transfer cost before committing — no money moves, no code."""
+        from .services import payout_quote
+
+        try:
+            amount = Decimal(request.query_params.get("amount") or "0")
+        except (InvalidOperation, TypeError):
+            amount = Decimal("0")
+        method = request.query_params.get("method") or "mpesa"
+        return Response(payout_quote(self.get_operator(), amount, method))
+
     @action(detail=False, methods=["post"])
     def withdraw(self, request):
         operator = self.get_operator()
@@ -144,6 +158,11 @@ class MyPayoutsViewSet(TenantReadOnlyViewSet):
                 destination["phone"] = normalize_msisdn(data.get("phone", ""))
             except InvalidPhoneError as exc:
                 return Response({"phone": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        elif method == "paybill":
+            destination = {
+                "paybill": data.get("paybill", ""),
+                "paybill_account": data.get("paybill_account", ""),
+            }
         else:
             destination = {
                 "bank_name": data.get("bank_name", ""),

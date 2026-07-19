@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Wallet, ArrowDownToLine, Loader2 } from 'lucide-react';
-import { api, ApiLedgerEntry, ApiPayout, asMfaChallenge, MfaChallenge, Settlement, WalletSummary, WithdrawPayload } from '../api/client';
+import { api, ApiLedgerEntry, ApiPayout, asMfaChallenge, MfaChallenge, PayoutQuote, Settlement, WalletSummary, WithdrawPayload } from '../api/client';
 import ConfirmPayout from './ConfirmPayout';
 import MfaGate from './MfaGate';
 import SettlementSetup from './SettlementSetup';
@@ -23,9 +23,11 @@ export default function WalletView() {
   const [settlement, setSettlement] = useState<Settlement | null>(null);
   const [error, setError] = useState('');
   const [amount, setAmount] = useState('');
-  const [method, setMethod] = useState<'mpesa' | 'bank'>('mpesa');
+  const [method, setMethod] = useState<'mpesa' | 'paybill' | 'bank'>('mpesa');
   const [phone, setPhone] = useState('');
+  const [paybill, setPaybill] = useState({ paybill: '', paybill_account: '' });
   const [bank, setBank] = useState({ bank_name: '', bank_account_number: '', bank_account_name: '' });
+  const [quote, setQuote] = useState<PayoutQuote | null>(null);
   const [busy, setBusy] = useState(false);
   // The second factor. Held in memory for one request and then dropped — a code that
   // authorises a withdrawal is the last thing that should ever touch storage.
@@ -43,6 +45,16 @@ export default function WalletView() {
       setLedger(l.results);
       setPayouts(p.results);
       setSettlement(st);
+      // Pre-fill the withdrawal with their registered destination, and default the method to it.
+      if (st.paybill) setPaybill({ paybill: st.paybill, paybill_account: st.paybill_account });
+      if (st.bank_name) {
+        setBank({
+          bank_name: st.bank_name,
+          bank_account_number: st.bank_account_number,
+          bank_account_name: st.bank_account_name,
+        });
+      }
+      if (st.method) setMethod(st.method);
       setError('');
     } catch {
       setError('Could not load your wallet.');
@@ -53,13 +65,28 @@ export default function WalletView() {
     load();
   }, [load]);
 
+  // Live transfer-cost preview — so they see what they'll actually receive before committing.
+  useEffect(() => {
+    const a = amount.trim();
+    if (!a || Number(a) <= 0) {
+      setQuote(null);
+      return;
+    }
+    const t = window.setTimeout(() => {
+      api.billing.payouts.quote(a, method).then(setQuote).catch(() => setQuote(null));
+    }, 350);
+    return () => window.clearTimeout(t);
+  }, [amount, method]);
+
   /** One place the withdrawal is actually sent, so the retry-with-a-code path is the
    *  SAME code path as the first attempt — not a second, subtly different one. */
   const send = async (mfa_code?: string) => {
     const payload: WithdrawPayload =
       method === 'mpesa'
         ? { amount, method, phone, mfa_code }
-        : { amount, method, ...bank, mfa_code };
+        : method === 'paybill'
+          ? { amount, method, ...paybill, mfa_code }
+          : { amount, method, ...bank, mfa_code };
 
     setBusy(true);
     try {
@@ -142,8 +169,8 @@ export default function WalletView() {
       )}
 
       <Panel title="Withdraw earnings">
-        <div className="flex border border-[#141414] mb-3 max-w-xs">
-          {(['mpesa', 'bank'] as const).map((m) => (
+        <div className="flex border border-[#141414] mb-3 max-w-md">
+          {(['mpesa', 'paybill', 'bank'] as const).map((m) => (
             <button
               key={m}
               type="button"
@@ -152,7 +179,7 @@ export default function WalletView() {
                 method === m ? 'bg-[#141414] text-[#E4E3E0]' : 'bg-white text-[#141414]'
               }`}
             >
-              {m === 'mpesa' ? 'M-Pesa' : 'Bank'}
+              {m === 'mpesa' ? 'M-Pesa' : m === 'paybill' ? 'Paybill' : 'Bank'}
             </button>
           ))}
         </div>
@@ -160,11 +187,22 @@ export default function WalletView() {
           <Field label={`Amount (min ${fmtKsh(summary?.minimum_payout ?? 100)})`}>
             <input type="number" min="100" step="0.01" required value={amount} onChange={(e) => setAmount(e.target.value)} className={inputCls} />
           </Field>
-          {method === 'mpesa' ? (
+          {method === 'mpesa' && (
             <Field label="M-Pesa number">
               <input type="tel" required value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="07XX…" className={inputCls} />
             </Field>
-          ) : (
+          )}
+          {method === 'paybill' && (
+            <>
+              <Field label="Paybill number">
+                <input required value={paybill.paybill} onChange={(e) => setPaybill({ ...paybill, paybill: e.target.value })} placeholder="e.g. 555777" className={inputCls} />
+              </Field>
+              <Field label="Account number">
+                <input required value={paybill.paybill_account} onChange={(e) => setPaybill({ ...paybill, paybill_account: e.target.value })} placeholder="account to credit" className={inputCls} />
+              </Field>
+            </>
+          )}
+          {method === 'bank' && (
             <>
               <Field label="Bank">
                 <input required value={bank.bank_name} onChange={(e) => setBank({ ...bank, bank_name: e.target.value })} placeholder="e.g. I&M Bank" className={inputCls} />
@@ -182,10 +220,33 @@ export default function WalletView() {
             {busy ? 'Requesting…' : 'Withdraw'}
           </Btn>
         </form>
+
+        {/* Transfer-cost breakdown — the ISP sees exactly what they'll receive and where the
+            cost goes, before they commit. */}
+        {quote && Number(quote.amount) > 0 && (
+          <div className="mt-3 max-w-md border border-[#141414]/20 bg-[#f4f4f2] p-3 text-xs font-mono">
+            <div className="flex justify-between py-0.5">
+              <span className="text-[#141414]/60">Withdraw</span>
+              <span>{fmtKsh(Number(quote.amount))}</span>
+            </div>
+            <div className="flex justify-between py-0.5 text-[#B26B00]">
+              <span>Transfer cost → {quote.cost_destination}</span>
+              <span>− {fmtKsh(Number(quote.cost))}</span>
+            </div>
+            <div className="flex justify-between py-1 mt-1 border-t border-[#141414]/15 font-bold">
+              <span>You receive</span>
+              <span>{fmtKsh(Number(quote.net))}</span>
+            </div>
+            <p className="mt-1.5 text-[10px] leading-relaxed text-[#141414]/55 font-sans">{quote.note}</p>
+          </div>
+        )}
+
         <p className="text-[11px] font-mono text-[#141414]/50 mt-2">
           {method === 'bank'
             ? 'Bank withdrawals are sent by the platform via EFT/Pesalink and marked paid.'
-            : 'Paid to your M-Pesa number by the platform.'}
+            : method === 'paybill'
+              ? 'Paid to your paybill (B2B) by the platform.'
+              : 'Paid to your M-Pesa number by the platform.'}
         </p>
         {payouts.filter((p) => p.status === 'requested').length > 0 && (
           <p className="text-[11px] font-mono text-[#B26B00] mt-1">

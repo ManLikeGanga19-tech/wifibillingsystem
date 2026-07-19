@@ -227,7 +227,13 @@ def set_settlement_account(
         paybill = (fields.get("settlement_paybill") or "").strip()
         if not paybill.isdigit():
             raise SettlementError("A paybill number must be digits only.")
+        account = (fields.get("settlement_paybill_account") or "").strip()
+        if not account:
+            # A B2B transfer needs the account to credit at the shortcode, or the money
+            # reaches the paybill with no idea which account it belongs to.
+            raise SettlementError("Enter the account number to credit at that paybill.")
         operator.settlement_paybill = paybill
+        operator.settlement_paybill_account = account
         operator.settlement_name = (fields.get("settlement_name") or "").strip()
         if not operator.settlement_name:
             raise SettlementError("Tell us the business name registered on that paybill.")

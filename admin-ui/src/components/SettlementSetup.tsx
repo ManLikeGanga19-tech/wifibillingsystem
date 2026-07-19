@@ -236,8 +236,13 @@ export default function SettlementSetup({ onWentLive }: { onWentLive: () => void
       </div>
 
       {method === 'paybill' ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
           <Field name="settlement_paybill" label="Your paybill number" placeholder="123456" />
+          <Field
+            name="settlement_paybill_account"
+            label="Account number"
+            placeholder="account to credit"
+          />
           <Field
             name="settlement_name"
             label="Registered business name"

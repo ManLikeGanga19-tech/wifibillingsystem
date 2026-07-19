@@ -38,7 +38,10 @@ SET = "/api/v1/operator/settlement/"
 CONFIRM = "/api/v1/operator/settlement/confirm/"
 WITHDRAW = "/api/v1/billing/payouts/withdraw/"
 
-PAYBILL = {"method": "paybill", "settlement_paybill": "555777", "settlement_name": "Acme Ltd"}
+PAYBILL = {
+    "method": "paybill", "settlement_paybill": "555777",
+    "settlement_paybill_account": "ACME01", "settlement_name": "Acme Ltd",
+}
 
 
 def fresh_isp(**kw):
@@ -73,7 +76,7 @@ def pay_out(operator, user, amount="1000"):
         operator=operator,
         amount=Decimal(amount),
         user=user,
-        method="paybill",
+        method="mpesa",
         destination={"phone": "254712345678"},
     )
     return mark_payout_paid(p, by=user, mpesa_reference="REF123")
@@ -173,7 +176,7 @@ class TestTheFirstPayoutProvesIt:
         with pytest.raises(WalletError, match="Confirm your last payout"):
             request_payout(
                 operator=op, amount=Decimal("1000"), user=user,
-                method="paybill", destination={"phone": "254712345678"},
+                method="mpesa", destination={"phone": "254712345678"},
             )
 
     def test_confirming_the_code_unlocks_payouts_permanently(self):
@@ -196,7 +199,7 @@ class TestTheFirstPayoutProvesIt:
         # ...and a second payout now goes straight through, with NO code attached.
         second = request_payout(
             operator=op, amount=Decimal("500"), user=user,
-            method="paybill", destination={"phone": "254712345678"},
+            method="mpesa", destination={"phone": "254712345678"},
         )
         assert second.confirmation_code == ""
 
@@ -451,7 +454,7 @@ class TestAccountTakeover:
 
         first = request_payout(
             operator=op, amount=Decimal("1000"), user=owner,
-            method="paybill", destination={"phone": "254712345678"},
+            method="mpesa", destination={"phone": "254712345678"},
         )
         assert first.confirmation_code  # carries a code again
 
@@ -463,7 +466,7 @@ class TestAccountTakeover:
         with pytest.raises(WalletError, match="Confirm your last payout"):
             request_payout(
                 operator=op, amount=Decimal("1000"), user=owner,
-                method="paybill", destination={"phone": "254712345678"},
+                method="mpesa", destination={"phone": "254712345678"},
             )
 
     def test_a_completed_change_also_WARNS_the_owner(self):
