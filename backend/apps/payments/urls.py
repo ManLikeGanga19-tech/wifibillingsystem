@@ -13,6 +13,7 @@ from .views import (
     C2BValidationView,
     DarajaCallbackView,
     DeviceStatusView,
+    PaymentSearchView,
     ResolveUnmatchedView,
     RetryProvisionView,
     STKPushView,
@@ -25,6 +26,7 @@ router = SimpleRouter()
 router.register("transactions", TransactionViewSet, basename="transaction")
 
 urlpatterns = [
+    path("search/", PaymentSearchView.as_view(), name="payment-search"),
     path("stk-push/", STKPushView.as_view(), name="stk-push"),
     path("device-status/", DeviceStatusView.as_view(), name="device-status"),
     path("status/<uuid:public_id>/", TransactionStatusView.as_view(), name="payment-status"),

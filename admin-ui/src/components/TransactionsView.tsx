@@ -7,9 +7,13 @@ import {
   Wifi,
   CheckCircle2,
   ChevronDown,
+  Search,
 } from 'lucide-react';
-import { api, ApiTransaction } from '../api/client';
+import { api, ApiTransaction, PaymentSearchResult } from '../api/client';
 import { toast } from './ui';
+
+const fmt = (iso: string) =>
+  new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 
 const STATUS_STYLE: Record<ApiTransaction['status'], string> = {
   success: 'text-[#228B22] border-[#228B22]/40 bg-[#228B22]/5',
@@ -32,6 +36,32 @@ export default function TransactionsView() {
   const [reconnecting, setReconnecting] = useState<number | null>(null);
   const [queueOpen, setQueueOpen] = useState(false);
   const [reconnectingAll, setReconnectingAll] = useState(false);
+
+  // Unified search across hotspot + PPPoE payments (phone / M-Pesa code / account number).
+  const [search, setSearch] = useState('');
+  const [searchResults, setSearchResults] = useState<PaymentSearchResult[] | null>(null);
+  const [searching, setSearching] = useState(false);
+  const searchActive = search.trim().length >= 2;
+
+  useEffect(() => {
+    const q = search.trim();
+    if (q.length < 2) {
+      setSearchResults(null);
+      return;
+    }
+    setSearching(true);
+    const t = window.setTimeout(async () => {
+      try {
+        const { results } = await api.transactions.search(q);
+        setSearchResults(results);
+      } catch {
+        setSearchResults([]);
+      } finally {
+        setSearching(false);
+      }
+    }, 300);
+    return () => window.clearTimeout(t);
+  }, [search]);
 
   const load = useCallback(async () => {
     setRefreshing(true);
@@ -187,6 +217,70 @@ export default function TransactionsView() {
         </div>
       )}
 
+      {/* Unified search */}
+      <div className="relative">
+        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-[#141414]/40" />
+        {search && (
+          <button
+            onClick={() => setSearch('')}
+            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] font-mono uppercase text-[#141414]/50 hover:text-[#141414]"
+          >
+            clear
+          </button>
+        )}
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search payments — phone, M-Pesa code, or PPPoE account number…"
+          className="w-full bg-white border border-[#141414] pl-9 pr-14 py-2 text-xs outline-none"
+        />
+      </div>
+
+      {searchActive ? (
+        <div className="bg-white border border-[#141414] overflow-x-auto">
+          {searching && searchResults === null ? (
+            <div className="flex justify-center py-16">
+              <Loader2 className="h-6 w-6 animate-spin text-[#141414]/40" />
+            </div>
+          ) : (searchResults ?? []).length === 0 ? (
+            <p className="p-8 text-center text-xs font-mono text-[#141414]/50">
+              No payments match “{search.trim()}”.
+            </p>
+          ) : (
+            <table className="w-full text-left">
+              <thead>
+                <tr className="border-b border-[#141414] font-mono text-[11px] uppercase text-[#141414]/60">
+                  <th className="py-2.5 px-3">Time</th>
+                  <th className="py-2.5 px-3">Type</th>
+                  <th className="py-2.5 px-3">Phone</th>
+                  <th className="py-2.5 px-3">M-Pesa code</th>
+                  <th className="py-2.5 px-3">Account</th>
+                  <th className="py-2.5 px-3 text-right">Amount</th>
+                  <th className="py-2.5 px-3">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#141414]/10">
+                {(searchResults ?? []).map((r, i) => (
+                  <tr key={i} className="text-xs hover:bg-[#f0efec]/40 transition">
+                    <td className="py-2.5 px-3 font-mono whitespace-nowrap">{fmt(r.date)}</td>
+                    <td className="py-2.5 px-3">
+                      <span className="border border-[#141414]/25 bg-[#f0efec] px-1.5 py-0.5 font-mono text-[10px] uppercase">
+                        {r.kind === 'pppoe' ? 'PPPoE' : 'Hotspot'}
+                      </span>
+                    </td>
+                    <td className="py-2.5 px-3 font-mono">{r.phone || '—'}</td>
+                    <td className="py-2.5 px-3 font-mono">{r.code || '—'}</td>
+                    <td className="py-2.5 px-3 font-mono">{r.reference || '—'}</td>
+                    <td className="py-2.5 px-3 text-right font-mono">KSh {Number(r.amount).toLocaleString()}</td>
+                    <td className="py-2.5 px-3 font-mono uppercase text-[10px]">{r.status}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      ) : (
+      <>
       {/* Status filter */}
       <div className="flex flex-wrap gap-1.5">
         {FILTERS.map((f) => (
@@ -286,6 +380,8 @@ export default function TransactionsView() {
           </table>
         )}
       </div>
+      </>
+      )}
     </div>
   );
 }

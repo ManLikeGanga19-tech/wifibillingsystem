@@ -2,6 +2,7 @@ import json
 import logging
 
 from django.conf import settings
+from django.db.models import Q
 from django.http import Http404, JsonResponse
 from django.utils import timezone
 from django.utils.decorators import method_decorator
@@ -11,20 +12,27 @@ from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.generics import RetrieveAPIView
+from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
-from apps.core.permissions import IsPlatformOwner, IsPlatformStaff
+from apps.core.permissions import (
+    IsPlatformOwner,
+    IsPlatformStaff,
+    RequireTenant,
+    TenantIsOperational,
+)
 from apps.core.public import PublicAPIView, PublicEndpointMixin
 from apps.core.schema import OBJECT_RESPONSE
+from apps.core.tenancy import acting_tenant
 from apps.core.viewsets import TenantReadOnlyViewSet
 from apps.provisioning.models import Session
 from apps.provisioning.services import ReprovisionError, reprovision_transaction
 
 from .daraja import DarajaError
 from .gateways import GatewayError
-from .models import Transaction
+from .models import C2BPayment, Transaction
 from .serializers import (
     STKPushRequestSerializer,
     TransactionAdminSerializer,
@@ -323,6 +331,60 @@ class ResolveUnmatchedView(APIView):
                 "status": resolved.status,
             }
         )
+
+
+class PaymentSearchView(APIView):
+    """Find one of this ISP's payments across BOTH rails at once: hotspot M-Pesa (STK) transactions
+    and fixed-line (PPPoE) C2B paybill payments — by customer phone, M-Pesa code, or (PPPoE only)
+    the account number the customer typed. Read-only and tenant-scoped."""
+
+    permission_classes = [IsAdminUser, RequireTenant, TenantIsOperational]
+
+    #: Below this a search is too broad to be useful and too cheap to abuse; return nothing.
+    MIN_QUERY = 2
+    PER_SOURCE = 40
+    TOTAL = 50
+
+    @extend_schema(
+        responses=OBJECT_RESPONSE,
+        summary="Search payments by phone / M-Pesa code / PPPoE account number",
+    )
+    def get(self, request):
+        q = (request.query_params.get("q") or "").strip()
+        if len(q) < self.MIN_QUERY:
+            return Response({"results": []})
+        operator = acting_tenant(request)
+
+        results = [
+            {
+                "kind": "hotspot", "phone": tx.phone, "code": tx.mpesa_receipt or "",
+                "reference": "", "amount": str(tx.amount), "status": tx.status,
+                "date": tx.created_at.isoformat(),
+            }
+            for tx in (
+                Transaction.objects.filter(operator=operator)
+                .filter(Q(phone__icontains=q) | Q(mpesa_receipt__icontains=q))
+                .order_by("-created_at")[: self.PER_SOURCE]
+            )
+        ]
+        results += [
+            {
+                "kind": "pppoe", "phone": p.msisdn, "code": p.trans_id or "",
+                "reference": p.bill_ref or "", "amount": str(p.amount), "status": p.status,
+                "date": p.received_at.isoformat(),
+            }
+            for p in (
+                C2BPayment.objects.filter(operator=operator)
+                .filter(
+                    Q(msisdn__icontains=q)
+                    | Q(trans_id__icontains=q)
+                    | Q(bill_ref__icontains=q)
+                )
+                .order_by("-received_at")[: self.PER_SOURCE]
+            )
+        ]
+        results.sort(key=lambda r: r["date"], reverse=True)
+        return Response({"results": results[: self.TOTAL]})
 
 
 class TransactionViewSet(TenantReadOnlyViewSet):

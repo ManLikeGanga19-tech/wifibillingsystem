@@ -115,6 +115,18 @@ export interface ApiPlan {
   sort_order: number;
 }
 
+/** One row from the unified payments search (hotspot + PPPoE). */
+export interface PaymentSearchResult {
+  kind: 'hotspot' | 'pppoe';
+  phone: string;
+  code: string;
+  /** PPPoE account number the customer typed (empty for hotspot). */
+  reference: string;
+  amount: string;
+  status: string;
+  date: string;
+}
+
 export interface ApiTransaction {
   id: number;
   public_id: string;
@@ -1396,6 +1408,9 @@ export const api = {
   transactions: {
     list: (status?: string) =>
       request<Paginated<ApiTransaction>>(`/payments/transactions/${status ? `?status=${status}` : ''}`),
+    /** Search across hotspot + PPPoE payments by phone / M-Pesa code / account number. */
+    search: (q: string) =>
+      request<{ results: PaymentSearchResult[] }>(`/payments/search/?q=${encodeURIComponent(q)}`),
     /** The "paid but never connected" queue — paid (incl. reconciled) with no active session. */
     unconnected: () =>
       request<Paginated<ApiTransaction>>('/payments/transactions/?unconnected=1'),
