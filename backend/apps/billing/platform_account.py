@@ -198,3 +198,37 @@ def credit_topup(topup) -> None:
     from .invoicing import settle_outstanding_if_clear
 
     settle_outstanding_if_clear(topup.operator)
+
+
+# --- reporting: what the ISP paid US (their auto expense line) ---------------------------
+
+#: The charges that are genuinely the ISP's cost of using WIFI.OS — money to Danamo. Top-ups and
+#: grants FUND the account; refunds/adjustments are corrections; none of those are an expense.
+FEE_REASONS = (
+    PlatformLedgerEntry.Reason.BASE_FEE,
+    PlatformLedgerEntry.Reason.COMMISSION,
+    PlatformLedgerEntry.Reason.PPPOE_FEE,
+    PlatformLedgerEntry.Reason.SETUP_FEE,
+    PlatformLedgerEntry.Reason.SMS,
+)
+
+
+def platform_charges(operator, *, start, end) -> dict:
+    """What the platform charged this ISP in [start, end) — surfaced on their Expenses page as an
+    auto 'WIFI.OS platform fees' line so their profit picture includes what they pay us.
+
+    Charges are stored NEGATIVE (a fee debits), so we flip each to a positive cost. Returns
+    {by_reason: {reason: Decimal}, total: Decimal} with every fee reason present (zero if none)."""
+    rows = (
+        PlatformLedgerEntry.objects.filter(
+            operator=operator, reason__in=FEE_REASONS,
+            created_at__gte=start, created_at__lt=end,
+        )
+        .values("reason")
+        .annotate(total=Sum("amount"))
+    )
+    by_reason = {r: Decimal("0.00") for r in FEE_REASONS}
+    for row in rows:
+        by_reason[row["reason"]] = (-row["total"]).quantize(Decimal("0.01"))
+    total = sum(by_reason.values(), Decimal("0.00"))
+    return {"by_reason": by_reason, "total": total}

@@ -1,6 +1,6 @@
-import { useMemo, useState, type FormEvent } from 'react';
-import { Wallet, Plus } from 'lucide-react';
-import { api, ApiExpense } from '../api/client';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { Wallet, Plus, Building2 } from 'lucide-react';
+import { api, ApiExpense, PlatformFees } from '../api/client';
 import {
   Badge, Btn, Field, inputCls, Panel, RefreshBtn, TableShell, tdCls, toast, useList, ViewHeader, fmtKsh,
 } from './ui';
@@ -17,11 +17,20 @@ export default function ExpensesView() {
   });
   const { rows, count, error, reload } = useList(() => api.expenses.list());
 
+  // Auto side: what the ISP paid WIFI.OS (Danamo) this month, pulled live from billing.
+  const [platform, setPlatform] = useState<PlatformFees | null>(null);
+  useEffect(() => {
+    api.expenses.platformFees().then(setPlatform).catch(() => setPlatform(null));
+  }, []);
+
   const monthTotal = useMemo(() => {
     if (!rows) return 0;
     const monthStart = new Date().toISOString().slice(0, 7);
     return rows.filter((e) => e.date.startsWith(monthStart)).reduce((a, e) => a + Number(e.amount), 0);
   }, [rows]);
+
+  const platformTotal = platform ? Number(platform.total) : 0;
+  const platformLines = (platform?.lines ?? []).filter((l) => Number(l.amount) > 0);
 
   const create = async (e: FormEvent) => {
     e.preventDefault();
@@ -51,14 +60,58 @@ export default function ExpensesView() {
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="bg-white border border-[#141414] p-3.5">
-          <p className="text-[11px] font-mono uppercase text-[#141414]/60">Spent This Month</p>
-          <p className="text-xl font-black font-mono mt-1 text-[#B22222]">{fmtKsh(monthTotal)}</p>
+          <p className="text-[11px] font-mono uppercase text-[#141414]/60">Total This Month</p>
+          <p className="text-xl font-black font-mono mt-1 text-[#B22222]">
+            {fmtKsh(monthTotal + platformTotal)}
+          </p>
+          <p className="text-[10px] font-mono text-[#141414]/45 mt-0.5">
+            incl. {fmtKsh(platformTotal)} WIFI.OS fees
+          </p>
+        </div>
+        <div className="bg-white border border-[#141414] p-3.5">
+          <p className="text-[11px] font-mono uppercase text-[#141414]/60">Recorded By You</p>
+          <p className="text-xl font-black font-mono mt-1">{fmtKsh(monthTotal)}</p>
+        </div>
+        <div className="bg-white border border-[#141414] p-3.5">
+          <p className="text-[11px] font-mono uppercase text-[#141414]/60">WIFI.OS Fees</p>
+          <p className="text-xl font-black font-mono mt-1">{fmtKsh(platformTotal)}</p>
+          <p className="text-[10px] font-mono text-[#141414]/45 mt-0.5">auto</p>
         </div>
         <div className="bg-white border border-[#141414] p-3.5">
           <p className="text-[11px] font-mono uppercase text-[#141414]/60">Entries</p>
           <p className="text-xl font-black font-mono mt-1">{count}</p>
         </div>
       </div>
+
+      {/* Auto: what the ISP paid WIFI.OS this month — computed from billing, not editable. */}
+      <Panel title="WIFI.OS platform fees · this month">
+        <p className="text-xs text-[#141414]/60 -mt-1 mb-3 flex items-start gap-1.5">
+          <Building2 className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+          <span>
+            What you paid WIFI.OS this month — calculated automatically from your billing, so your
+            real profit already accounts for it. You don't record these yourself.
+          </span>
+        </p>
+        {platformLines.length === 0 ? (
+          <p className="text-xs text-[#141414]/45">No platform fees charged yet this month.</p>
+        ) : (
+          <div className="border border-[#141414]/15">
+            {platformLines.map((l) => (
+              <div
+                key={l.key}
+                className="flex items-center justify-between border-b border-[#141414]/5 px-3 py-1.5 text-xs last:border-0"
+              >
+                <span>{l.label}</span>
+                <span className="font-mono">{fmtKsh(Number(l.amount))}</span>
+              </div>
+            ))}
+            <div className="flex items-center justify-between bg-[#f4f4f2] px-3 py-2 text-xs font-bold">
+              <span>Total to WIFI.OS</span>
+              <span className="font-mono">{fmtKsh(platformTotal)}</span>
+            </div>
+          </div>
+        )}
+      </Panel>
 
       {showForm && (
         <Panel title="Record expense">

@@ -273,6 +273,13 @@ export interface ApiLead {
   created_at: string;
 }
 
+/** The auto "WIFI.OS platform fees" line on the Expenses page. */
+export interface PlatformFees {
+  month: string;
+  total: string;
+  lines: { key: string; label: string; amount: string }[];
+}
+
 export interface ApiExpense {
   id: number;
   date: string;
@@ -1478,7 +1485,12 @@ export const api = {
 
   tickets: crud<ApiTicket>('/ops/tickets'),
   leads: crud<ApiLead>('/ops/leads'),
-  expenses: crud<ApiExpense>('/ops/expenses'),
+  expenses: {
+    ...crud<ApiExpense>('/ops/expenses'),
+    /** What this ISP paid WIFI.OS (fees + SMS) for a month — the auto expense line. */
+    platformFees: (month?: string) =>
+      request<PlatformFees>(`/ops/platform-fees/${month ? `?month=${month}` : ''}`),
+  },
   equipment: crud<ApiEquipment>('/ops/equipment'),
 
   pppoe: {
