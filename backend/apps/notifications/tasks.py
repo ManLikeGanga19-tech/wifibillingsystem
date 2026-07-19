@@ -108,20 +108,32 @@ def dispatch_campaign(campaign_id: int):
         customers = customers.filter(sessions__isnull=False).exclude(
             sessions__status=Session.Status.ACTIVE
         )
-    field = "email" if campaign.channel == Channel.EMAIL else "phone"
-    recipients = list(customers.values_list(field, flat=True).distinct())
+    is_email = campaign.channel == Channel.EMAIL
+    field = "email" if is_email else "phone"
+    # Pull the name too, so @first_name fills per recipient. distinct() on (contact, name)
+    # still collapses a subscriber the audience join duplicated.
+    recipients = list(customers.values_list(field, "name").distinct())
+
+    from .services import _company_name, _first_name, personalize_campaign
+
+    company = _company_name(campaign.operator)
+
+    def _body(name: str) -> str:
+        return personalize_campaign(
+            campaign.body, first_name=_first_name(name), company_name=company
+        )
 
     messages = Message.objects.bulk_create(
         Message(
             operator=campaign.operator,
             campaign=campaign,
-            to_phone="" if campaign.channel == Channel.EMAIL else recipient,
-            to_email=recipient if campaign.channel == Channel.EMAIL else "",
+            to_phone="" if is_email else contact,
+            to_email=contact if is_email else "",
             channel=campaign.channel,
             subject=campaign.subject,
-            body=campaign.body,
+            body=_body(name),
         )
-        for recipient in recipients
+        for contact, name in recipients
     )
     campaign.total_recipients = len(messages)
     campaign.status = (

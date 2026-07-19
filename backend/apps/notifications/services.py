@@ -144,6 +144,22 @@ def _first_name(full_name: str) -> str:
     return (full_name or "").strip().split(" ")[0]
 
 
+#: The only two @tokens that mean anything in a marketing BLAST. A campaign goes to a whole
+#: audience, so it has no single package/expiry/amount/account to fill the transactional tokens
+#: with — those are per-event. These two are per-recipient facts that always exist.
+CAMPAIGN_TOKENS: frozenset[str] = frozenset({"first_name", "company_name"})
+
+
+def personalize_campaign(body: str, *, first_name: str, company_name: str) -> str:
+    """Fill @first_name / @company_name for one recipient. Every OTHER @token is left exactly as
+    typed — the composer flags those, because a blast can't resolve them (matching the
+    transactional renderer, which also leaves unknown tokens untouched)."""
+    from .templates import TOKEN_RE
+
+    values = {"first_name": first_name or "", "company_name": company_name or ""}
+    return TOKEN_RE.sub(lambda m: values.get(m.group(1), m.group(0)), body or "")
+
+
 def _platform_paybill() -> str:
     """The paybill customers pay to. PPPoE account numbers are BillRefs on Danamo's shared
     C2B shortcode, so that is the number in the message."""

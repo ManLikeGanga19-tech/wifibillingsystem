@@ -3,7 +3,7 @@ import {
   Megaphone, Send, Users, CheckCircle2, Clock, Loader2, AlertTriangle,
   MessageSquare, ArrowRight, X, Wallet,
 } from 'lucide-react';
-import { api, ApiCampaign, PlatformAccount } from '../api/client';
+import { api, ApiCampaign, MessageTemplate, PlatformAccount } from '../api/client';
 import { Badge, Btn, Panel, RefreshBtn, ViewHeader, fmtDateTime, toast } from './ui';
 
 type Channel = 'sms' | 'whatsapp';
@@ -16,6 +16,11 @@ function segmentsFor(text: string): number {
   return len <= 160 ? 1 : Math.ceil(len / 153);
 }
 
+// The only two tokens a broadcast can fill per recipient; everything else is per-payment.
+const SAFE_TOKENS = ['first_name', 'company_name'];
+const tokensIn = (t: string) =>
+  Array.from(new Set((t.match(/@(\w+)/g) ?? []).map((x) => x.slice(1))));
+
 export default function MessagingView() {
   const [channel, setChannel] = useState<Channel>('sms');
   const [audience, setAudience] = useState<Audience>('all');
@@ -26,6 +31,7 @@ export default function MessagingView() {
 
   const [campaigns, setCampaigns] = useState<ApiCampaign[] | null>(null);
   const [counts, setCounts] = useState<{ all: number; active: number; expired: number } | null>(null);
+  const [templates, setTemplates] = useState<MessageTemplate[]>([]);
   const [account, setAccount] = useState<PlatformAccount | null>(null);
   const [gateway, setGateway] = useState<{ name: string; managed: boolean } | null | false>(null);
   const pollRef = useRef<number | undefined>(undefined);
@@ -41,6 +47,7 @@ export default function MessagingView() {
 
   useEffect(() => {
     loadCampaigns();
+    api.messageTemplates.get().then((r) => setTemplates(r.templates)).catch(() => {});
     api.account.get().then(setAccount).catch(() => {});
     api.messaging.providers('sms')
       .then((r) => {
@@ -153,7 +160,29 @@ export default function MessagingView() {
               className="w-full bg-white border border-[#141414] p-2 text-xs outline-none mb-4"
             />
 
-            <label className="text-xs font-bold font-mono uppercase text-[#141414]/60 block mb-1">Message</label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-xs font-bold font-mono uppercase text-[#141414]/60">Message</label>
+              {templates.length > 0 && (
+                <select
+                  value=""
+                  onChange={(e) => {
+                    const t = templates.find((x) => x.key === e.target.value);
+                    if (t) setBody(t.body);
+                  }}
+                  className="bg-white border border-[#141414] px-2 py-1 text-[11px] font-mono outline-none max-w-[14rem]"
+                  title="Load the wording from one of your message templates"
+                >
+                  <option value="">Start from a template…</option>
+                  {Array.from(new Set(templates.map((t) => t.group))).map((g) => (
+                    <optgroup key={g} label={g}>
+                      {templates.filter((t) => t.group === g).map((t) => (
+                        <option key={t.key} value={t.key}>{t.label}</option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+              )}
+            </div>
             <textarea
               value={body}
               onChange={(e) => setBody(e.target.value)}
@@ -166,6 +195,27 @@ export default function MessagingView() {
               <span>{body.length}/640</span>
               {isSms && <span className={segs > 1 ? 'text-[#B26B00]' : ''}>{segs} segment{segs === 1 ? '' : 's'} / customer</span>}
             </div>
+            {tokensIn(body).length > 0 && (
+              <div className="mt-2 space-y-1 text-[11px] leading-relaxed">
+                <p className="text-[#141414]/55">
+                  <span className="font-mono">@first_name</span> and{' '}
+                  <span className="font-mono">@company_name</span> fill in per customer.
+                </p>
+                {tokensIn(body).filter((t) => !SAFE_TOKENS.includes(t)).length > 0 && (
+                  <p className="flex items-start gap-1 text-[#B26B00]">
+                    <AlertTriangle className="h-3 w-3 mt-0.5 shrink-0" />
+                    <span>
+                      A blast can't fill{' '}
+                      {tokensIn(body)
+                        .filter((t) => !SAFE_TOKENS.includes(t))
+                        .map((t) => `@${t}`)
+                        .join(', ')}{' '}
+                      — those are per-payment. Edit them out, or they'll send as typed.
+                    </span>
+                  </p>
+                )}
+              </div>
+            )}
           </Panel>
 
           {/* Cost + send */}
