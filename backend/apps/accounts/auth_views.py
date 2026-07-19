@@ -8,11 +8,13 @@ to go stale, and nothing for a user to "clear their cache" to fix.
 
 import logging
 
+from django.contrib.auth.password_validation import validate_password
 from django.core.cache import cache
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.middleware.csrf import get_token
 from drf_spectacular.utils import extend_schema
-from rest_framework import status
-from rest_framework.permissions import AllowAny
+from rest_framework import serializers, status
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
@@ -22,10 +24,12 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.core.phone import InvalidPhoneError, normalize_msisdn
 from apps.core.schema import (
+    OBJECT_RESPONSE,
     DetailSerializer,
     LoginRequestSerializer,
     LoginResponseSerializer,
 )
+from apps.core.services import audit
 
 from .cookie_auth import (
     REFRESH_COOKIE,
@@ -200,3 +204,54 @@ class LogoutView(APIView):
 
     def post(self, request):
         return clear_auth_cookies(Response({"detail": "Signed out."}))
+
+
+class ChangePasswordSerializer(serializers.Serializer):
+    current_password = serializers.CharField()
+    new_password = serializers.CharField()
+
+
+@extend_schema(request=ChangePasswordSerializer, responses=OBJECT_RESPONSE,
+               summary="Change your password (needs the current one)")
+class ChangePasswordView(APIView):
+    """Change the signed-in user's password. Requires the current password (so a walk-up on an
+    unlocked console can't lock the owner out), and runs Django's password validators plus a hard
+    minimum on the new one. Not 2FA-gated — that's for MONEY, not account maintenance.
+
+    On success we re-issue fresh cookies: the old JWTs stay valid until they expire (they're
+    stateless), so rotating them is the clean way to make "changed my password" mean something.
+    """
+
+    permission_classes = [IsAuthenticated]
+    MIN_LENGTH = 8
+
+    def post(self, request):
+        s = ChangePasswordSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        user = request.user
+
+        if not user.check_password(s.validated_data["current_password"]):
+            return Response(
+                {"detail": "That is not your current password."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        new_password = s.validated_data["new_password"]
+        # A floor that holds even if no AUTH_PASSWORD_VALIDATORS are configured.
+        if len(new_password) < self.MIN_LENGTH:
+            return Response(
+                {"detail": f"Use at least {self.MIN_LENGTH} characters."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            validate_password(new_password, user=user)
+        except DjangoValidationError as exc:
+            return Response({"detail": " ".join(exc.messages)}, status=status.HTTP_400_BAD_REQUEST)
+
+        user.set_password(new_password)
+        user.save(update_fields=["password"])
+        audit("password_changed", operator=getattr(user, "operator", None), actor=user, target=user)
+
+        # Keep them signed in on THIS session, on freshly-minted tokens.
+        refresh = RefreshToken.for_user(user)
+        resp = Response({"detail": "Your password was changed."})
+        return set_auth_cookies(resp, access=str(refresh.access_token), refresh=str(refresh))

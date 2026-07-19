@@ -1064,6 +1064,13 @@ export const api = {
 
   /** Where WE pay THEM. Registering is INSTANT — that's what switches payments on.
    *  The first payout then carries a code they read back, which unlocks the rest. */
+  /** Change the signed-in user's password (needs the current one). */
+  changePassword: (current_password: string, new_password: string) =>
+    request<{ detail: string }>('/auth/change-password/', {
+      method: 'POST',
+      body: JSON.stringify({ current_password, new_password }),
+    }),
+
   mfa: {
     status: () => request<MfaStatus>('/auth/mfa/'),
     setup: () => request<MfaSetup>('/auth/mfa/setup/', { method: 'POST' }),

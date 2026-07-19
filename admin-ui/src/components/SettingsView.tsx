@@ -9,11 +9,11 @@ import LoyaltyPanel from './settings/LoyaltyPanel';
 import AlertsPanel from './settings/AlertsPanel';
 import AIAssistantPanel from './settings/AIAssistantPanel';
 import DeveloperPanel from './settings/DeveloperPanel';
+import SecurityPanel from './settings/SecurityPanel';
 import EmailPanel from './settings/EmailPanel';
 import PaymentsPanel from './settings/PaymentsPanel';
 import PppoePanel from './settings/PppoePanel';
 import ProfilePanel from './settings/ProfilePanel';
-import Placeholder from './settings/Placeholder';
 
 /**
  * The settings SHELL. One frame, an inner sidebar of every setting an ISP has, and a
@@ -183,9 +183,7 @@ export default function SettingsView({
           {active === 'alerts' && <AlertsPanel />}
           {active === 'ai' && <AIAssistantPanel />}
           {active === 'developer' && <DeveloperPanel />}
-          {active === 'security' && (
-            <Placeholder title="Password & 2FA" blurb="Change your password and manage the authenticator that protects your money. (2FA already guards withdrawals today.)" />
-          )}
+          {active === 'security' && <SecurityPanel />}
         </div>
       </div>
     </div>
