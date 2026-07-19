@@ -16,11 +16,6 @@ function segmentsFor(text: string): number {
   return len <= 160 ? 1 : Math.ceil(len / 153);
 }
 
-// The only two tokens a broadcast can fill per recipient; everything else is per-payment.
-const SAFE_TOKENS = ['first_name', 'company_name'];
-const tokensIn = (t: string) =>
-  Array.from(new Set((t.match(/@(\w+)/g) ?? []).map((x) => x.slice(1))));
-
 export default function MessagingView() {
   const [channel, setChannel] = useState<Channel>('sms');
   const [audience, setAudience] = useState<Audience>('all');
@@ -171,27 +166,6 @@ export default function MessagingView() {
               <span>{body.length}/640</span>
               {isSms && <span className={segs > 1 ? 'text-[#B26B00]' : ''}>{segs} segment{segs === 1 ? '' : 's'} / customer</span>}
             </div>
-            {tokensIn(body).length > 0 && (
-              <div className="mt-2 space-y-1 text-[11px] leading-relaxed">
-                <p className="text-[#141414]/55">
-                  <span className="font-mono">@first_name</span> and{' '}
-                  <span className="font-mono">@company_name</span> fill in per customer.
-                </p>
-                {tokensIn(body).filter((t) => !SAFE_TOKENS.includes(t)).length > 0 && (
-                  <p className="flex items-start gap-1 text-[#B26B00]">
-                    <AlertTriangle className="h-3 w-3 mt-0.5 shrink-0" />
-                    <span>
-                      A blast can't fill{' '}
-                      {tokensIn(body)
-                        .filter((t) => !SAFE_TOKENS.includes(t))
-                        .map((t) => `@${t}`)
-                        .join(', ')}{' '}
-                      — those are per-payment. Edit them out, or they'll send as typed.
-                    </span>
-                  </p>
-                )}
-              </div>
-            )}
           </Panel>
 
           {/* Cost + send */}
