@@ -33,6 +33,7 @@ import { toast, ToastHost } from './components/ui';
 
 import LoginView from './components/LoginView';
 import GoLiveBanner from './components/GoLiveBanner';
+import AssistantWidget from './components/AssistantWidget';
 import PastDueBanner from './components/PastDueBanner';
 import LiveDashboard from './components/LiveDashboard';
 import ActiveUsersView from './components/ActiveUsersView';
@@ -592,6 +593,7 @@ export default function App() {
           </div>
         </footer>
       </main>
+      <AssistantWidget />
       <ToastHost />
     </div>
   );

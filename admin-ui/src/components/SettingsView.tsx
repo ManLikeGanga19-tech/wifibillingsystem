@@ -7,6 +7,7 @@ import HotspotPanel from './settings/HotspotPanel';
 import MessageTemplatesPanel from './settings/MessageTemplatesPanel';
 import LoyaltyPanel from './settings/LoyaltyPanel';
 import AlertsPanel from './settings/AlertsPanel';
+import AIAssistantPanel from './settings/AIAssistantPanel';
 import EmailPanel from './settings/EmailPanel';
 import PaymentsPanel from './settings/PaymentsPanel';
 import PppoePanel from './settings/PppoePanel';
@@ -179,9 +180,7 @@ export default function SettingsView({
           {active === 'templates' && <MessageTemplatesPanel />}
           {active === 'loyalty' && <LoyaltyPanel />}
           {active === 'alerts' && <AlertsPanel />}
-          {active === 'ai' && (
-            <Placeholder title="AI Assistant" blurb="Plug in an AI provider and API key to help you run support and analytics." />
-          )}
+          {active === 'ai' && <AIAssistantPanel />}
           {active === 'developer' && (
             <Placeholder title="Developer" blurb="API tokens and webhooks to integrate WIFI.OS with your own tools." />
           )}

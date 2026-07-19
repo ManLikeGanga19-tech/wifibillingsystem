@@ -552,6 +552,21 @@ export interface LoyaltySummary {
   top: { phone: string; points: number }[];
 }
 
+/** Settings > AI Assistant. */
+export interface AISettings {
+  provider: 'claude' | 'openai';
+  has_own_key: boolean;
+  /** Masked hint (e.g. "sk-ant-…4f2a"); never the whole key. */
+  key_preview: string;
+  platform_default_available: boolean;
+  platform_default_provider: 'claude' | 'openai';
+}
+
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
 /** Settings > Operator alerts. */
 export interface OperatorAlertSettings {
   router_alerts_enabled: boolean;
@@ -1150,6 +1165,20 @@ export const api = {
         body: JSON.stringify(data),
       }),
     summary: (q = '') => request<LoyaltySummary>(`/loyalty/summary/${q ? `?q=${encodeURIComponent(q)}` : ''}`),
+  },
+
+  assistant: {
+    get: () => request<AISettings>('/assistant/settings/'),
+    update: (data: Partial<{ provider: string; api_key: string }>) =>
+      request<AISettings>('/assistant/settings/', {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      }),
+    chat: (messages: ChatMessage[]) =>
+      request<{ reply: string }>('/assistant/chat/', {
+        method: 'POST',
+        body: JSON.stringify({ messages }),
+      }),
   },
 
   alerts: {

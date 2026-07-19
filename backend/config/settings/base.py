@@ -33,6 +33,7 @@ INSTALLED_APPS = [
     "apps.pppoe",
     "apps.loyalty",
     "apps.signup",
+    "apps.assistant",
 ]
 
 MIDDLEWARE = [
@@ -331,6 +332,13 @@ AT_SENDER_ID = os.getenv("AT_SENDER_ID", "")
 WHATSAPP_API_BASE = os.getenv("WHATSAPP_API_BASE", "https://graph.facebook.com/v20.0")
 WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN", "")
 WHATSAPP_PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID", "")
+
+# AI Assistant (Settings > AI Assistant). The PLATFORM DEFAULT key an ISP falls back on when
+# they don't bring their own — env-only, never in code. Blank = the assistant is off until an ISP
+# supplies their own key. AI_DEFAULT_PROVIDER picks which platform key the default uses.
+AI_DEFAULT_PROVIDER = os.getenv("AI_DEFAULT_PROVIDER", "claude")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
 # Outbound email (console backend in dev; set SMTP env vars in production)
 EMAIL_BACKEND = os.getenv(
