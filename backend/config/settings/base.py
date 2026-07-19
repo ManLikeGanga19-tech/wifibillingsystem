@@ -34,6 +34,7 @@ INSTALLED_APPS = [
     "apps.loyalty",
     "apps.signup",
     "apps.assistant",
+    "apps.developer",
 ]
 
 MIDDLEWARE = [
@@ -114,6 +115,9 @@ REST_FRAMEWORK = {
     # cookie-authenticated writes, where it actually applies.
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "apps.accounts.cookie_auth.CookieJWTAuthentication",
+        # Developer API tokens (Authorization: Token wos_…). Runs after cookie/Bearer so it only
+        # ever sees the `Token` scheme; a token acts as its creator, scoped to their tenant.
+        "apps.developer.auth.ApiTokenAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",

@@ -8,6 +8,7 @@ import MessageTemplatesPanel from './settings/MessageTemplatesPanel';
 import LoyaltyPanel from './settings/LoyaltyPanel';
 import AlertsPanel from './settings/AlertsPanel';
 import AIAssistantPanel from './settings/AIAssistantPanel';
+import DeveloperPanel from './settings/DeveloperPanel';
 import EmailPanel from './settings/EmailPanel';
 import PaymentsPanel from './settings/PaymentsPanel';
 import PppoePanel from './settings/PppoePanel';
@@ -181,9 +182,7 @@ export default function SettingsView({
           {active === 'loyalty' && <LoyaltyPanel />}
           {active === 'alerts' && <AlertsPanel />}
           {active === 'ai' && <AIAssistantPanel />}
-          {active === 'developer' && (
-            <Placeholder title="Developer" blurb="API tokens and webhooks to integrate WIFI.OS with your own tools." />
-          )}
+          {active === 'developer' && <DeveloperPanel />}
           {active === 'security' && (
             <Placeholder title="Password & 2FA" blurb="Change your password and manage the authenticator that protects your money. (2FA already guards withdrawals today.)" />
           )}

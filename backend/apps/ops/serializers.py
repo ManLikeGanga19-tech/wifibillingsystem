@@ -8,6 +8,22 @@ from apps.provisioning.models import Router
 from .models import Equipment, Expense, Lead, Ticket
 
 
+def _emit_ticket(ticket, event: str) -> None:
+    """Fan a ticket event out to the ISP's webhooks (Settings > Developer). Best-effort."""
+    try:
+        from apps.developer.dispatch import emit_event
+
+        emit_event(ticket.operator, event, {
+            "id": ticket.pk,
+            "subject": ticket.subject,
+            "status": ticket.status,
+            "priority": ticket.priority,
+            "subscriber_phone": ticket.subscriber.phone if ticket.subscriber_id else "",
+        })
+    except Exception:  # pragma: no cover - defensive
+        pass
+
+
 class TicketSerializer(serializers.ModelSerializer):
     subscriber_phone = serializers.CharField(source="subscriber.phone", read_only=True, default="")
     # Tenant-scoped: cannot attach another ISP's customer or assign to their staff
@@ -34,14 +50,24 @@ class TicketSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["resolved_at"]
 
+    def create(self, validated_data):
+        ticket = super().create(validated_data)
+        _emit_ticket(ticket, "ticket.opened")
+        return ticket
+
     def update(self, instance, validated_data):
         new_status = validated_data.get("status", instance.status)
         is_closing = new_status in (Ticket.Status.RESOLVED, Ticket.Status.CLOSED)
+        was_resolved = instance.resolved_at is not None
         if is_closing and not instance.resolved_at:
             instance.resolved_at = timezone.now()
         elif new_status in Ticket.OPEN_STATUSES:
             instance.resolved_at = None
-        return super().update(instance, validated_data)
+        ticket = super().update(instance, validated_data)
+        # Fire only on the OPEN -> resolved edge, so re-saving a resolved ticket stays quiet.
+        if is_closing and not was_resolved:
+            _emit_ticket(ticket, "ticket.resolved")
+        return ticket
 
 
 class LeadSerializer(serializers.ModelSerializer):

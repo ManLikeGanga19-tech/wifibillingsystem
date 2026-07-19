@@ -552,6 +552,36 @@ export interface LoyaltySummary {
   top: { phone: string; points: number }[];
 }
 
+/** Settings > Developer — API tokens & webhooks. */
+export interface ApiToken {
+  id: number;
+  name: string;
+  prefix: string;
+  last_used_at: string | null;
+  created_at: string;
+  is_active: boolean;
+}
+/** Returned by create — the plaintext token, shown exactly once. */
+export interface NewApiToken extends ApiToken {
+  token: string;
+}
+export interface Webhook {
+  id: number;
+  label: string;
+  url: string;
+  events: string[];
+  is_active: boolean;
+  secret_preview: string;
+  last_delivered_at: string | null;
+  last_status: number | null;
+  last_error: string;
+  created_at: string;
+}
+export interface WebhookEvent {
+  key: string;
+  label: string;
+}
+
 /** Settings > AI Assistant. */
 export interface AISettings {
   provider: 'claude' | 'openai';
@@ -1165,6 +1195,31 @@ export const api = {
         body: JSON.stringify(data),
       }),
     summary: (q = '') => request<LoyaltySummary>(`/loyalty/summary/${q ? `?q=${encodeURIComponent(q)}` : ''}`),
+  },
+
+  developer: {
+    tokens: {
+      list: () => request<Paginated<ApiToken>>('/developer/tokens/').then((r) => r.results),
+      create: (name: string) =>
+        request<NewApiToken>('/developer/tokens/', {
+          method: 'POST',
+          body: JSON.stringify({ name }),
+        }),
+      revoke: (id: number) =>
+        request<void>(`/developer/tokens/${id}/`, { method: 'DELETE' }),
+    },
+    webhooks: {
+      list: () => request<Paginated<Webhook>>('/developer/webhooks/').then((r) => r.results),
+      create: (data: { label: string; url: string; secret?: string; events: string[] }) =>
+        request<Webhook & { secret: string }>('/developer/webhooks/', {
+          method: 'POST',
+          body: JSON.stringify(data),
+        }),
+      remove: (id: number) =>
+        request<void>(`/developer/webhooks/${id}/`, { method: 'DELETE' }),
+    },
+    events: () =>
+      request<{ events: WebhookEvent[] }>('/developer/webhook-events/').then((r) => r.events),
   },
 
   assistant: {

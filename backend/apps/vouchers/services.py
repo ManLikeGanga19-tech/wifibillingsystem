@@ -20,6 +20,16 @@ class VoucherError(Exception):
     pass
 
 
+def _emit(operator, event: str, data: dict) -> None:
+    """Fan a voucher event out to the ISP's webhooks — isolated so it can't break a redemption."""
+    try:
+        from apps.developer.dispatch import emit_event
+
+        emit_event(operator, event, data)
+    except Exception:
+        logger.exception("emit_event failed for %s", event)
+
+
 def _generate_code(prefix: str = "") -> str:
     body = "".join(secrets.choice(CODE_ALPHABET) for _ in range(CODE_LENGTH))
     return f"{prefix}{body}"[:20].upper()
@@ -85,6 +95,8 @@ def generate_batch(*, operator, plan, count: int, prefix: str = "", created_by=N
         plan=plan.name,
         batch_id=str(batch_id),
     )
+    _emit(operator, "voucher.generated",
+          {"batch_id": str(batch_id), "count": count, "plan": plan.name})
     return created
 
 
@@ -120,5 +132,7 @@ def redeem(*, code: str, mac: str = "", router=None):
 
         session = create_session_for_voucher(voucher, mac=mac, router=router)
         audit("voucher_redeemed", operator=voucher.operator, target=voucher, mac=mac)
+        _emit(voucher.operator, "voucher.redeemed",
+              {"code": voucher.code, "plan": voucher.plan.name, "mac": mac})
         db_transaction.on_commit(lambda: activate_session.delay(session.pk))
     return session

@@ -21,6 +21,28 @@ def _pppoe_password() -> str:
     return secrets.token_urlsafe(9)
 
 
+def _emit(operator, event: str, data: dict) -> None:
+    """Fan a subscriber/payment event out to the ISP's webhooks (Settings > Developer). Isolated
+    from the caller — a webhook must never break a suspension or a recorded payment."""
+    try:
+        from apps.developer.dispatch import emit_event
+
+        emit_event(operator, event, data)
+    except Exception:
+        logger.exception("emit_event failed for %s", event)
+
+
+def _client_payload(client) -> dict:
+    return {
+        "id": client.pk,
+        "account_number": client.account_number,
+        "full_name": client.full_name,
+        "phone": client.phone,
+        "plan": client.plan.name if client.plan_id else None,
+        "status": client.status,
+    }
+
+
 #: Account numbers are a random tail checked against the database. That check and the
 #: INSERT are not atomic, so two clients signing up at the same instant can both pass it
 #: and then collide on the unique column. Rare — but "rare" here means a real customer
@@ -57,6 +79,7 @@ def create_client(*, operator, plan: ServicePlan, router, created_by=None, **fie
                 continue
             raise
     audit("pppoe_client_created", operator=operator, actor=created_by, target=client)
+    _emit(operator, "subscriber.created", _client_payload(client))
     return client
 
 
@@ -90,6 +113,7 @@ def suspend_client(client: Client, *, reason: str = "overdue") -> None:
     client.status = Client.Status.SUSPENDED
     client.save(update_fields=["status", "updated_at"])
     audit("pppoe_client_suspended", operator=client.operator, target=client, reason=reason)
+    _emit(client.operator, "subscriber.paused", {**_client_payload(client), "reason": reason})
     # "Your package has expired — pay to reconnect." Best-effort.
     try:
         from apps.notifications.services import notify_pppoe_expired
@@ -106,6 +130,7 @@ def restore_client(client: Client) -> None:
     client.status = Client.Status.ACTIVE
     client.save(update_fields=["status", "updated_at"])
     audit("pppoe_client_restored", operator=client.operator, target=client)
+    _emit(client.operator, "subscriber.resumed", _client_payload(client))
 
 
 # ---- invoicing (anniversary) ----------------------------------------------
@@ -179,3 +204,5 @@ def record_client_payment(client: Client, amount: Decimal, *, source: str, memo:
         apply_payment_to_invoices(client)
     audit("pppoe_payment_recorded", operator=client.operator, target=client,
           amount=str(amount), source=source)
+    _emit(client.operator, "payment.received",
+          {**_client_payload(client), "amount": str(amount), "source": source})
