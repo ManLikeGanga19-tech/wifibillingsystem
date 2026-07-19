@@ -266,9 +266,11 @@ def expire_sessions():
 def check_router_health():
     from .adapters import ProvisioningAuthError, get_adapter
     from .models import Router, RouterHealthCheck
+    from .outages import on_router_offline, on_router_online
 
     for router in Router.objects.filter(is_active=True).exclude(management_host=""):
         was_online = router.status == Router.Status.ONLINE
+        was_offline = router.status == Router.Status.OFFLINE
         ok = False
         auth_failed = False
         try:
@@ -286,6 +288,14 @@ def check_router_health():
         # Offline -> online transition with valid creds: re-sync its sessions.
         if ok and not was_online:
             sync_router.delay(router.id)
+
+        # Operator alerts + outage compensation (Settings > Operator alerts). Only the real
+        # edges fire: a router that was ONLINE and just dropped, or was OFFLINE and just
+        # recovered. First contact (PENDING -> ONLINE) is neither a drop nor a recovery.
+        if was_online and not ok:
+            on_router_offline(router)
+        elif was_offline and ok:
+            on_router_online(router)
 
 
 def _apply_reachability(router, ok: bool, auth_failed: bool):

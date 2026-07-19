@@ -1,6 +1,7 @@
 from django.urls import path
 from rest_framework.routers import SimpleRouter
 
+from .alert_views import OperatorAlertSettingsView
 from .messaging_views import (
     ActivateProviderView,
     ConfigureProviderView,
@@ -20,6 +21,9 @@ urlpatterns = [
     # Settings > Message templates: the body of each automated customer SMS. MUST precede
     # the greedy settings/<channel>/ route below, or "templates" is read as a channel.
     path("settings/templates/", MessageTemplatesView.as_view(), name="messaging-templates"),
+    # Settings > Operator alerts: the ISP team's own notifications. Also precedes the greedy
+    # settings/<channel>/ route below, or "alerts" is read as a messaging channel.
+    path("settings/alerts/", OperatorAlertSettingsView.as_view(), name="operator-alerts"),
     # Settings > Communications: which gateway this ISP's messages leave on.
     path("settings/email/", EmailSettingsView.as_view(), name="messaging-email"),
     path("settings/test/", MessagingTestView.as_view(), name="messaging-test"),

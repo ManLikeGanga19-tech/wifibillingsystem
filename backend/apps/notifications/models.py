@@ -270,3 +270,43 @@ class MessageTemplate(OperatorOwnedModel):
 
     def __str__(self):
         return f"{self.key} template for {self.operator.slug}"
+
+
+class OperatorAlertSettings(models.Model):
+    """Settings > Operator alerts — the ISP TEAM's own notifications, not their customers'.
+
+    Three switches, all off by default (an ISP opts in):
+      * router status alerts — a text the moment a router drops or comes back;
+      * outage compensation — credit the downtime back to affected PPPoE subscribers' expiry
+        when the router recovers (driven by the same health monitoring);
+      * a daily sales digest emailed to the team so nobody has to log in to see yesterday.
+
+    These messages go to the OPERATOR, so they are deliberately NOT gated on
+    `notify_customers_sms` (that flag is about customer receipts) and NOT metered as customer
+    traffic — see notifications.services.send_operator_alert.
+    """
+
+    operator = models.OneToOneField(
+        Operator, on_delete=models.CASCADE, related_name="alert_settings"
+    )
+
+    # --- MikroTik status alerts ------------------------------------------------------
+    router_alerts_enabled = models.BooleanField(default=False)
+    #: Normalised MSISDNs to text on a router event. Empty = fall back to every admin
+    #: (the operator's owner logins + contact_phone), so "off" is never "nobody hears".
+    router_alert_phones = models.JSONField(default=list, blank=True)
+    #: Send router alerts over WhatsApp instead of SMS — honoured only when a WhatsApp
+    #: gateway is actually configured, otherwise we quietly fall back to SMS.
+    prefer_whatsapp = models.BooleanField(default=False)
+
+    # --- Outage compensation ---------------------------------------------------------
+    compensate_outages = models.BooleanField(default=False)
+
+    # --- Sales digest ----------------------------------------------------------------
+    sales_digest_enabled = models.BooleanField(default=False)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Alerts for {self.operator.slug}"

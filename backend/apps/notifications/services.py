@@ -22,6 +22,79 @@ SMS_MAX = 160
 SMS_HARD_MAX = 640
 
 
+# --- operator (team) alerts ------------------------------------------------------------
+# These go to the ISP's OWN people — "a router just went down" — not their customers. So
+# they skip the notify_customers_sms gate (that's a customer switch) and ride category=ALERT,
+# which notifications.tasks.send_message treats as non-billable (the ISP shouldn't pay us to
+# be told their kit is offline).
+
+
+def alert_settings_for(operator):
+    from .models import OperatorAlertSettings
+
+    row, _ = OperatorAlertSettings.objects.get_or_create(operator=operator)
+    return row
+
+
+def _operator_admin_phones(operator) -> list[str]:
+    """Every number that should hear an operator alert when no explicit list is set: the
+    ISP's owner logins plus their contact number. Deduped, digits only."""
+    from apps.accounts.models import Role, User
+
+    candidates = list(
+        User.objects.filter(operator=operator, role=Role.TENANT_OWNER)
+        .exclude(phone="")
+        .values_list("phone", flat=True)
+    )
+    if operator.contact_phone:
+        candidates.append(operator.contact_phone)
+    seen, out = set(), []
+    for raw in candidates:
+        p = (raw or "").strip()
+        if p.isdigit() and p not in seen:
+            seen.add(p)
+            out.append(p)
+    return out
+
+
+def send_operator_alert(operator, body: str, *, settings=None) -> int:
+    """Text the ISP's team a one-off alert (router up/down). Returns how many were queued.
+
+    Recipients: the explicit alert list if set, else every admin. Channel: WhatsApp when the
+    ISP prefers it AND a WhatsApp gateway is actually configured, otherwise SMS — a preference
+    for a channel that can't send is silently downgraded rather than dropped."""
+    from .models import Channel, MessagingSettings
+    from .models import Message as _Message
+
+    conf = settings or alert_settings_for(operator)
+    numbers = [str(p) for p in (conf.router_alert_phones or []) if str(p).isdigit()]
+    if not numbers:
+        numbers = _operator_admin_phones(operator)
+    if not numbers:
+        return 0
+
+    channel = Channel.SMS
+    if conf.prefer_whatsapp:
+        ms = MessagingSettings.objects.filter(operator=operator).first()
+        if ms and ms.whatsapp_provider:
+            channel = Channel.WHATSAPP
+
+    from .tasks import send_message
+
+    queued = 0
+    for number in numbers:
+        msg = _Message.objects.create(
+            operator=operator,
+            to_phone=number,
+            channel=channel,
+            category=_Message.Category.ALERT,
+            body=body[:SMS_HARD_MAX],
+        )
+        db_transaction.on_commit(lambda pk=msg.pk: send_message.delay(pk))
+        queued += 1
+    return queued
+
+
 def send_sms(operator, to_phone: str, body: str, *, category=Message.Category.OTHER):
     """Queue one transactional SMS to a customer. Returns the Message, or None if it
     was suppressed (no number, or the ISP switched customer SMS off).

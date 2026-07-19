@@ -170,6 +170,11 @@ class Client(OperatorOwnedModel):
         help_text="Running credit; unpaid invoices reduce it",
     )
     next_due_date = models.DateField(null=True, blank=True)
+    # Outage compensation (Settings > Operator alerts) accrues downtime here in SECONDS,
+    # because next_due_date is day-granular: a 4-hour outage is real credit but not a whole
+    # day, so we bank the seconds and roll a day onto next_due_date each time the balance
+    # crosses 24h. Precise both ways — the subscriber loses nothing, the ISP over-credits no one.
+    outage_credit_seconds = models.PositiveIntegerField(default=0)
     installed_at = models.DateField(null=True, blank=True)
     # The next_due_date we last sent a pre-expiry reminder for. Stored (not a bool) so a
     # RENEWAL — which moves next_due_date forward — automatically re-arms the reminder,

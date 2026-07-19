@@ -281,6 +281,12 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.provisioning.tasks.sync_all_routers",
         "schedule": crontab(minute=0, hour=3),
     },
+    # Daily sales digest to opted-in ISPs (Settings > Operator alerts). Morning, after the
+    # prior day has fully closed, so the figure is final.
+    "send-sales-digests": {
+        "task": "apps.notifications.tasks.send_sales_digests",
+        "schedule": crontab(minute=30, hour=6),
+    },
 }
 
 # Settlement verification auto-activates an ISP (live in minutes, no human in the

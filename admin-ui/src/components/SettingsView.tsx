@@ -6,6 +6,7 @@ import DomainPanel from './settings/DomainPanel';
 import HotspotPanel from './settings/HotspotPanel';
 import MessageTemplatesPanel from './settings/MessageTemplatesPanel';
 import LoyaltyPanel from './settings/LoyaltyPanel';
+import AlertsPanel from './settings/AlertsPanel';
 import EmailPanel from './settings/EmailPanel';
 import PaymentsPanel from './settings/PaymentsPanel';
 import PppoePanel from './settings/PppoePanel';
@@ -177,9 +178,7 @@ export default function SettingsView({
           {active === 'whatsapp' && <CommsPanel channel="whatsapp" />}
           {active === 'templates' && <MessageTemplatesPanel />}
           {active === 'loyalty' && <LoyaltyPanel />}
-          {active === 'alerts' && (
-            <Placeholder title="Operator alerts" blurb="Get told when a router goes down, and a daily sales digest." />
-          )}
+          {active === 'alerts' && <AlertsPanel />}
           {active === 'ai' && (
             <Placeholder title="AI Assistant" blurb="Plug in an AI provider and API key to help you run support and analytics." />
           )}

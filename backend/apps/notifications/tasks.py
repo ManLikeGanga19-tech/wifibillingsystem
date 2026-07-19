@@ -1,4 +1,5 @@
 import logging
+from decimal import Decimal
 
 from celery import shared_task
 from django.db.models import F
@@ -192,3 +193,92 @@ def warn_low_platform_balance():
         warned += 1
 
     return warned
+
+
+def _digest_recipients(operator) -> list[str]:
+    """Who a sales digest emails: the ISP's owner login(s) and their contact address, deduped.
+    The login address is the durable one; contact_email is a nice-to-have they can edit."""
+    from apps.accounts.models import Role
+
+    emails = list(
+        operator.users.filter(role=Role.TENANT_OWNER)
+        .exclude(email="")
+        .values_list("email", flat=True)
+    )
+    if operator.contact_email:
+        emails.append(operator.contact_email)
+    seen, out = set(), []
+    for e in emails:
+        e = (e or "").strip()
+        if e and e.lower() not in seen:
+            seen.add(e.lower())
+            out.append(e)
+    return out
+
+
+@shared_task
+def send_sales_digests():
+    """Daily: email each opted-in ISP yesterday's takings, so the team can see the day without
+    logging in (Settings > Operator alerts). Reads the SALE ledger — the same gross figure the
+    dashboard shows — so the email and the console never disagree."""
+    from datetime import datetime, time, timedelta
+
+    from django.conf import settings as dj_settings
+    from django.core.mail import send_mail
+    from django.db.models import Count, Sum
+    from django.db.models.functions import Coalesce
+
+    from apps.billing.models import LedgerEntry
+
+    from .models import OperatorAlertSettings
+
+    today = timezone.localdate()
+    yesterday = today - timedelta(days=1)
+    start = timezone.make_aware(datetime.combine(yesterday, time.min))
+    end = timezone.make_aware(datetime.combine(today, time.min))
+    from_email = getattr(dj_settings, "DEFAULT_FROM_EMAIL", "noreply@wifios.co.ke")
+    label = yesterday.strftime("%a %d %b %Y")
+
+    sent = 0
+    for conf in OperatorAlertSettings.objects.filter(sales_digest_enabled=True).select_related(
+        "operator"
+    ):
+        operator = conf.operator
+        recipients = _digest_recipients(operator)
+        if not recipients:
+            continue
+
+        agg = LedgerEntry.objects.filter(
+            operator=operator,
+            entry_type=LedgerEntry.Type.SALE,
+            created_at__gte=start,
+            created_at__lt=end,
+        ).aggregate(
+            gross=Coalesce(Sum("amount"), Decimal("0")),
+            payments=Count("id"),
+        )
+        gross, payments = agg["gross"], agg["payments"]
+
+        if payments:
+            headline = f"KES {gross:,.0f} from {payments} payment{'s' if payments != 1 else ''}"
+        else:
+            headline = "No payments"
+        body = (
+            f"Hi,\n\n"
+            f"{operator.name} — sales for {label}:\n\n"
+            f"    {headline}\n\n"
+            "See the full breakdown in your console under Reports.\n\n"
+            "You're getting this because the daily sales digest is on in "
+            "Settings > Operator alerts.\n\n"
+            "— WIFI.OS"
+        )
+        try:
+            send_mail(
+                f"{operator.name}: sales for {label} — KES {gross:,.0f}",
+                body, from_email, recipients, fail_silently=False,
+            )
+            sent += 1
+        except Exception:
+            logger.exception("Could not send the sales digest for %s", operator.slug)
+
+    return sent

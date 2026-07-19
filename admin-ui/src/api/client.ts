@@ -552,6 +552,16 @@ export interface LoyaltySummary {
   top: { phone: string; points: number }[];
 }
 
+/** Settings > Operator alerts. */
+export interface OperatorAlertSettings {
+  router_alerts_enabled: boolean;
+  /** Normalised 2547XXXXXXXX. Empty = notify every admin. */
+  router_alert_phones: string[];
+  prefer_whatsapp: boolean;
+  compensate_outages: boolean;
+  sales_digest_enabled: boolean;
+}
+
 /** Returned as a 409 when adding/moving a client onto a full sector. */
 export interface CapacityWarning {
   code: 'sector_at_capacity';
@@ -1140,6 +1150,15 @@ export const api = {
         body: JSON.stringify(data),
       }),
     summary: (q = '') => request<LoyaltySummary>(`/loyalty/summary/${q ? `?q=${encodeURIComponent(q)}` : ''}`),
+  },
+
+  alerts: {
+    get: () => request<OperatorAlertSettings>('/notifications/settings/alerts/'),
+    update: (data: Partial<OperatorAlertSettings>) =>
+      request<OperatorAlertSettings>('/notifications/settings/alerts/', {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      }),
   },
 
   domain: {

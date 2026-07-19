@@ -1,6 +1,7 @@
 import secrets
 
 from django.db import models
+from django.utils import timezone
 
 from apps.core.fields import EncryptedTextField
 from apps.core.models import OperatorOwnedModel
@@ -121,6 +122,46 @@ class RouterHealthCheck(models.Model):
 
     def __str__(self):
         return f"{self.router.name} {'up' if self.online else 'down'} @ {self.checked_at}"
+
+
+class RouterOutage(models.Model):
+    """One continuous stretch of a router being unreachable — opened when health monitoring
+    first sees it down, closed when it comes back.
+
+    It exists so outage compensation (Settings > Operator alerts) can credit each affected
+    PPPoE subscriber the downtime EXACTLY ONCE per outage, and so the ISP has a record of
+    when their sites were down. The open row (ended_at IS NULL) is the "currently down" flag;
+    there is at most one open outage per router.
+    """
+
+    router = models.ForeignKey(Router, on_delete=models.CASCADE, related_name="outages")
+    started_at = models.DateTimeField()
+    ended_at = models.DateTimeField(null=True, blank=True)
+
+    #: Set when recovery credited affected subscribers, so a re-run never double-credits.
+    compensated_at = models.DateTimeField(null=True, blank=True)
+    #: How many PPPoE clients had their expiry extended, and by how long (audit trail).
+    compensated_clients = models.PositiveIntegerField(default=0)
+    credited_seconds = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["-started_at"]
+        constraints = [
+            # At most one OPEN outage per router — the "is it down right now" invariant.
+            models.UniqueConstraint(
+                fields=["router"], condition=models.Q(ended_at__isnull=True),
+                name="one_open_outage_per_router",
+            )
+        ]
+
+    def __str__(self):
+        state = "ongoing" if self.ended_at is None else f"ended {self.ended_at}"
+        return f"{self.router.name} outage from {self.started_at} ({state})"
+
+    @property
+    def duration_seconds(self) -> int:
+        end = self.ended_at or timezone.now()
+        return max(0, int((end - self.started_at).total_seconds()))
 
 
 class Session(OperatorOwnedModel):
