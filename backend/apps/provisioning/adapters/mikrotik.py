@@ -252,6 +252,34 @@ class MikroTikRestAdapter(ProvisioningAdapter):
         rows = resp.json()
         return rows[0][".id"] if rows else None
 
+    def _pppoe_addressing(self, client_http) -> dict:
+        """The local-address (gateway) + remote-address (pool) a plan profile must carry.
+
+        A PPP secret is authenticated against its OWN profile, and if that profile has no
+        addressing the client comes up with no IP — authenticated but dead. Plan profiles
+        the platform creates therefore have to carry addressing too. We READ it from the
+        PPPoE server's default profile rather than hard-coding a pool, so this honours
+        whatever the ISP set up and works unchanged on any router. Empty if the ISP uses a
+        bridged/other scheme with no pool — we never invent one.
+        """
+        servers = client_http.get("/ppp/profile", params={"name": "pppoe-default"}).json()
+        # Prefer the pppoe-server's declared default profile; fall back to `pppoe-default`.
+        try:
+            srv = client_http.get("/interface/pppoe-server/server").json()
+            dp = srv[0].get("default-profile") if srv else None
+            if dp:
+                servers = client_http.get("/ppp/profile", params={"name": dp}).json()
+        except (httpx.HTTPError, IndexError, KeyError):
+            pass
+        if not servers:
+            return {}
+        p = servers[0]
+        return {
+            k: p[k]
+            for k in ("local-address", "remote-address")
+            if p.get(k)
+        }
+
     def ensure_pppoe_profile(self, plan) -> ProvisionResult:
         payload = {
             "name": plan.mikrotik_profile,
@@ -260,6 +288,9 @@ class MikroTikRestAdapter(ProvisioningAdapter):
         }
         try:
             with self._client() as c:
+                # Carry the same pool + gateway the ISP's PPPoE server hands out, or an
+                # authenticated client on this plan would get no IP.
+                payload.update(self._pppoe_addressing(c))
                 existing = self._find_id(c, "/ppp/profile", name=plan.mikrotik_profile)
                 if existing:
                     c.patch(f"/ppp/profile/{existing}", json=payload).raise_for_status()
