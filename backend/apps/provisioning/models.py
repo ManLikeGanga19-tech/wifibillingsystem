@@ -76,6 +76,26 @@ class Router(OperatorOwnedModel):
     # wiped the API user). Cleared on the next successful connection.
     onboarding_required = models.BooleanField(default=False)
 
+    # --- WireGuard management plane (docs/WIREGUARD_MANAGEMENT_PLANE.md) ---
+    # The router dials the hub outbound, so CGNAT is irrelevant; the control plane then
+    # reaches it back at overlay_ip. The private key is Fernet-encrypted at rest; the
+    # public key is public by definition and must be registered on the hub. overlay_ip is
+    # the router's /32 on the overlay — unique, since two routers on one /32 would be an
+    # L3 cross-tenant breach.
+    wg_private_key = EncryptedTextField(blank=True)
+    wg_public_key = models.CharField(max_length=64, blank=True)
+    overlay_ip = models.GenericIPAddressField(
+        protocol="IPv4",
+        null=True,
+        blank=True,
+        unique=True,
+        help_text="The /32 this router holds on the management overlay",
+    )
+    wg_enrolled_at = models.DateTimeField(null=True, blank=True)
+    # Last handshake the hub saw from this peer — an independent liveness signal from the
+    # REST check: a dead tunnel means unreachable no matter what a stale API check says.
+    wg_last_handshake_at = models.DateTimeField(null=True, blank=True)
+
     def __str__(self):
         return f"{self.name} ({self.management_host or 'not enrolled'})"
 

@@ -317,6 +317,19 @@ DARAJA_CALLBACK_TOKEN = os.getenv("DARAJA_CALLBACK_TOKEN", "dev-callback-token")
 # login page on every router — see provisioning.onboarding and core.domains.
 TENANT_BASE_DOMAIN = os.getenv("TENANT_BASE_DOMAIN", "wifios.co.ke")
 
+# --- WireGuard management plane (docs/WIREGUARD_MANAGEMENT_PLANE.md) ---
+# Every router dials the hub outbound (CGNAT-proof); the control plane addresses it back at
+# its overlay /32. NONE of these are secrets: WireGuard public keys and the hub endpoint are
+# public by definition. The only secret — each router's PRIVATE key — is generated per-router
+# and stored Fernet-encrypted (never here), honouring the no-secrets-in-code rule.
+WG_OVERLAY_CIDR = os.getenv("WG_OVERLAY_CIDR", "10.88.0.0/16")
+WG_HUB_IP = os.getenv("WG_HUB_IP", "10.88.0.1")
+# host:port the router dials, e.g. hub.wifios.co.ke:51820. Empty until the hub is stood up.
+WG_HUB_ENDPOINT = os.getenv("WG_HUB_ENDPOINT", "")
+# The hub's WireGuard public key (public by definition), pasted into each router's peer.
+WG_HUB_PUBLIC_KEY = os.getenv("WG_HUB_PUBLIC_KEY", "")
+WG_KEEPALIVE_SECONDS = int(os.getenv("WG_KEEPALIVE_SECONDS", "25"))
+
 # Dev/staging escape hatch: when set, routers redirect HERE instead of the tenant's real
 # subdomain (which does not resolve from a laptop or an ngrok tunnel). Unset in
 # production, where each ISP's portal genuinely lives on their own subdomain.
