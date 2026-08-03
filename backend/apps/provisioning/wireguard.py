@@ -51,6 +51,45 @@ def _free_overlay_ip(used: set[str]) -> str:
     raise OverlayExhausted(f"No free overlay IP in {settings.WG_OVERLAY_CIDR}")
 
 
+def hub_configured() -> bool:
+    """True once the WireGuard hub exists (endpoint + public key set). Until then the
+    platform falls back to the LAN / phone-home-source-IP model, so onboarding still works
+    before the hub is stood up."""
+    return bool(settings.WG_HUB_ENDPOINT and settings.WG_HUB_PUBLIC_KEY)
+
+
+def render_router_wg_setup(router) -> str:
+    """RouterOS commands that stand up the router's end of the management tunnel.
+
+    Idempotent (safe to re-paste). Returns '' if the hub isn't configured or the router has
+    no identity yet — the caller then keeps the pre-WireGuard behaviour. The private key is
+    embedded here by design: it is fetched once over TLS and lives only on the router and in
+    our encrypted column, never in a browser store (no-browser-storage rule)."""
+    if not (hub_configured() and router.overlay_ip and router.wg_private_key):
+        return ""
+    host, _, port = settings.WG_HUB_ENDPOINT.partition(":")
+    port = port or "51820"
+    cidr = settings.WG_OVERLAY_CIDR
+    keepalive = settings.WG_KEEPALIVE_SECONDS
+    hub_key = settings.WG_HUB_PUBLIC_KEY
+    peer = (
+        "/interface wireguard peers add interface=wg-wifios "
+        f'public-key="{hub_key}" endpoint-address={host} endpoint-port={port} '
+        f"allowed-address={cidr} persistent-keepalive={keepalive}s"
+    )
+    return "\n".join(
+        [
+            "# --- WireGuard management tunnel (router dials the hub; CGNAT-proof) ---",
+            ':if ([/interface wireguard find name=wg-wifios]="") '
+            "do={ /interface wireguard add name=wg-wifios }",
+            f'/interface wireguard set [find name=wg-wifios] private-key="{router.wg_private_key}"',
+            f':if ([/ip address find interface=wg-wifios]="") '
+            f"do={{ /ip address add address={router.overlay_ip}/32 interface=wg-wifios }}",
+            f':if ([/interface wireguard peers find interface=wg-wifios]="") do={{ {peer} }}',
+        ]
+    )
+
+
 def ensure_wireguard_identity(router) -> bool:
     """Idempotently give a router a keypair + overlay IP. Returns True if anything changed.
 

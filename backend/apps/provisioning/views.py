@@ -136,11 +136,19 @@ def router_enroll(request):
     if router is None:
         return Response({"detail": "Unknown enrollment token"}, status=status.HTTP_404_NOT_FOUND)
 
-    # The IP the platform sees is where it must reach the router back
+    # Where we reach the router back. With the WireGuard hub live, that's the router's
+    # stable overlay /32 — never its public/CGNAT source IP. Before the hub exists we fall
+    # back to the IP the platform saw the phone-home come from (the pilot LAN model).
+    from .wireguard import hub_configured
+
     xff = request.META.get("HTTP_X_FORWARDED_FOR", "")
     source_ip = (xff.split(",")[0].strip() if xff else "") or request.META.get("REMOTE_ADDR", "")
 
-    router.management_host = source_ip
+    if hub_configured() and router.overlay_ip:
+        router.management_host = router.overlay_ip
+        router.wg_enrolled_at = timezone.now()
+    else:
+        router.management_host = source_ip
     router.api_port = 80  # REST over www; production tightens to 443
     router.use_tls = False
     router.password = payload.get("api_password", "")
