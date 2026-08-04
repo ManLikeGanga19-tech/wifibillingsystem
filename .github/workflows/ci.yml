@@ -15,7 +15,7 @@ name: CI
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, staging]
   pull_request:
 
 concurrency:
@@ -191,16 +191,18 @@ jobs:
           ignore-unfixed: true
 
   # ---------------------------------------------------------------------------
-  # Deploy to STAGING — only after every check above is green, only on main, only
-  # on a real push (never a PR). This is why we stopped deploying by hand: a broken
-  # build, a missing migration, or a committed secret never reaches the box, because
-  # the deploy job simply doesn't run unless backend + frontends + audit + images all
-  # pass first.
+  # Deploy to STAGING — only after every check above is green, only on the `staging`
+  # branch, only on a real push (never a PR). `main` is reserved for PRODUCTION and is
+  # deliberately NOT a deploy trigger here, so a merge to main never touches the staging
+  # box (and won't touch production until a production deploy job is added). This is why
+  # we stopped deploying by hand: a broken build, a missing migration, or a committed
+  # secret never reaches the box, because deploy doesn't run unless backend + frontends
+  # + audit + images all pass first.
   # ---------------------------------------------------------------------------
   deploy:
     name: Deploy to staging
     needs: [backend, frontends, audit, images]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.ref == 'refs/heads/staging' && github.event_name == 'push'
     runs-on: ubuntu-latest
     concurrency:
       group: deploy-staging
