@@ -217,26 +217,32 @@ def credit_sale(tx, *, settlement: str = Settlement.PLATFORM) -> None:
     )
 
 
-def request_payout(*, operator, amount: Decimal, user, method="mpesa", destination=None) -> Payout:
-    """Funds are debited (held) immediately so concurrent requests can't
-    double-spend the balance. `destination` carries the method-specific details
-    (phone for M-Pesa; bank_name/account for bank).
+def request_payout(*, operator, amount: Decimal, user) -> Payout:
+    """Withdraw to the operator's VERIFIED settlement account — the ONLY place a payout
+    destination is ever set. Changing that account needs a code emailed to the owner, so
+    the withdraw call itself carries nothing but an amount: it can never redirect money
+    to an account someone typed into the withdraw box. That closes the hole where anyone
+    in the console could drain the wallet to their own number, bypassing the change-code.
 
-    THE ONE-PAYOUT CAP: if a previous payout is still awaiting confirmation, no
-    further payout may leave. The ISP gets their first withdrawal in full and at
-    once — but that payout carries a code, and until they read it back we do not
-    know the money actually landed where they said. Blocking here is what caps a
-    wrong (or hijacked) destination at a single payout instead of an open drain.
+    Funds are debited (held) immediately so concurrent requests can't double-spend.
+
+    THE ONE-PAYOUT CAP: if a previous payout is still awaiting confirmation, no further
+    payout may leave. The ISP gets their first withdrawal in full and at once — but that
+    payout carries a code, and until they read it back we don't know the money landed
+    where they said. Blocking here caps a wrong (or hijacked) destination at a single
+    payout instead of an open drain.
     """
     from apps.core.settlement import (
         new_confirmation_code,
         payout_awaiting_confirmation,
     )
 
-    destination = destination or {}
     amount = Decimal(amount).quantize(Decimal("0.01"))
     if amount < MINIMUM_PAYOUT:
         raise WalletError(f"Minimum withdrawal is KSh {MINIMUM_PAYOUT}.")
+
+    if not operator.has_settlement_account:
+        raise WalletError("Add your payout account in Settings before withdrawing.")
 
     unconfirmed = payout_awaiting_confirmation(operator)
     if unconfirmed is not None:
@@ -245,30 +251,31 @@ def request_payout(*, operator, amount: Decimal, user, method="mpesa", destinati
             "from your statement and your payouts unlock permanently."
         )
 
+    # Destination comes ONLY from the settlement account — never from the request.
+    Settlement = operator.Settlement
+    method = operator.settlement_method
     fields = {"method": method}
-    if method == Payout.Method.BANK:
-        if not (destination.get("bank_name") and destination.get("bank_account_number")):
-            raise WalletError("Bank name and account number are required for a bank withdrawal.")
+    if method == Settlement.MPESA:
+        fields["phone"] = operator.payout_phone
+        dest_label = f"M-Pesa {operator.payout_phone}"
+    elif method == Settlement.PAYBILL:
         fields.update(
-            bank_name=destination["bank_name"],
-            bank_account_number=destination["bank_account_number"],
-            bank_account_name=destination.get("bank_account_name", ""),
+            paybill=operator.settlement_paybill,
+            paybill_account=operator.settlement_paybill_account,
         )
-        dest_label = f"{fields['bank_name']} {fields['bank_account_number']}"
-    elif method == Payout.Method.PAYBILL:
-        if not (destination.get("paybill") and destination.get("paybill_account")):
-            raise WalletError(
-                "A paybill number and account number are required for a paybill withdrawal."
-            )
+        dest_label = (
+            f"Paybill {operator.settlement_paybill} "
+            f"acct {operator.settlement_paybill_account}"
+        )
+    elif method == Settlement.BANK:
         fields.update(
-            paybill=destination["paybill"], paybill_account=destination["paybill_account"]
+            bank_name=operator.payout_bank_name,
+            bank_account_number=operator.payout_bank_account_number,
+            bank_account_name=operator.payout_bank_account_name,
         )
-        dest_label = f"Paybill {fields['paybill']} acct {fields['paybill_account']}"
+        dest_label = f"{operator.payout_bank_name} {operator.payout_bank_account_number}"
     else:
-        if not destination.get("phone"):
-            raise WalletError("An M-Pesa number is required.")
-        fields["phone"] = destination["phone"]
-        dest_label = fields["phone"]
+        raise WalletError("Add your payout account in Settings before withdrawing.")
 
     from .tariffs import payout_cost
 
@@ -313,11 +320,16 @@ def request_payout(*, operator, amount: Decimal, user, method="mpesa", destinati
     return payout
 
 
-def payout_quote(operator, amount: Decimal, method: str = "mpesa") -> dict:
+def payout_quote(operator, amount: Decimal) -> dict:
     """What a withdrawal WOULD cost, for the console to show before the ISP commits: the amount,
-    the transfer cost they'll bear, and what actually reaches them. No money moves."""
+    the transfer cost they'll bear, what actually reaches them, and WHERE it's going. No money
+    moves. The rail (and so the cost) follows the verified settlement account — the ISP never
+    picks a method at withdrawal time."""
     from .tariffs import payout_cost
 
+    # The rail is whatever their settlement account is; default to M-Pesa's schedule
+    # until they've set one up (the withdraw call will refuse anyway).
+    method = operator.settlement_method or "mpesa"
     amount = Decimal(amount or 0).quantize(Decimal("0.01"))
     cost = payout_cost(amount, method) if amount > 0 else Decimal("0.00")
     where = "your bank" if method == "bank" else "Safaricom"
@@ -326,6 +338,8 @@ def payout_quote(operator, amount: Decimal, method: str = "mpesa") -> dict:
         "cost": str(cost),
         "net": str(max(Decimal("0.00"), amount - cost)),
         "cost_destination": where,
+        "destination": operator.settlement_destination,
+        "has_account": operator.has_settlement_account,
         "note": (
             f"The KSh {cost} transfer cost is charged by {where} to move the money — it is not a "
             "WIFI.OS charge. You receive the amount minus this cost."

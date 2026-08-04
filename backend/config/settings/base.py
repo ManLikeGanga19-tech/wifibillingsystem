@@ -278,9 +278,13 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.payments.tasks.reconcile_pending_transactions",
         "schedule": 20.0,
     },
+    # Every 60s (was 300s) so a rebooted router recovers in the console on its own within
+    # ~a minute of its tunnel re-forming, instead of sitting "offline" for up to 5. The
+    # floor below that is the router's own boot + WireGuard re-dial. Manual "resync" does a
+    # live check for instant on-demand recovery.
     "check-router-health": {
         "task": "apps.provisioning.tasks.check_router_health",
-        "schedule": 300.0,
+        "schedule": 60.0,
     },
     "sync-all-routers-nightly": {
         "task": "apps.provisioning.tasks.sync_all_routers",

@@ -45,17 +45,10 @@ class PayoutSerializer(serializers.ModelSerializer):
 
 
 class WithdrawSerializer(serializers.Serializer):
+    """A withdrawal is only an AMOUNT. The destination is the verified settlement
+    account — never submitted here, so it can't be redirected without the change-code."""
+
     amount = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=1)
-    method = serializers.ChoiceField(choices=["mpesa", "paybill", "bank"], default="mpesa")
-    # M-Pesa
-    phone = serializers.CharField(max_length=20, required=False, allow_blank=True)
-    # Paybill (B2B) — the ISP's own shortcode + the account to credit at it
-    paybill = serializers.CharField(max_length=20, required=False, allow_blank=True)
-    paybill_account = serializers.CharField(max_length=40, required=False, allow_blank=True)
-    # Bank
-    bank_name = serializers.CharField(max_length=80, required=False, allow_blank=True)
-    bank_account_number = serializers.CharField(max_length=40, required=False, allow_blank=True)
-    bank_account_name = serializers.CharField(max_length=120, required=False, allow_blank=True)
     #: The 6-digit code from the ISP owner's authenticator app — or one of their
     #: recovery codes. Required: this is money leaving our custody.
     mfa_code = serializers.CharField(max_length=32, required=False, allow_blank=True)

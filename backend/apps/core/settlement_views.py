@@ -30,6 +30,8 @@ from .tenancy import acting_tenant
 
 class SettlementSerializer(serializers.Serializer):
     method = serializers.ChoiceField(choices=Operator.Settlement.choices)
+    # M-Pesa personal (the common case for a small ISP with no registered business)
+    payout_phone = serializers.CharField(max_length=20, required=False, allow_blank=True)
     # paybill
     settlement_paybill = serializers.CharField(max_length=20, required=False, allow_blank=True)
     settlement_paybill_account = serializers.CharField(
@@ -90,7 +92,8 @@ def _state(op: Operator) -> dict:
     return {
         "method": op.settlement_method or None,
         "destination": op.settlement_destination or None,
-        # Raw fields so the withdrawal walkthrough can pre-fill the registered destination.
+        # Raw fields so the settlement form can pre-fill the registered destination.
+        "payout_phone": op.payout_phone or "",
         "paybill": op.settlement_paybill or "",
         "paybill_account": op.settlement_paybill_account or "",
         "bank_name": op.payout_bank_name or "",
@@ -115,13 +118,9 @@ def _state(op: Operator) -> dict:
             if pending
             else None
         ),
-        # Said out loud, because every ISP asks.
-        "explainer": (
-            "Your customers always pay WIFI.OS, never you directly. We hold that "
-            "money, attribute every shilling to you in a ledger you can see, and "
-            "absorb the cost of collecting it. When you withdraw, the transfer fee "
-            "(M-Pesa or bank) is charged by the rail and comes off what you receive."
-        ),
+        # One line only — the full "why we hold the money" explanation lives in the
+        # Terms of Service now, not on the payment form.
+        "explainer": "You can change this anytime; it takes a code we email you.",
     }
 
 

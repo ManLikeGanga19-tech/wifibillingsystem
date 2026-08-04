@@ -223,7 +223,20 @@ def set_settlement_account(
     was_confirmed = operator.settlement_verified_at is not None
     old_destination = operator.settlement_destination
 
-    if method == Operator.Settlement.PAYBILL:
+    if method == Operator.Settlement.MPESA:
+        # The common case for a tiny ISP with no registered business: pay their own
+        # M-Pesa line. The name is whatever the line is registered under — personal is
+        # fine.
+        from apps.core.phone import InvalidPhoneError, normalize_msisdn
+
+        try:
+            operator.payout_phone = normalize_msisdn(fields.get("payout_phone") or "")
+        except InvalidPhoneError:
+            raise SettlementError("Enter a valid M-Pesa phone number.") from None
+        operator.settlement_name = (fields.get("settlement_name") or "").strip()
+        if not operator.settlement_name:
+            raise SettlementError("Tell us the name on that M-Pesa line.")
+    elif method == Operator.Settlement.PAYBILL:
         paybill = (fields.get("settlement_paybill") or "").strip()
         if not paybill.isdigit():
             raise SettlementError("A paybill number must be digits only.")
@@ -236,7 +249,7 @@ def set_settlement_account(
         operator.settlement_paybill_account = account
         operator.settlement_name = (fields.get("settlement_name") or "").strip()
         if not operator.settlement_name:
-            raise SettlementError("Tell us the business name registered on that paybill.")
+            raise SettlementError("Tell us the name registered on that paybill.")
     elif method == Operator.Settlement.BANK:
         bank = (fields.get("payout_bank_name") or "").strip()
         acct = (fields.get("payout_bank_account_number") or "").strip()
@@ -249,7 +262,7 @@ def set_settlement_account(
         ).strip()
         operator.settlement_name = operator.payout_bank_account_name
     else:
-        raise SettlementError("Choose a paybill or a bank account.")
+        raise SettlementError("Choose M-Pesa, a paybill, or a bank account.")
 
     operator.settlement_method = method
     # A new destination is an unconfirmed destination — always.

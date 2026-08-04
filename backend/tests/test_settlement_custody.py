@@ -107,8 +107,6 @@ def test_a_payout_CANNOT_be_funded_by_a_direct_sale():
             operator=operator,
             amount=Decimal("1000.00"),
             user=owner_of(operator),
-            method="mpesa",
-            destination={"phone": "254700000001"},
         )
 
     assert not LedgerEntry.objects.filter(
@@ -127,8 +125,6 @@ def test_a_payout_may_take_exactly_what_we_hold_and_not_one_shilling_more():
             operator=operator,
             amount=Decimal("1000.01"),
             user=owner_of(operator),
-            method="mpesa",
-            destination={"phone": "254700000001"},
         )
 
     # ...and exactly the held amount is allowed.
@@ -136,8 +132,6 @@ def test_a_payout_may_take_exactly_what_we_hold_and_not_one_shilling_more():
         operator=operator,
         amount=Decimal("1000.00"),
         user=owner_of(operator),
-        method="mpesa",
-        destination={"phone": "254700000001"},
     )
 
     assert payout.amount == Decimal("1000.00")
@@ -154,8 +148,6 @@ def test_the_payout_hold_itself_is_platform_money():
         operator=operator,
         amount=Decimal("500.00"),
         user=owner_of(operator),
-        method="mpesa",
-        destination={"phone": "254700000001"},
     )
 
     debit = LedgerEntry.objects.get(operator=operator, entry_type=LedgerEntry.Type.PAYOUT)

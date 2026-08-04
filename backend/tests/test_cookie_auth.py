@@ -82,6 +82,33 @@ class TestCookieLogin:
         assert resp.status_code == 200
         assert resp.cookies[ACCESS_COOKIE].value
 
+    def test_refresh_slides_the_session(self):
+        """Refresh re-issues BOTH cookies, so an active user's 7-day window moves
+        forward from last activity and they are never logged out mid-work."""
+        user = make_user(is_staff=True)
+        c = APIClient()
+        c.post(
+            "/api/v1/auth/login/", {"phone": user.phone, "password": PASSWORD}, format="json"
+        )
+        old_refresh = c.cookies[REFRESH_COOKIE].value
+        resp = c.post("/api/v1/auth/refresh/")
+        assert resp.status_code == 200
+        assert resp.cookies[ACCESS_COOKIE].value  # new access
+        assert resp.cookies[REFRESH_COOKIE].value  # new refresh (sliding)
+        assert resp.cookies[REFRESH_COOKIE].value != old_refresh
+
+    def test_refresh_for_deactivated_user_is_rejected(self):
+        user = make_user(is_staff=True)
+        c = APIClient()
+        c.post(
+            "/api/v1/auth/login/", {"phone": user.phone, "password": PASSWORD}, format="json"
+        )
+        user.is_active = False
+        user.save(update_fields=["is_active"])
+        resp = c.post("/api/v1/auth/refresh/")
+        assert resp.status_code == 401
+        assert resp.cookies[REFRESH_COOKIE].value == ""  # cookie cleared
+
     def test_refresh_without_a_session_is_401(self):
         assert APIClient().post("/api/v1/auth/refresh/").status_code == 401
 
