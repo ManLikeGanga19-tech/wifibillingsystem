@@ -26,8 +26,6 @@ from apps.billing.services import (
     withdrawable_balance,
 )
 
-from apps.core.settlement import set_settlement_account
-
 from .factories import OperatorFactory, TransactionFactory, UserFactory
 
 pytestmark = pytest.mark.django_db
@@ -117,11 +115,10 @@ def test_an_aggregator_isp_with_a_wallet_owes_nothing_even_with_fees():
 
 def test_a_payout_is_capped_at_available_after_what_they_owe():
     """You cannot withdraw money we are keeping to cover your unpaid fee."""
+    # The factory already gives the operator a verified settlement account, so the payout
+    # clears the has-account guard and we can test the availability cap itself.
     operator = OperatorFactory(slug="cap", hotspot_commission_pct=Decimal("0.00"))
     zero_account(operator)
-    set_settlement_account(
-        operator, method="mpesa", payout_phone="0700000001", settlement_name="Cap ISP"
-    )
     a_sale(operator, "1000.00", Settlement.PLATFORM)
     pa.accrue_fee(operator, Decimal("300.00"),
                   reason=PlatformLedgerEntry.Reason.BASE_FEE, period="2026-07")
