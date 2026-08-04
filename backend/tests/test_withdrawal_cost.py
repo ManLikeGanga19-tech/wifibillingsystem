@@ -62,7 +62,9 @@ def _bank_op():
 
 def _mpesa_op():
     op = _fresh_op()
-    set_settlement_account(op, method="mpesa", payout_phone="0712345678", settlement_name="Jane Doe")
+    set_settlement_account(
+        op, method="mpesa", payout_phone="0712345678", settlement_name="Jane Doe"
+    )
     return op
 
 
@@ -147,7 +149,9 @@ class TestSettlementAccount:
 
     def test_mpesa_personal_is_complete_and_normalises_the_number(self):
         op = _fresh_op()
-        set_settlement_account(op, method="mpesa", payout_phone="0712345678", settlement_name="Jane Doe")
+        set_settlement_account(
+            op, method="mpesa", payout_phone="0712345678", settlement_name="Jane Doe"
+        )
         op.refresh_from_db()
         assert op.has_settlement_account
         assert "M-Pesa" in op.settlement_destination
