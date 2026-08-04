@@ -26,7 +26,7 @@ import {
 } from 'lucide-react';
 
 import { BandwidthProfile, Subscriber, OutboundCampaign } from './types';
-import { api, ApiPlan, ApiTenant, logout, Me, NavCounts } from './api/client';
+import { api, ApiPlan, ApiTenant, keepSessionFresh, logout, Me, NavCounts } from './api/client';
 import { planToProfile, profileToPlan, campaignToUi, subscriberToUi } from './api/mappers';
 import { useHashRoute } from './utils/useHashRoute';
 import { toast, ToastHost } from './components/ui';
@@ -153,7 +153,16 @@ const NAV_GROUPS: { title: string | null; items: NavItem[] }[] = [
 /** This app is now PURELY the ISP console. Everything cross-tenant (tenants,
  * payouts, reconciliation, audit, P&L) lives in the separate Platform Control
  * app — so an ISP never downloads platform code, and the two deploy apart. */
-const PLATFORM_CONSOLE_URL = 'http://localhost:4800';
+// Derived from the CURRENT domain so cross-console links work on ANY deployment —
+// dev localhost ports, staging on :8443, production — never a hardcoded host that
+// would 404 in the browser and make the system look broken.
+function consoleOrigin(subdomain: string, devPort: string): string {
+  const { protocol, hostname, port } = window.location;
+  if (hostname === 'localhost' || hostname === '127.0.0.1') return `http://localhost:${devPort}`;
+  const base = hostname.split('.').slice(1).join('.') || hostname;
+  return `${protocol}//${subdomain}.${base}${port ? `:${port}` : ''}`;
+}
+const PLATFORM_CONSOLE_URL = consoleOrigin('admin', '4800');
 
 export default function App() {
   // Session lives in an httpOnly cookie we cannot read, so "am I signed in?" is a
@@ -217,6 +226,10 @@ export default function App() {
       .catch(() => setMe(null)) // not signed in -> the login gate
       .finally(() => setChecking(false));
   }, [loadMe]);
+
+  // Keep the session renewed on tab-focus + a heartbeat, so returning after
+  // inactivity never lands on an expired token and forces a re-login.
+  useEffect(() => keepSessionFresh(), []);
 
   /** Leave an ISP we were granted access to. The server ends the grant AND clears
    * the acting-tenant cookie, so we simply re-ask who we are. */

@@ -59,9 +59,43 @@ export async function logout(): Promise<void> {
   await fetch(`${BASE}/api/v1/auth/logout/`, { ...withCookies, method: 'POST' }).catch(() => {});
 }
 
+// Single-flight: when the access cookie expires, a dashboard fires several requests
+// at once and they ALL get 401. Without this, each one would POST its own refresh —
+// a thundering herd, and with a rotating refresh token, a race that logs you out.
+// Instead every caller awaits the SAME in-flight refresh.
+let refreshInFlight: Promise<boolean> | null = null;
 async function tryRefresh(): Promise<boolean> {
-  const resp = await fetch(`${BASE}/api/v1/auth/refresh/`, { ...withCookies, method: 'POST' });
-  return resp.ok;
+  if (!refreshInFlight) {
+    refreshInFlight = fetch(`${BASE}/api/v1/auth/refresh/`, { ...withCookies, method: 'POST' })
+      .then((r) => r.ok)
+      .catch(() => false)
+      .finally(() => {
+        refreshInFlight = null;
+      });
+  }
+  return refreshInFlight;
+}
+
+/**
+ * Keep the session alive so returning from inactivity never dumps you at the login
+ * screen. Two triggers:
+ *   - the tab becoming visible again (you came back to it), and
+ *   - a heartbeat while it stays open,
+ * both well inside the access-token lifetime. Renewing PROACTIVELY means data calls
+ * never hit an expired token in the first place. Returns a cleanup function.
+ */
+export function keepSessionFresh(): () => void {
+  const renewIfVisible = () => {
+    if (document.visibilityState === 'visible') void tryRefresh();
+  };
+  document.addEventListener('visibilitychange', renewIfVisible);
+  window.addEventListener('focus', renewIfVisible);
+  const heartbeat = window.setInterval(renewIfVisible, 30 * 60 * 1000); // every 30 min
+  return () => {
+    document.removeEventListener('visibilitychange', renewIfVisible);
+    window.removeEventListener('focus', renewIfVisible);
+    window.clearInterval(heartbeat);
+  };
 }
 
 export class ApiError extends Error {
@@ -323,9 +357,10 @@ export interface GoLiveBlocker {
 }
 
 export interface Settlement {
-  method: 'paybill' | 'bank' | null;
+  method: 'mpesa' | 'paybill' | 'bank' | null;
   destination: string | null;
-  /** Raw registered destination, so the withdrawal form can pre-fill it. */
+  /** Raw registered destination, so the settlement form can pre-fill it. */
+  payout_phone: string;
   paybill: string;
   paybill_account: string;
   bank_name: string;
@@ -461,20 +496,17 @@ export interface PayoutQuote {
   /** What actually reaches them: amount − cost. */
   net: string;
   cost_destination: string;
+  /** Where the money is going — the verified settlement account. */
+  destination: string | null;
+  has_account: boolean;
   note: string;
 }
 
 export interface WithdrawPayload {
   amount: string;
-  method: 'mpesa' | 'paybill' | 'bank';
-  phone?: string;
-  paybill?: string;
-  paybill_account?: string;
-  bank_name?: string;
-  bank_account_number?: string;
-  bank_account_name?: string;
   /** Six digits from the owner's authenticator app — or one of their recovery codes.
-   *  Money does not leave without it. */
+   *  Money does not leave without it. The DESTINATION is not sent: it's the verified
+   *  settlement account, decided server-side. */
   mfa_code?: string;
 }
 
@@ -1382,11 +1414,10 @@ export const api = {
     ledger: () => request<Paginated<ApiLedgerEntry>>('/billing/ledger/'),
     payouts: {
       list: () => request<Paginated<ApiPayout>>('/billing/payouts/'),
-      /** Preview the transfer cost before committing (no money moves). */
-      quote: (amount: string, method: string) =>
-        request<PayoutQuote>(
-          `/billing/payouts/quote/?amount=${encodeURIComponent(amount)}&method=${method}`
-        ),
+      /** Preview the transfer cost before committing (no money moves). The rail follows
+       *  the verified settlement account, so no method is passed. */
+      quote: (amount: string) =>
+        request<PayoutQuote>(`/billing/payouts/quote/?amount=${encodeURIComponent(amount)}`),
       withdraw: (data: WithdrawPayload) =>
         request<ApiPayout>('/billing/payouts/withdraw/', { method: 'POST', body: JSON.stringify(data) }),
     },

@@ -44,12 +44,13 @@ export const MEDIA: Record<string, MediaSlot> = {
   hero: {
     id: 'hero',
     kind: 'shot',
-    file: 'console-dashboard.png',
+    file: 'hero-illustration.svg',
     aspect: '16/10',
-    caption: 'The ISP console — revenue, clients and live sessions at a glance.',
+    caption: 'Customers pay by M-Pesa; every shilling lands attributed in your ledger.',
     brief:
-      'The ISP dashboard on seeded demo data, with the eye toggle OPEN so the money ' +
-      'is visible. Full browser window, no bookmarks bar, no personal tabs.',
+      'Brand illustration (SVG): a rooftop router beams signal over a Nairobi ' +
+      'skyline, a customer pays by M-Pesa, and the shillings flow into a ledger — ' +
+      'each sorted into its own row. Palette: ink / paper / one green accent.',
   },
   payments: {
     id: 'payments',

@@ -23,10 +23,6 @@ export default function WalletView() {
   const [settlement, setSettlement] = useState<Settlement | null>(null);
   const [error, setError] = useState('');
   const [amount, setAmount] = useState('');
-  const [method, setMethod] = useState<'mpesa' | 'paybill' | 'bank'>('mpesa');
-  const [phone, setPhone] = useState('');
-  const [paybill, setPaybill] = useState({ paybill: '', paybill_account: '' });
-  const [bank, setBank] = useState({ bank_name: '', bank_account_number: '', bank_account_name: '' });
   const [quote, setQuote] = useState<PayoutQuote | null>(null);
   const [busy, setBusy] = useState(false);
   // The second factor. Held in memory for one request and then dropped — a code that
@@ -45,16 +41,6 @@ export default function WalletView() {
       setLedger(l.results);
       setPayouts(p.results);
       setSettlement(st);
-      // Pre-fill the withdrawal with their registered destination, and default the method to it.
-      if (st.paybill) setPaybill({ paybill: st.paybill, paybill_account: st.paybill_account });
-      if (st.bank_name) {
-        setBank({
-          bank_name: st.bank_name,
-          bank_account_number: st.bank_account_number,
-          bank_account_name: st.bank_account_name,
-        });
-      }
-      if (st.method) setMethod(st.method);
       setError('');
     } catch {
       setError('Could not load your wallet.');
@@ -73,20 +59,16 @@ export default function WalletView() {
       return;
     }
     const t = window.setTimeout(() => {
-      api.billing.payouts.quote(a, method).then(setQuote).catch(() => setQuote(null));
+      api.billing.payouts.quote(a).then(setQuote).catch(() => setQuote(null));
     }, 350);
     return () => window.clearTimeout(t);
-  }, [amount, method]);
+  }, [amount]);
 
   /** One place the withdrawal is actually sent, so the retry-with-a-code path is the
-   *  SAME code path as the first attempt — not a second, subtly different one. */
+   *  SAME code path as the first attempt — not a second, subtly different one. The
+   *  destination is NOT sent — it's the verified settlement account, server-side. */
   const send = async (mfa_code?: string) => {
-    const payload: WithdrawPayload =
-      method === 'mpesa'
-        ? { amount, method, phone, mfa_code }
-        : method === 'paybill'
-          ? { amount, method, ...paybill, mfa_code }
-          : { amount, method, ...bank, mfa_code };
+    const payload: WithdrawPayload = { amount, mfa_code };
 
     setBusy(true);
     try {
@@ -125,7 +107,7 @@ export default function WalletView() {
       <ViewHeader
         icon={<Wallet className="h-4.5 w-4.5" />}
         title="Wallet"
-        subtitle="Customer payments are collected by Danamo Tech and credited here, with the platform commission already deducted. Withdraw to M-Pesa anytime."
+        subtitle="Your earnings, commission already deducted. Withdraw to your payout account anytime."
       >
         <RefreshBtn onClick={load} />
       </ViewHeader>
@@ -169,57 +151,31 @@ export default function WalletView() {
       )}
 
       <Panel title="Withdraw earnings">
-        <div className="flex border border-[#141414] mb-3 max-w-md">
-          {(['mpesa', 'paybill', 'bank'] as const).map((m) => (
-            <button
-              key={m}
-              type="button"
-              onClick={() => setMethod(m)}
-              className={`flex-1 py-2 text-xs font-bold font-mono uppercase transition cursor-pointer ${
-                method === m ? 'bg-[#141414] text-[#E4E3E0]' : 'bg-white text-[#141414]'
-              }`}
-            >
-              {m === 'mpesa' ? 'M-Pesa' : m === 'paybill' ? 'Paybill' : 'Bank'}
-            </button>
-          ))}
-        </div>
-        <form onSubmit={withdraw} className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
-          <Field label={`Amount (min ${fmtKsh(summary?.minimum_payout ?? 100)})`}>
-            <input type="number" min="100" step="0.01" required value={amount} onChange={(e) => setAmount(e.target.value)} className={inputCls} />
-          </Field>
-          {method === 'mpesa' && (
-            <Field label="M-Pesa number">
-              <input type="tel" required value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="07XX…" className={inputCls} />
+        {!settlement?.has_account ? (
+          <p className="text-xs font-mono text-[#141414]/70 max-w-md">
+            Add your payout account in <b>Settings → Payments</b> first — every withdrawal
+            goes there. Changing it later needs a code we email you.
+          </p>
+        ) : (
+          <form onSubmit={withdraw} className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end max-w-2xl">
+            <Field label={`Amount (min ${fmtKsh(summary?.minimum_payout ?? 100)})`}>
+              <input type="number" min="100" step="0.01" required value={amount} onChange={(e) => setAmount(e.target.value)} className={inputCls} />
             </Field>
-          )}
-          {method === 'paybill' && (
-            <>
-              <Field label="Paybill number">
-                <input required value={paybill.paybill} onChange={(e) => setPaybill({ ...paybill, paybill: e.target.value })} placeholder="e.g. 555777" className={inputCls} />
-              </Field>
-              <Field label="Account number">
-                <input required value={paybill.paybill_account} onChange={(e) => setPaybill({ ...paybill, paybill_account: e.target.value })} placeholder="account to credit" className={inputCls} />
-              </Field>
-            </>
-          )}
-          {method === 'bank' && (
-            <>
-              <Field label="Bank">
-                <input required value={bank.bank_name} onChange={(e) => setBank({ ...bank, bank_name: e.target.value })} placeholder="e.g. I&M Bank" className={inputCls} />
-              </Field>
-              <Field label="Account number">
-                <input required value={bank.bank_account_number} onChange={(e) => setBank({ ...bank, bank_account_number: e.target.value })} className={inputCls} />
-              </Field>
-              <Field label="Account name">
-                <input value={bank.bank_account_name} onChange={(e) => setBank({ ...bank, bank_account_name: e.target.value })} className={inputCls} />
-              </Field>
-            </>
-          )}
-          <Btn type="submit" variant="green" disabled={busy}>
-            <ArrowDownToLine className="h-3.5 w-3.5" />
-            {busy ? 'Requesting…' : 'Withdraw'}
-          </Btn>
-        </form>
+            {/* No destination fields: money goes to the ONE verified settlement account,
+                shown read-only. It can't be redirected here — that would bypass the
+                change-code protection. */}
+            <div className="text-xs font-mono">
+              <div className="text-[10px] uppercase text-[#141414]/50 mb-1">Pays out to</div>
+              <div className="border border-[#141414]/20 bg-[#f4f4f2] px-2.5 py-2 truncate" title={settlement.destination ?? ''}>
+                {settlement.destination}
+              </div>
+            </div>
+            <Btn type="submit" variant="green" disabled={busy}>
+              <ArrowDownToLine className="h-3.5 w-3.5" />
+              {busy ? 'Requesting…' : 'Withdraw'}
+            </Btn>
+          </form>
+        )}
 
         {/* Transfer-cost breakdown — the ISP sees exactly what they'll receive and where the
             cost goes, before they commit. */}
@@ -241,13 +197,11 @@ export default function WalletView() {
           </div>
         )}
 
-        <p className="text-[11px] font-mono text-[#141414]/50 mt-2">
-          {method === 'bank'
-            ? 'Bank withdrawals are sent by the platform via EFT/Pesalink and marked paid.'
-            : method === 'paybill'
-              ? 'Paid to your paybill (B2B) by the platform.'
-              : 'Paid to your M-Pesa number by the platform.'}
-        </p>
+        {settlement?.has_account && (
+          <p className="text-[11px] font-mono text-[#141414]/50 mt-2">
+            Paid out by the platform to your registered account.
+          </p>
+        )}
         {payouts.filter((p) => p.status === 'requested').length > 0 && (
           <p className="text-[11px] font-mono text-[#B26B00] mt-1">
             {payouts.filter((p) => p.status === 'requested').length} withdrawal(s) awaiting payment by the platform.

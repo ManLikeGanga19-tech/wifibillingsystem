@@ -70,12 +70,35 @@ export async function logout(): Promise<void> {
   );
 }
 
+// Single-flight: many requests can 401 at once when the access cookie expires; only
+// ONE refresh runs and everyone awaits it (avoids a herd and a rotating-token race).
+let refreshInFlight: Promise<boolean> | null = null;
 async function tryRefresh(): Promise<boolean> {
-  const resp = await fetch(`${BASE}/api/v1/auth/refresh/`, {
-    ...withCookies,
-    method: 'POST',
-  });
-  return resp.ok;
+  if (!refreshInFlight) {
+    refreshInFlight = fetch(`${BASE}/api/v1/auth/refresh/`, { ...withCookies, method: 'POST' })
+      .then((r) => r.ok)
+      .catch(() => false)
+      .finally(() => {
+        refreshInFlight = null;
+      });
+  }
+  return refreshInFlight;
+}
+
+/** Renew the session on tab-focus + a heartbeat so returning after inactivity never
+ *  lands on an expired token and forces a re-login. Returns a cleanup function. */
+export function keepSessionFresh(): () => void {
+  const renewIfVisible = () => {
+    if (document.visibilityState === 'visible') void tryRefresh();
+  };
+  document.addEventListener('visibilitychange', renewIfVisible);
+  window.addEventListener('focus', renewIfVisible);
+  const heartbeat = window.setInterval(renewIfVisible, 30 * 60 * 1000);
+  return () => {
+    document.removeEventListener('visibilitychange', renewIfVisible);
+    window.removeEventListener('focus', renewIfVisible);
+    window.clearInterval(heartbeat);
+  };
 }
 
 export async function request<T>(
