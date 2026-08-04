@@ -25,9 +25,11 @@ FROM caddy:2-alpine
 # Astro emits to dist/, Vite emits to dist/ — both land here.
 COPY --from=build /app/dist /srv
 
-# A single-page app must serve index.html for any path it does not recognise, or a
-# refresh on /wallet is a 404. The API is NOT proxied here — the edge Caddy owns that,
-# so this container has no route to anything but its own files.
-RUN printf ':80 {\n\troot * /srv\n\tencode zstd gzip\n\ttry_files {path} /index.html\n\tfile_server\n}\n' > /etc/caddy/Caddyfile
+# Serve real files first, then a directory's index.html (Astro's multi-page output puts
+# /signup at /signup/index.html), and only THEN fall back to the root index.html for SPA
+# client routes (so a refresh on /wallet still works). Without the {path}/index.html step,
+# every multi-page route (marketing /signup, /features, …) wrongly falls back to home.
+# The API is NOT proxied here — the edge Caddy owns that.
+RUN printf ':80 {\n\troot * /srv\n\tencode zstd gzip\n\ttry_files {path} {path}/index.html /index.html\n\tfile_server\n}\n' > /etc/caddy/Caddyfile
 
 EXPOSE 80
