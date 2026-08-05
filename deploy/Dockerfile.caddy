@@ -1,0 +1,10 @@
+# Caddy with the Cloudflare DNS plugin, for the *.wifios.co.ke wildcard certificate.
+#
+# Wildcard certs require a DNS-01 challenge (Let's Encrypt won't issue *.x over HTTP-01),
+# and the Caddyfile uses `acme_dns cloudflare {$CLOUDFLARE_API_TOKEN}`. Stock caddy:2-alpine
+# ships no DNS providers, so we build one in with xcaddy. Pinned to the same Caddy 2 line.
+FROM caddy:2-builder AS builder
+RUN xcaddy build --with github.com/caddy-dns/cloudflare
+
+FROM caddy:2-alpine
+COPY --from=builder /usr/bin/caddy /usr/bin/caddy

@@ -42,6 +42,9 @@ class RouterViewSet(TenantModelViewSet):
 
     @action(detail=True, methods=["post"])
     def resync(self, request, pk=None):
+        """Manual 'reconcile now': live-test the router, update its status, and re-push
+        session state. The periodic health check owns passive status; this is the button
+        for 'don't wait — recover and sync it right now'."""
         router = self.get_object()
         if not router.is_reachable:
             # A wiped/factory-reset router has no API user to talk to — re-syncing
@@ -54,8 +57,34 @@ class RouterViewSet(TenantModelViewSet):
                 },
                 status=status.HTTP_409_CONFLICT,
             )
+        # LIVE check, not the cached flag: a just-rebooted router recovers immediately, and
+        # if it is still booting we say so instead of queueing a sync that will fail.
+        if router.provisioning_backend != router.Backend.DUMMY:
+            from .adapters import ProvisioningAuthError
+            from .tasks import _apply_reachability
+
+            try:
+                ok = get_adapter(router).test_connection()
+            except ProvisioningAuthError as exc:
+                _apply_reachability(router, ok=False, auth_failed=True)
+                return Response(
+                    {"detail": str(exc), "needs_onboarding": True},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            except ProvisioningError:
+                _apply_reachability(router, ok=False, auth_failed=False)
+                return Response(
+                    {
+                        "detail": "Can't reach the router yet. If you just powered it on, "
+                        "give it a minute to reconnect, then try again.",
+                    },
+                    status=status.HTTP_409_CONFLICT,
+                )
+            _apply_reachability(router, ok=ok, auth_failed=False)
         sync_router.delay(router.id)
-        return Response({"detail": "Re-sync queued."}, status=status.HTTP_202_ACCEPTED)
+        return Response(
+            {"detail": "Reconnected — re-sync queued."}, status=status.HTTP_202_ACCEPTED
+        )
 
     @action(detail=True, methods=["post"])
     def test_connection(self, request, pk=None):
@@ -136,11 +165,19 @@ def router_enroll(request):
     if router is None:
         return Response({"detail": "Unknown enrollment token"}, status=status.HTTP_404_NOT_FOUND)
 
-    # The IP the platform sees is where it must reach the router back
+    # Where we reach the router back. With the WireGuard hub live, that's the router's
+    # stable overlay /32 — never its public/CGNAT source IP. Before the hub exists we fall
+    # back to the IP the platform saw the phone-home come from (the pilot LAN model).
+    from .wireguard import hub_configured
+
     xff = request.META.get("HTTP_X_FORWARDED_FOR", "")
     source_ip = (xff.split(",")[0].strip() if xff else "") or request.META.get("REMOTE_ADDR", "")
 
-    router.management_host = source_ip
+    if hub_configured() and router.overlay_ip:
+        router.management_host = router.overlay_ip
+        router.wg_enrolled_at = timezone.now()
+    else:
+        router.management_host = source_ip
     router.api_port = 80  # REST over www; production tightens to 443
     router.use_tls = False
     router.password = payload.get("api_password", "")

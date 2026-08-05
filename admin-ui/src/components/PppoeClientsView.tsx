@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { Users, Plus, Ban, RotateCcw, Zap, Printer, X, Loader2, Wifi, WifiOff, AlertTriangle } from 'lucide-react';
-import { api, ApiError, PppoeClient, PppoePlan, ApiRouter, AccessPoint, PppoeUsageSummary, CapacityWarning } from '../api/client';
+import { Users, Plus, Ban, RotateCcw, Zap, Printer, X, Loader2, Wifi, WifiOff, AlertTriangle, Key, Copy, Eye, EyeOff, Trash2, RefreshCw, Upload, Download, Pencil, Save } from 'lucide-react';
+import { api, ApiError, PppoeClient, PppoePlan, ApiRouter, AccessPoint, PppoeUsageSummary, CapacityWarning, PppoeImportRow, PppoeImportItem } from '../api/client';
 import {
   Badge, Btn, Field, FilterChips, inputCls, Panel, RefreshBtn, TableShell, tdCls, toast, useList, ViewHeader, fmtDateTime, fmtKsh,
 } from './ui';
@@ -123,10 +123,23 @@ export default function PppoeClientsView() {
   const [aps, setAps] = useState<AccessPoint[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [sheetFor, setSheetFor] = useState<PppoeClient | null>(null);
+  const [credsFor, setCredsFor] = useState<PppoeClient | null>(null);
+  const [editFor, setEditFor] = useState<PppoeClient | null>(null);
+  const [showImport, setShowImport] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  const exportCsv = () => {
+    const a = document.createElement('a');
+    a.href = api.pppoe.clients.exportUrl();
+    a.download = '';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
   const blank = {
     full_name: '', phone: '', email: '', physical_address: '',
     plan: '', router: '', delivery_method: 'fibre', access_point: '', billing_day: '1',
+    pppoe_username: '', pppoe_password: '',
   };
   const [form, setForm] = useState(blank);
 
@@ -135,6 +148,14 @@ export default function PppoeClientsView() {
     api.routers.list().then((r) => setRouters(r.results)).catch(() => {});
     api.pppoe.accessPoints.list().then((r) => setAps(r.results)).catch(() => {});
   }, []);
+
+  // Auto-refresh so a client that just connected flips to "live" on its own. The backend
+  // presence sweep updates the online flag within ~a minute; this reflects it without the
+  // ISP hitting refresh. A silent re-fetch (reload doesn't blank the table).
+  useEffect(() => {
+    const id = window.setInterval(reload, 30_000);
+    return () => window.clearInterval(id);
+  }, [reload]);
 
   const isWireless = form.delivery_method.startsWith('wireless');
 
@@ -156,6 +177,9 @@ export default function PppoeClientsView() {
         delivery_method: form.delivery_method as PppoeClient['delivery_method'],
         access_point: isWireless && form.access_point ? Number(form.access_point) : null,
         billing_day: Number(form.billing_day),
+        // Blank = auto-generate (the server generates a strong one).
+        pppoe_username: form.pppoe_username.trim(),
+        pppoe_password: form.pppoe_password,
         ...(force ? { force: true } : {}),
       });
       setCapWarn(null);
@@ -209,6 +233,12 @@ export default function PppoeClientsView() {
         <Btn onClick={() => setShowForm(!showForm)}>
           <Plus className="h-3.5 w-3.5" /> New Client
         </Btn>
+        <Btn variant="outline" onClick={() => setShowImport(true)} title="Adopt existing PPPoE users off a router">
+          <Upload className="h-3.5 w-3.5" /> Import
+        </Btn>
+        <Btn variant="outline" onClick={exportCsv} title="Download all clients as CSV">
+          <Download className="h-3.5 w-3.5" /> Export
+        </Btn>
         <RefreshBtn onClick={reload} />
       </ViewHeader>
 
@@ -254,6 +284,12 @@ export default function PppoeClientsView() {
             <Field label="Address" className="md:col-span-2">
               <input value={form.physical_address} onChange={(e) => setForm({ ...form, physical_address: e.target.value })} className={inputCls} />
             </Field>
+            <Field label="PPPoE username (optional)">
+              <input value={form.pppoe_username} onChange={(e) => setForm({ ...form, pppoe_username: e.target.value })} className={inputCls} placeholder="Auto-generated if blank" />
+            </Field>
+            <Field label="PPPoE password (optional)">
+              <input value={form.pppoe_password} onChange={(e) => setForm({ ...form, pppoe_password: e.target.value })} className={inputCls} placeholder="Auto-generated if blank" />
+            </Field>
             <Btn type="submit" variant="green" disabled={busy}>
               {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
               Create & provision
@@ -274,7 +310,13 @@ export default function PppoeClientsView() {
           <tr key={c.id} className="hover:bg-[#f0efec]/40 transition">
             <td className={`${tdCls} font-mono font-bold`}>{c.account_number}</td>
             <td className={tdCls}>
-              {c.full_name}
+              <button
+                onClick={() => setEditFor(c)}
+                className="text-left hover:underline cursor-pointer"
+                title="Edit this client"
+              >
+                {c.full_name}
+              </button>
               <span className="block text-[11px] font-mono text-[#141414]/50">{c.pppoe_username}</span>
             </td>
             <td className={tdCls}>{c.plan_name}</td>
@@ -299,6 +341,12 @@ export default function PppoeClientsView() {
                   <RotateCcw className="h-3.5 w-3.5" /> Restore
                 </Btn>
               )}
+              <Btn variant="outline" onClick={() => setEditFor(c)} title="Edit this client's details">
+                <Pencil className="h-3.5 w-3.5" /> Edit
+              </Btn>
+              <Btn variant="outline" onClick={() => setCredsFor(c)} title="PPPoE username & password, reset, delete">
+                <Key className="h-3.5 w-3.5" /> Credentials
+              </Btn>
               <Btn variant="outline" onClick={() => setSheetFor(c)} title="Printable account sheet">
                 <Printer className="h-3.5 w-3.5" /> Sheet
               </Btn>
@@ -308,6 +356,13 @@ export default function PppoeClientsView() {
       </TableShell>
 
       {sheetFor && <AccountSheet client={sheetFor} onClose={() => setSheetFor(null)} />}
+      {credsFor && (
+        <CredentialsDialog
+          client={credsFor}
+          onClose={() => setCredsFor(null)}
+          onChanged={reload}
+        />
+      )}
       {capWarn && (
         <CapacityWarningModal
           warning={capWarn}
@@ -316,6 +371,382 @@ export default function PppoeClientsView() {
           onContinue={() => submit(true)}
         />
       )}
+      {editFor && (
+        <EditClientDialog
+          client={editFor}
+          plans={plans}
+          routers={routers}
+          aps={aps}
+          onClose={() => setEditFor(null)}
+          onSaved={reload}
+          onOpenCredentials={(c) => { setEditFor(null); setCredsFor(c); }}
+        />
+      )}
+      {showImport && (
+        <ImportDialog
+          routers={routers}
+          plans={plans}
+          onClose={() => setShowImport(false)}
+          onDone={reload}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Edit a client. Everything here is editable EXCEPT the account number — that is the
+ * customer's permanent M-Pesa payment reference, so it stays with them when they move house
+ * (you just change the address). Changes that the router needs to know about — the plan, the
+ * site/router — are pushed to the MikroTik by the server, so the console and the network
+ * never disagree. The password lives in Credentials (it has to re-push), linked from here.
+ */
+function EditClientDialog({
+  client, plans, routers, aps, onClose, onSaved, onOpenCredentials,
+}: {
+  client: PppoeClient;
+  plans: PppoePlan[];
+  routers: ApiRouter[];
+  aps: AccessPoint[];
+  onClose: () => void;
+  onSaved: () => void;
+  onOpenCredentials: (c: PppoeClient) => void;
+}) {
+  const [form, setForm] = useState({
+    full_name: client.full_name ?? '',
+    phone: client.phone ?? '',
+    email: client.email ?? '',
+    physical_address: client.physical_address ?? '',
+    plan: String(client.plan),
+    router: String(client.router),
+    delivery_method: client.delivery_method,
+    access_point: client.access_point ? String(client.access_point) : '',
+    billing_day: String(client.billing_day),
+    notes: client.notes ?? '',
+  });
+  const [busy, setBusy] = useState(false);
+  const isWireless = form.delivery_method.startsWith('wireless');
+
+  const planChanged = Number(form.plan) !== client.plan;
+  const routerChanged = Number(form.router) !== client.router;
+
+  const save = async (e: FormEvent) => {
+    e.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    try {
+      await api.pppoe.clients.update(client.id, {
+        full_name: form.full_name,
+        phone: form.phone,
+        email: form.email,
+        physical_address: form.physical_address,
+        plan: Number(form.plan),
+        router: Number(form.router),
+        delivery_method: form.delivery_method as PppoeClient['delivery_method'],
+        access_point: isWireless && form.access_point ? Number(form.access_point) : null,
+        billing_day: Number(form.billing_day),
+        notes: form.notes,
+      });
+      toast(
+        'success',
+        planChanged || routerChanged
+          ? 'Saved — and pushed to the router.'
+          : `${form.full_name} updated.`,
+      );
+      onSaved();
+      onClose();
+    } catch (err) {
+      toast('error', err instanceof Error ? err.message : 'Could not save those changes.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-[#141414]/50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white border border-[#141414] w-full max-w-2xl max-h-[88vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-4 border-b border-[#141414]">
+          <h3 className="font-bold font-mono uppercase text-sm flex items-center gap-2">
+            <Pencil className="h-4 w-4" /> Edit client
+          </h3>
+          <button onClick={onClose} className="cursor-pointer"><X className="h-4 w-4" /></button>
+        </div>
+        <form onSubmit={save} className="p-5 space-y-4">
+          <div className="flex items-baseline justify-between border border-[#141414]/15 bg-[#f0efec] px-3 py-2">
+            <span className="font-mono text-[10px] uppercase tracking-wide text-[#141414]/50">Account number</span>
+            <b className="font-mono">{client.account_number}</b>
+          </div>
+          <p className="text-[11px] text-[#141414]/55 leading-relaxed -mt-2">
+            The account number never changes — it&apos;s how this customer&apos;s M-Pesa
+            payments find them, so it moves with them if they relocate.
+          </p>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <Field label="Full name">
+              <input required value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} className={inputCls} />
+            </Field>
+            <Field label="Phone">
+              <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} className={inputCls} placeholder="07XX…" />
+            </Field>
+            <Field label="Email">
+              <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className={inputCls} />
+            </Field>
+            <Field label="Address">
+              <input value={form.physical_address} onChange={(e) => setForm({ ...form, physical_address: e.target.value })} className={inputCls} />
+            </Field>
+            <Field label="Plan">
+              <select value={form.plan} onChange={(e) => setForm({ ...form, plan: e.target.value })} className={inputCls}>
+                {plans.map((p) => <option key={p.id} value={p.id}>{p.name} — {fmtKsh(p.price)}/mo</option>)}
+              </select>
+            </Field>
+            <Field label="Router / site">
+              <select value={form.router} onChange={(e) => setForm({ ...form, router: e.target.value })} className={inputCls}>
+                {routers.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+              </select>
+            </Field>
+            <Field label="Delivery">
+              <select value={form.delivery_method} onChange={(e) => setForm({ ...form, delivery_method: e.target.value })} className={inputCls}>
+                {DELIVERY.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
+              </select>
+            </Field>
+            {isWireless && (
+              <Field label="Access point (sector)">
+                <select value={form.access_point} onChange={(e) => setForm({ ...form, access_point: e.target.value })} className={inputCls}>
+                  <option value="">Unassigned</option>
+                  {aps.map((ap) => <option key={ap.id} value={ap.id}>{ap.tower_name} / {ap.name}</option>)}
+                </select>
+              </Field>
+            )}
+          </div>
+
+          <BillingDayPicker
+            value={Number(form.billing_day)}
+            onChange={(d) => setForm({ ...form, billing_day: String(d) })}
+          />
+
+          <Field label="Notes">
+            <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} className={`${inputCls} h-20`} />
+          </Field>
+
+          {(planChanged || routerChanged) && (
+            <div className="border border-[#B26B00]/40 bg-[#FFF8EC] px-3 py-2 text-xs text-[#B26B00] leading-relaxed">
+              {planChanged && <p>Changing the plan re-pushes the speed to the router and briefly reconnects this customer so the new rate applies immediately.</p>}
+              {routerChanged && <p>Moving them to another site transfers their PPPoE account to that router.</p>}
+            </div>
+          )}
+
+          <div className="flex items-center justify-between border-t border-[#141414]/10 pt-3">
+            <Btn variant="outline" type="button" onClick={() => onOpenCredentials(client)}>
+              <Key className="h-3.5 w-3.5" /> Change password
+            </Btn>
+            <div className="flex items-center gap-2">
+              <Btn variant="outline" type="button" onClick={onClose} disabled={busy}><X className="h-3.5 w-3.5" /> Cancel</Btn>
+              <Btn variant="green" type="submit" disabled={busy}>
+                {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                Save changes
+              </Btn>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+/** Billing day = which day of the month the ISP invoices this client. A month grid reads
+ *  like a calendar but picks a RECURRING day; 29–31 don't exist in every month, so 28 is the
+ *  ceiling (the server enforces the same). */
+function BillingDayPicker({ value, onChange }: { value: number; onChange: (d: number) => void }) {
+  return (
+    <div>
+      <label className="block font-mono text-[10px] uppercase tracking-wide text-[#141414]/50 mb-1.5">
+        Billing day — invoiced on day {value} of every month
+      </label>
+      <div className="grid grid-cols-7 gap-1 max-w-sm">
+        {Array.from({ length: 28 }, (_, i) => i + 1).map((d) => (
+          <button
+            key={d}
+            type="button"
+            onClick={() => onChange(d)}
+            className={`h-8 font-mono text-xs border cursor-pointer transition ${
+              d === value
+                ? 'bg-[#141414] text-[#E4E3E0] border-[#141414] font-bold'
+                : 'bg-white border-[#141414]/15 hover:border-[#141414]/50'
+            }`}
+          >
+            {d}
+          </button>
+        ))}
+      </div>
+      <p className="text-[11px] text-[#141414]/45 mt-1.5">
+        Months don&apos;t all have 29–31, so billing days run 1–28.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Adopt an ISP's pre-existing PPPoE users off a router into WIFI.OS. Preview first (what's
+ * new / already managed / which plan each maps to), tweak name + plan per row, then import
+ * the selected ones. DB-only on the server — a client's live session is never disturbed.
+ */
+function ImportDialog({
+  routers, plans, onClose, onDone,
+}: {
+  routers: ApiRouter[];
+  plans: PppoePlan[];
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [routerId, setRouterId] = useState<number | ''>(routers[0]?.id ?? '');
+  const [rows, setRows] = useState<PppoeImportRow[] | null>(null);
+  const [sel, setSel] = useState<Record<string, { include: boolean; full_name: string; plan: number | '' }>>({});
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{ imported: number; skipped: number; failed: number } | null>(null);
+
+  const preview = async () => {
+    if (!routerId || busy) return;
+    setBusy(true);
+    setResult(null);
+    try {
+      const data = await api.pppoe.clients.importPreview(Number(routerId));
+      setRows(data);
+      const seed: typeof sel = {};
+      for (const r of data) {
+        seed[r.username] = {
+          include: !r.already_managed,
+          full_name: r.comment || r.username,
+          plan: r.suggested_plan ?? '',
+        };
+      }
+      setSel(seed);
+    } catch (e) {
+      toast('error', e instanceof Error ? e.message : 'Could not read the router.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const run = async () => {
+    if (!routerId || busy || !rows) return;
+    const items: PppoeImportItem[] = rows
+      .filter((r) => sel[r.username]?.include && sel[r.username]?.plan)
+      .map((r) => ({
+        username: r.username,
+        full_name: sel[r.username].full_name,
+        plan: Number(sel[r.username].plan),
+      }));
+    if (items.length === 0) {
+      toast('warning', 'Pick at least one user and a plan for it.');
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await api.pppoe.clients.importRun(Number(routerId), items);
+      setResult({ imported: res.imported.length, skipped: res.skipped.length, failed: res.failed.length });
+      toast('success', `Imported ${res.imported.length} client(s).`);
+      onDone();
+    } catch (e) {
+      toast('error', e instanceof Error ? e.message : 'Import failed.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const candidates = (rows ?? []).filter((r) => !r.already_managed).length;
+
+  return (
+    <div className="fixed inset-0 z-50 bg-[#141414]/50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white border border-[#141414] w-full max-w-2xl max-h-[88vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-4 border-b border-[#141414]">
+          <h3 className="font-bold font-mono uppercase text-sm flex items-center gap-2">
+            <Upload className="h-4 w-4" /> Import PPPoE users from a router
+          </h3>
+          <button onClick={onClose} className="cursor-pointer"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="p-5 space-y-4 text-sm">
+          <p className="text-[11px] text-[#141414]/55 leading-relaxed">
+            Reads the PPPoE accounts already on the router and adopts the ones you choose as
+            managed clients — keeping their exact username/password. It never disturbs their
+            live connection. Users WIFI.OS already manages are skipped.
+          </p>
+
+          <div className="flex items-end gap-2">
+            <Field label="Router" className="flex-1">
+              <select value={routerId} onChange={(e) => { setRouterId(Number(e.target.value)); setRows(null); }} className={inputCls}>
+                {routers.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+              </select>
+            </Field>
+            <Btn onClick={preview} disabled={busy || !routerId}>
+              {busy && rows === null ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+              Preview
+            </Btn>
+          </div>
+
+          {rows && rows.length === 0 && (
+            <p className="text-xs text-[#141414]/60">No PPPoE users found on this router.</p>
+          )}
+
+          {rows && rows.length > 0 && (
+            <div className="border border-[#141414]/15">
+              <div className="grid grid-cols-[auto_1fr_1fr_1fr] gap-2 px-3 py-2 bg-[#f0efec] font-mono text-[10px] uppercase tracking-wide text-[#141414]/50">
+                <span></span><span>User</span><span>Name</span><span>Plan</span>
+              </div>
+              {rows.map((r) => {
+                const s = sel[r.username];
+                return (
+                  <div key={r.username} className={`grid grid-cols-[auto_1fr_1fr_1fr] gap-2 px-3 py-2 items-center border-t border-[#141414]/10 ${r.already_managed ? 'opacity-50' : ''}`}>
+                    <input
+                      type="checkbox"
+                      disabled={r.already_managed}
+                      checked={!!s?.include}
+                      onChange={(e) => setSel({ ...sel, [r.username]: { ...s, include: e.target.checked } })}
+                    />
+                    <span className="font-mono text-xs truncate" title={r.username}>
+                      {r.username}
+                      {r.already_managed && <span className="block text-[10px] text-[#141414]/50">already managed</span>}
+                    </span>
+                    {r.already_managed ? <span /> : (
+                      <input
+                        value={s?.full_name ?? ''}
+                        onChange={(e) => setSel({ ...sel, [r.username]: { ...s, full_name: e.target.value } })}
+                        className={`${inputCls} text-xs py-1`}
+                      />
+                    )}
+                    {r.already_managed ? <span /> : (
+                      <select
+                        value={s?.plan ?? ''}
+                        onChange={(e) => setSel({ ...sel, [r.username]: { ...s, plan: e.target.value ? Number(e.target.value) : '' } })}
+                        className={`${inputCls} text-xs py-1`}
+                      >
+                        <option value="">Choose plan…</option>
+                        {plans.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                      </select>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {result && (
+            <div className="text-xs font-mono border border-[#141414]/15 bg-[#faf9f7] p-2.5">
+              Imported <b>{result.imported}</b> · skipped <b>{result.skipped}</b>
+              {result.failed > 0 && <> · <span className="text-[#B22222]">failed {result.failed}</span></>}
+            </div>
+          )}
+
+          {rows && rows.length > 0 && (
+            <div className="flex items-center gap-2">
+              <Btn variant="green" onClick={run} disabled={busy || candidates === 0}>
+                {busy && rows !== null ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+                Import selected
+              </Btn>
+              <Btn variant="outline" onClick={onClose}><X className="h-3.5 w-3.5" /> Close</Btn>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -408,6 +839,146 @@ function Row({ label, value }: { label: string; value: string }) {
     <div className="flex justify-between">
       <span className="opacity-50">{label}</span>
       <b>{value}</b>
+    </div>
+  );
+}
+
+/**
+ * The ISP-only credentials panel: the username + password the customer's CPE dials with,
+ * plus a hybrid reset (type your own, or generate) and delete. Deliberately separate from
+ * the printable customer account sheet — the password must never go on the customer's copy.
+ */
+function CredentialsDialog({
+  client, onClose, onChanged,
+}: {
+  client: PppoeClient;
+  onClose: () => void;
+  onChanged: () => void;
+}) {
+  const [password, setPassword] = useState(client.pppoe_password);
+  const [reveal, setReveal] = useState(false);
+  const [newPwd, setNewPwd] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [confirmDel, setConfirmDel] = useState(false);
+
+  const copy = (text: string, what: string) =>
+    navigator.clipboard?.writeText(text).then(
+      () => toast('success', `${what} copied.`),
+      () => toast('error', 'Could not copy.'),
+    );
+
+  const reset = async () => {
+    if (busy) return;
+    if (newPwd && (newPwd.length < 6 || /\s/.test(newPwd))) {
+      toast('error', 'Password needs 6+ characters and no spaces.');
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await api.pppoe.clients.resetPassword(client.id, newPwd || undefined);
+      setPassword(res.pppoe_password);
+      setNewPwd('');
+      setReveal(true);
+      toast('success', 'Password reset and pushed to the router.');
+      onChanged();
+    } catch (e) {
+      toast('error', e instanceof Error ? e.message : 'Reset failed.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const del = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await api.pppoe.clients.remove(client.id);
+      toast('success', `${client.full_name} deleted.`);
+      onChanged();
+      onClose();
+    } catch (e) {
+      toast('error', e instanceof Error ? e.message : 'Delete failed.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-[#141414]/50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white border border-[#141414] w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-4 border-b border-[#141414]">
+          <h3 className="font-bold font-mono uppercase text-sm flex items-center gap-2">
+            <Key className="h-4 w-4" /> PPPoE credentials
+          </h3>
+          <button onClick={onClose} className="cursor-pointer"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="p-5 space-y-4 text-sm">
+          <p className="text-[11px] text-[#141414]/55 leading-relaxed">
+            What the customer&apos;s router (CPE) dials with — enter these in its
+            {' '}<b>WAN → PPPoE</b> settings. Keep them private; don&apos;t print them on the
+            customer account sheet.
+          </p>
+
+          <div>
+            <label className="block font-mono text-[10px] uppercase tracking-wide text-[#141414]/50 mb-1">Username</label>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 font-mono text-sm bg-[#f0efec] border border-[#141414]/15 px-2.5 py-1.5 break-all">{client.pppoe_username}</code>
+              <Btn variant="outline" onClick={() => copy(client.pppoe_username, 'Username')} title="Copy"><Copy className="h-3.5 w-3.5" /></Btn>
+            </div>
+          </div>
+
+          <div>
+            <label className="block font-mono text-[10px] uppercase tracking-wide text-[#141414]/50 mb-1">Password</label>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 font-mono text-sm bg-[#f0efec] border border-[#141414]/15 px-2.5 py-1.5 break-all">
+                {reveal ? password : '•'.repeat(Math.max(password.length, 8))}
+              </code>
+              <Btn variant="outline" onClick={() => setReveal(!reveal)} title={reveal ? 'Hide' : 'Reveal'}>
+                {reveal ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+              </Btn>
+              <Btn variant="outline" onClick={() => copy(password, 'Password')} title="Copy"><Copy className="h-3.5 w-3.5" /></Btn>
+            </div>
+          </div>
+
+          <div className="border-t border-[#141414]/10 pt-3 space-y-2">
+            <label className="block font-mono text-[10px] uppercase tracking-wide text-[#141414]/50">Reset password</label>
+            <div className="flex items-center gap-2">
+              <input
+                value={newPwd}
+                onChange={(e) => setNewPwd(e.target.value)}
+                placeholder="Type a new one, or leave blank to generate"
+                className={`${inputCls} flex-1`}
+              />
+              <Btn variant="green" onClick={reset} disabled={busy}>
+                {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                {newPwd ? 'Set' : 'Generate'}
+              </Btn>
+            </div>
+            <p className="text-[11px] text-[#141414]/45">Pushed to the router immediately — update the CPE to match.</p>
+          </div>
+
+          <div className="border-t border-[#B22222]/20 pt-3">
+            {confirmDel ? (
+              <div className="space-y-2">
+                <p className="text-xs text-[#B22222] leading-relaxed">
+                  Delete <b>{client.full_name}</b>? This removes the user from the router and
+                  can&apos;t be undone.
+                </p>
+                <div className="flex items-center gap-2">
+                  <Btn variant="danger" onClick={del} disabled={busy}>
+                    {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />} Yes, delete
+                  </Btn>
+                  <Btn variant="outline" onClick={() => setConfirmDel(false)} disabled={busy}><X className="h-3.5 w-3.5" /> Cancel</Btn>
+                </div>
+              </div>
+            ) : (
+              <Btn variant="danger" onClick={() => setConfirmDel(true)}>
+                <Trash2 className="h-3.5 w-3.5" /> Delete client
+              </Btn>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

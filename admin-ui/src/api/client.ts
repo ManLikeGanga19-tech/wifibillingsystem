@@ -59,9 +59,43 @@ export async function logout(): Promise<void> {
   await fetch(`${BASE}/api/v1/auth/logout/`, { ...withCookies, method: 'POST' }).catch(() => {});
 }
 
+// Single-flight: when the access cookie expires, a dashboard fires several requests
+// at once and they ALL get 401. Without this, each one would POST its own refresh —
+// a thundering herd, and with a rotating refresh token, a race that logs you out.
+// Instead every caller awaits the SAME in-flight refresh.
+let refreshInFlight: Promise<boolean> | null = null;
 async function tryRefresh(): Promise<boolean> {
-  const resp = await fetch(`${BASE}/api/v1/auth/refresh/`, { ...withCookies, method: 'POST' });
-  return resp.ok;
+  if (!refreshInFlight) {
+    refreshInFlight = fetch(`${BASE}/api/v1/auth/refresh/`, { ...withCookies, method: 'POST' })
+      .then((r) => r.ok)
+      .catch(() => false)
+      .finally(() => {
+        refreshInFlight = null;
+      });
+  }
+  return refreshInFlight;
+}
+
+/**
+ * Keep the session alive so returning from inactivity never dumps you at the login
+ * screen. Two triggers:
+ *   - the tab becoming visible again (you came back to it), and
+ *   - a heartbeat while it stays open,
+ * both well inside the access-token lifetime. Renewing PROACTIVELY means data calls
+ * never hit an expired token in the first place. Returns a cleanup function.
+ */
+export function keepSessionFresh(): () => void {
+  const renewIfVisible = () => {
+    if (document.visibilityState === 'visible') void tryRefresh();
+  };
+  document.addEventListener('visibilitychange', renewIfVisible);
+  window.addEventListener('focus', renewIfVisible);
+  const heartbeat = window.setInterval(renewIfVisible, 30 * 60 * 1000); // every 30 min
+  return () => {
+    document.removeEventListener('visibilitychange', renewIfVisible);
+    window.removeEventListener('focus', renewIfVisible);
+    window.clearInterval(heartbeat);
+  };
 }
 
 export class ApiError extends Error {
@@ -77,23 +111,116 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit, retried = false): Promise<T> {
-  const resp = await fetch(`${BASE}/api/v1${path}`, {
-    ...withCookies,
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      ...csrfHeader(init?.method),
-      ...init?.headers,
-    },
-  });
-  // Access cookie expired -> renew silently and replay once.
-  if (resp.status === 401 && !retried && (await tryRefresh())) {
-    return request<T>(path, init, true);
+/**
+ * A 401 that a silent refresh could NOT recover — the session is genuinely over.
+ * Distinct from ApiError so views can stay quiet (the app is returning you to sign-in)
+ * instead of each one showing a misleading "could not load — is the API running?".
+ */
+export class SessionExpiredError extends ApiError {
+  constructor(body: unknown) {
+    super(401, body);
+    this.name = 'SessionExpiredError';
   }
-  const body = resp.status === 204 ? null : await resp.json().catch(() => null);
-  if (!resp.ok) throw new ApiError(resp.status, body);
-  return body as T;
+}
+
+// The app registers a single handler; we call it ONCE when a request finds the session
+// truly gone, so the whole app returns to the sign-in screen centrally rather than every
+// data call surfacing its own error.
+let onSessionExpired: (() => void) | null = null;
+export function setOnSessionExpired(cb: (() => void) | null): void {
+  onSessionExpired = cb;
+}
+
+// ---- connection resilience -----------------------------------------------------------
+// A short API blip (a deploy rolling the container, a momentary overload) used to surface
+// as "could not load — is the API running?" in every view, which reads as the backend being
+// broken and forces a manual refresh. Instead: GETs retry briefly, a "Reconnecting…" state
+// is published for a subtle banner, and the moment the API answers again every subscribed
+// view re-fetches on its own — no refresh, no scary error. This matters at tenant scale.
+
+export type ConnState = 'ok' | 'reconnecting';
+let onConnectionChange: ((s: ConnState) => void) | null = null;
+export function setOnConnectionChange(cb: ((s: ConnState) => void) | null): void {
+  onConnectionChange = cb;
+}
+
+const reconnectSubs = new Set<() => void>();
+/** Subscribe to "the API just came back" so a view can silently reload. Returns an unsub. */
+export function onReconnect(cb: () => void): () => void {
+  reconnectSubs.add(cb);
+  return () => reconnectSubs.delete(cb);
+}
+
+const TRANSIENT_STATUS = new Set([502, 503, 504]);
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+let connectionDown = false;
+let probeTimer: number | null = null;
+function markConnection(down: boolean): void {
+  if (down === connectionDown) return;
+  connectionDown = down;
+  onConnectionChange?.(down ? 'reconnecting' : 'ok');
+  if (down) {
+    // Probe a cheap unauthenticated endpoint until the API answers, then recover fast.
+    if (probeTimer === null) {
+      probeTimer = window.setInterval(() => {
+        // Hit an API path (not the static server, which would 200 even when the API is down).
+        fetch(`${BASE}/api/v1/health/`, { ...withCookies })
+          .then((r) => { if (r.ok) markConnection(false); })
+          .catch(() => { /* still down */ });
+      }, 3000);
+    }
+  } else {
+    if (probeTimer !== null) { window.clearInterval(probeTimer); probeTimer = null; }
+    reconnectSubs.forEach((cb) => cb()); // recovered → every subscribed view re-fetches
+  }
+}
+
+async function request<T>(path: string, init?: RequestInit, retried = false): Promise<T> {
+  const isGet = !init?.method || init.method.toUpperCase() === 'GET';
+  for (let attempt = 0; ; attempt++) {
+    let resp: Response;
+    try {
+      resp = await fetch(`${BASE}/api/v1${path}`, {
+        ...withCookies,
+        ...init,
+        headers: {
+          'Content-Type': 'application/json',
+          ...csrfHeader(init?.method),
+          ...init?.headers,
+        },
+      });
+    } catch {
+      // Network-level failure — the server is unreachable (mid-deploy, blip). Retry GETs a
+      // few times so a brief outage is invisible; writes fail fast so we never double-submit.
+      if (isGet && attempt < 4) {
+        markConnection(true);
+        await sleep(400 * 2 ** attempt); // 0.4s, 0.8s, 1.6s, 3.2s
+        continue;
+      }
+      markConnection(true);
+      throw new ApiError(0, { detail: 'Could not reach the server. Reconnecting…' });
+    }
+    // A gateway error means "not ready yet" (e.g. a container just restarting) — retry GETs.
+    if (isGet && TRANSIENT_STATUS.has(resp.status) && attempt < 4) {
+      markConnection(true);
+      await sleep(400 * 2 ** attempt);
+      continue;
+    }
+    markConnection(false); // we reached the server
+    // Access cookie expired: renew silently and replay once. If the refresh ALSO fails the
+    // session is genuinely over — tell the app (which returns to sign-in) and throw a quiet,
+    // typed error, instead of a generic one every view would read as "the API is down".
+    if (resp.status === 401 && !retried) {
+      if (await tryRefresh()) return request<T>(path, init, true);
+      const expiredBody = await resp.json().catch(() => null);
+      onSessionExpired?.();
+      throw new SessionExpiredError(expiredBody);
+    }
+    const body = resp.status === 204 ? null : await resp.json().catch(() => null);
+    if (!resp.ok) throw new ApiError(resp.status, body);
+    return body as T;
+  }
 }
 
 // ---- types (mirroring the DRF serializers) ------------------------------
@@ -323,9 +450,10 @@ export interface GoLiveBlocker {
 }
 
 export interface Settlement {
-  method: 'paybill' | 'bank' | null;
+  method: 'mpesa' | 'paybill' | 'bank' | null;
   destination: string | null;
-  /** Raw registered destination, so the withdrawal form can pre-fill it. */
+  /** Raw registered destination, so the settlement form can pre-fill it. */
+  payout_phone: string;
   paybill: string;
   paybill_account: string;
   bank_name: string;
@@ -461,20 +589,17 @@ export interface PayoutQuote {
   /** What actually reaches them: amount − cost. */
   net: string;
   cost_destination: string;
+  /** Where the money is going — the verified settlement account. */
+  destination: string | null;
+  has_account: boolean;
   note: string;
 }
 
 export interface WithdrawPayload {
   amount: string;
-  method: 'mpesa' | 'paybill' | 'bank';
-  phone?: string;
-  paybill?: string;
-  paybill_account?: string;
-  bank_name?: string;
-  bank_account_number?: string;
-  bank_account_name?: string;
   /** Six digits from the owner's authenticator app — or one of their recovery codes.
-   *  Money does not leave without it. */
+   *  Money does not leave without it. The DESTINATION is not sent: it's the verified
+   *  settlement account, decided server-side. */
   mfa_code?: string;
 }
 
@@ -942,6 +1067,25 @@ export interface PppoeUsageSummary {
   synced_at: string | null;
 }
 
+export interface PppoeImportRow {
+  username: string;
+  profile: string;
+  comment: string;
+  already_managed: boolean;
+  suggested_plan: number | null;
+  suggested_plan_name: string | null;
+}
+export interface PppoeImportItem {
+  username: string;
+  full_name?: string;
+  plan: number;
+}
+export interface PppoeImportResult {
+  imported: { username: string; account_number: string }[];
+  skipped: { username: string; reason: string }[];
+  failed: { username: string; reason: string }[];
+}
+
 export interface PppoeInvoice {
   id: number;
   number: string;
@@ -1382,11 +1526,10 @@ export const api = {
     ledger: () => request<Paginated<ApiLedgerEntry>>('/billing/ledger/'),
     payouts: {
       list: () => request<Paginated<ApiPayout>>('/billing/payouts/'),
-      /** Preview the transfer cost before committing (no money moves). */
-      quote: (amount: string, method: string) =>
-        request<PayoutQuote>(
-          `/billing/payouts/quote/?amount=${encodeURIComponent(amount)}&method=${method}`
-        ),
+      /** Preview the transfer cost before committing (no money moves). The rail follows
+       *  the verified settlement account, so no method is passed. */
+      quote: (amount: string) =>
+        request<PayoutQuote>(`/billing/payouts/quote/?amount=${encodeURIComponent(amount)}`),
       withdraw: (data: WithdrawPayload) =>
         request<ApiPayout>('/billing/payouts/withdraw/', { method: 'POST', body: JSON.stringify(data) }),
     },
@@ -1535,6 +1678,25 @@ export const api = {
         request<{ detail: string }>(`/pppoe/clients/${id}/restore/`, { method: 'POST' }),
       liveStatus: (id: number) =>
         request<{ online: boolean }>(`/pppoe/clients/${id}/live_status/`),
+      // Hybrid reset: pass a password to set it, or omit to have the server generate one.
+      // Returns the new credentials so the ISP can read them back to the installer.
+      resetPassword: (id: number, password?: string) =>
+        request<{ pppoe_username: string; pppoe_password: string }>(
+          `/pppoe/clients/${id}/reset_password/`,
+          { method: 'POST', body: JSON.stringify(password ? { password } : {}) },
+        ),
+      // Adopt an ISP's pre-existing router PPPoE users. Preview first (what's new / already
+      // managed / suggested plan), then import the chosen rows — DB-only, never disrupts them.
+      importPreview: (router: number) =>
+        request<PppoeImportRow[]>('/pppoe/clients/import-preview/', {
+          method: 'POST', body: JSON.stringify({ router }),
+        }),
+      importRun: (router: number, items: PppoeImportItem[]) =>
+        request<PppoeImportResult>('/pppoe/clients/import/', {
+          method: 'POST', body: JSON.stringify({ router, items }),
+        }),
+      // A CSV backup of every client. Cookie-auth GET, so a plain download link works.
+      exportUrl: () => `${BASE}/api/v1/pppoe/clients/export/`,
     },
     usageSummary: () => request<PppoeUsageSummary>('/pppoe/usage-summary/'),
     invoices: {

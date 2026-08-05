@@ -191,8 +191,23 @@ class CookieRefreshView(APIView):
                 {"detail": "Session expired."}, status=status.HTTP_401_UNAUTHORIZED
             )
             return clear_auth_cookies(resp)
+
+        # SLIDING SESSION: mint a fresh refresh token too, so the 7-day window moves
+        # forward from LAST ACTIVITY, not from login. Someone who uses the console at
+        # least once a week is never logged out mid-work; someone who walks away for a
+        # week still expires. We don't blacklist the old token (stateless, and the
+        # client refreshes single-flight), so this is a clean re-issue, not rotation
+        # bookkeeping.
+        from .models import User
+
+        user = User.objects.filter(pk=refresh.payload.get("user_id")).first()
+        if user is None or not user.is_active:
+            return clear_auth_cookies(
+                Response({"detail": "Session expired."}, status=status.HTTP_401_UNAUTHORIZED)
+            )
+        fresh = RefreshToken.for_user(user)
         resp = Response({"detail": "Refreshed."})
-        return set_auth_cookies(resp, access=str(refresh.access_token))
+        return set_auth_cookies(resp, access=str(fresh.access_token), refresh=str(fresh))
 
 
 @extend_schema(request=None, responses={200: DetailSerializer},

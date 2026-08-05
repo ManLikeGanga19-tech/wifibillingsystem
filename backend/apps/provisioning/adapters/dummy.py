@@ -1,6 +1,13 @@
 """No-op adapter for development and tests. Records calls so tests can assert on them."""
 
-from .base import ActiveSession, DeviceInfo, HostEntry, ProvisioningAdapter, ProvisionResult
+from .base import (
+    ActiveSession,
+    DeviceInfo,
+    HostEntry,
+    PppoeSecret,
+    ProvisioningAdapter,
+    ProvisionResult,
+)
 
 
 class DummyAdapter(ProvisioningAdapter):
@@ -66,6 +73,10 @@ class DummyAdapter(ProvisioningAdapter):
         DummyAdapter.calls.append(("pppoe_remove", client.pppoe_username))
         return ProvisionResult(ok=True)
 
+    def kick_pppoe_session(self, client) -> ProvisionResult:
+        DummyAdapter.calls.append(("pppoe_kick", client.pppoe_username))
+        return ProvisionResult(ok=True)
+
     #: Tests set this to drive PPPoE metering:
     #: {pppoe_username: (download_bytes, upload_bytes, ip, uptime, mac)}.
     pppoe_active: dict = {}
@@ -84,6 +95,18 @@ class DummyAdapter(ProvisioningAdapter):
                     mac_address=v[4] if len(v) > 4 else "",
                 )
             )
+        return out
+
+    #: Tests set this to drive PPPoE import: a list of PppoeSecret (or dicts).
+    pppoe_secrets: list = []
+
+    def list_pppoe_secrets(self) -> list[PppoeSecret]:
+        out = []
+        for s in DummyAdapter.pppoe_secrets:
+            if isinstance(s, PppoeSecret):
+                out.append(s)
+            else:
+                out.append(PppoeSecret(**s))
         return out
 
     # -- Multi-device sharing ---------------------------------------------

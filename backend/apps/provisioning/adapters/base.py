@@ -48,6 +48,17 @@ class HostEntry:
 
 
 @dataclass
+class PppoeSecret:
+    """An existing /ppp/secret on the router — used to ADOPT an ISP's pre-existing PPPoE
+    users into WIFI.OS (import), without disturbing their live sessions."""
+
+    username: str
+    password: str = ""
+    profile: str = ""
+    comment: str = ""
+
+
+@dataclass
 class DeviceInfo:
     """A router's hardware identity (stable) + live health (transient)."""
 
@@ -133,6 +144,18 @@ class ProvisioningAdapter(ABC):
 
     def get_active_pppoe(self) -> list[ActiveSession]:
         return []
+
+    def list_pppoe_secrets(self) -> list["PppoeSecret"]:
+        """Every PPPoE /ppp/secret currently on the router — for importing an ISP's
+        pre-existing users into WIFI.OS. Default empty for adapters that can't read them."""
+        return []
+
+    def kick_pppoe_session(self, client) -> ProvisionResult:
+        """Drop a client's LIVE PPPoE session without touching their credentials, so the CPE
+        redials at once and picks up a changed profile (e.g. a new plan's speed). A running
+        session keeps its old queue until it reconnects, so this is what makes a plan change
+        take effect now rather than whenever the customer next reboots."""
+        return ProvisionResult(ok=True, message="noop")
 
     # -- Captive portal ----------------------------------------------------
     def push_portal(self, portal_url: str) -> ProvisionResult:

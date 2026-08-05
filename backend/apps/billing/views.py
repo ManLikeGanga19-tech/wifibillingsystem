@@ -19,7 +19,6 @@ from apps.core.permissions import (
     TenantCanTransact,
     TenantIsOperational,
 )
-from apps.core.phone import InvalidPhoneError, normalize_msisdn
 from apps.core.schema import OBJECT_RESPONSE
 from apps.core.tenancy import acting_tenant
 from apps.core.viewsets import TenantReadOnlyViewSet
@@ -110,23 +109,25 @@ class MyPayoutsViewSet(TenantReadOnlyViewSet):
 
     @action(detail=False, methods=["get"])
     def quote(self, request):
-        """Preview a withdrawal's transfer cost before committing — no money moves, no code."""
+        """Preview a withdrawal's transfer cost before committing — no money moves, no code.
+        The destination (and so the rail) is always the verified settlement account."""
         from .services import payout_quote
 
         try:
             amount = Decimal(request.query_params.get("amount") or "0")
         except (InvalidOperation, TypeError):
             amount = Decimal("0")
-        method = request.query_params.get("method") or "mpesa"
-        return Response(payout_quote(self.get_operator(), amount, method))
+        return Response(payout_quote(self.get_operator(), amount))
 
     @action(detail=False, methods=["post"])
     def withdraw(self, request):
+        """Withdraw an AMOUNT to the verified settlement account. The destination is not
+        accepted here — it's set once in Settings and changing it needs an emailed code,
+        so a withdrawal can never redirect money to an account typed into this box."""
         operator = self.get_operator()
         serializer = WithdrawSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
-        method = data["method"]
 
         # THE SECOND FACTOR, enforced here rather than inside request_payout: the
         # service is also driven by platform tooling and tests, where a six-digit code
@@ -152,30 +153,9 @@ class MyPayoutsViewSet(TenantReadOnlyViewSet):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        destination = {}
-        if method == "mpesa":
-            try:
-                destination["phone"] = normalize_msisdn(data.get("phone", ""))
-            except InvalidPhoneError as exc:
-                return Response({"phone": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-        elif method == "paybill":
-            destination = {
-                "paybill": data.get("paybill", ""),
-                "paybill_account": data.get("paybill_account", ""),
-            }
-        else:
-            destination = {
-                "bank_name": data.get("bank_name", ""),
-                "bank_account_number": data.get("bank_account_number", ""),
-                "bank_account_name": data.get("bank_account_name", ""),
-            }
         try:
             payout = request_payout(
-                operator=operator,
-                amount=data["amount"],
-                user=request.user,
-                method=method,
-                destination=destination,
+                operator=operator, amount=data["amount"], user=request.user
             )
         except WalletError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)

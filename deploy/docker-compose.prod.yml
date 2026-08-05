@@ -22,6 +22,9 @@ x-django: &django
   env_file: .env
   environment:
     DJANGO_SETTINGS_MODULE: config.settings.prod
+    # The root FS is read-only; point HOME at the writable tmpfs so gunicorn's control
+    # files (~/.gunicorn) don't hit "Read-only file system" on boot.
+    HOME: /tmp
   depends_on:
     db:
       condition: service_healthy
@@ -32,18 +35,26 @@ x-django: &django
   read_only: true
   tmpfs:
     - /tmp
+    # collectstatic (ManifestStaticFilesStorage) writes here on boot; whitenoise then
+    # serves it in-process. Writable tmpfs keeps the rest of the FS read-only.
+    - /app/staticfiles
   security_opt:
     - no-new-privileges:true
 
 services:
   caddy:
-    image: caddy:2-alpine
+    # Caddy with the Cloudflare DNS plugin baked in — needed for the *.wifios.co.ke
+    # wildcard cert (DNS-01 challenge). Stock caddy:2-alpine has no DNS providers.
+    build:
+      context: .
+      dockerfile: Dockerfile.caddy
+    image: ${IMAGE_CADDY:-wifios/caddy:latest}
     restart: unless-stopped
-    # The ONLY ports open to the internet. Everything else talks over the private
-    # docker network and is unreachable from outside the box.
+    # The ONLY ports open to the internet. Host ports are env-driven so we can co-locate
+    # behind another stack that owns 80/443 (default) — on a dedicated box leave them 80/443.
     ports:
-      - "80:80"
-      - "443:443"
+      - "${CADDY_HTTP_PORT:-80}:80"
+      - "${CADDY_HTTPS_PORT:-443}:443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data # certificates. LOSING THIS MEANS RE-ISSUING EVERY CERT.
@@ -57,14 +68,22 @@ services:
 
   api:
     <<: *django
+    # NOTE: keep every continuation line at THIS indentation. The YAML folded scalar (>)
+    # preserves newlines on any MORE-indented line, which would make sh run `--bind` as a
+    # separate command. Flat indentation folds it all to one line.
     command: >
       sh -c "python manage.py migrate --noinput &&
-             python manage.py collectstatic --noinput &&
-             gunicorn config.wsgi:application
-               --bind 0.0.0.0:8000
-               --workers ${GUNICORN_WORKERS:-3}
-               --timeout 30
-               --access-logfile - --error-logfile -"
+      python manage.py collectstatic --noinput &&
+      gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers ${GUNICORN_WORKERS:-3} --timeout 30 --access-logfile - --error-logfile -"
+    # Readiness for zero-downtime rollouts: the deploy waits for this to pass, and Caddy's
+    # active health check (see Caddyfile) only routes to the api once it's serving + DB-ready.
+    # start_period covers migrate + collectstatic on boot.
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/v1/health/', timeout=4).status==200 else 1)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 45s
 
   worker:
     <<: *django
@@ -72,7 +91,11 @@ services:
 
   beat:
     <<: *django
-    command: celery -A config beat -l warning
+    # The app filesystem is read-only, so beat's schedule + pid files go to the writable
+    # tmpfs (/tmp), or beat crash-loops on 'Read-only file system: celerybeat-schedule'.
+    command: >
+      celery -A config beat -l warning
+      --schedule=/tmp/celerybeat-schedule --pidfile=/tmp/celerybeat.pid
 
   db:
     image: postgres:16-alpine

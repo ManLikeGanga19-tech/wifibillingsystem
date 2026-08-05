@@ -337,3 +337,294 @@ class TestSectorCapacity:
             {"access_point": full.id, "force": True}, format="json",
         )
         assert forced.status_code == 200, forced.content
+
+
+class TestClientCredentials:
+    """PPPoE dial credentials: readable on the dashboard, settable at create, resettable
+    (hybrid — typed or generated), and never changed by a plain edit."""
+
+    def _create(self, op, **extra):
+        plan = ServicePlanFactory(operator=op)
+        router = RouterFactory(operator=op)
+        payload = {"full_name": "Jane", "plan": plan.id, "router": router.id, **extra}
+        return staff(op).post("/api/v1/pppoe/clients/", payload, format="json")
+
+    def test_password_is_readable_on_the_dashboard(self):
+        # The gap this feature closes: the create response (and detail) carries the password
+        # so the ISP can hand it to an installer.
+        resp = self._create(OperatorFactory())
+        assert resp.status_code == 201, resp.content
+        body = resp.json()
+        assert body["pppoe_username"] and body["pppoe_password"]
+
+    def test_blank_credentials_autogenerate(self):
+        resp = self._create(OperatorFactory(), pppoe_username="", pppoe_password="")
+        assert resp.status_code == 201, resp.content
+        body = resp.json()
+        assert len(body["pppoe_username"]) >= 3
+        assert len(body["pppoe_password"]) >= 6
+
+    def test_isp_can_set_their_own_credentials(self):
+        resp = self._create(
+            OperatorFactory(), pppoe_username="janedoe", pppoe_password="hunter2x"
+        )
+        assert resp.status_code == 201, resp.content
+        body = resp.json()
+        assert body["pppoe_username"] == "janedoe"
+        assert body["pppoe_password"] == "hunter2x"
+
+    def test_short_password_is_rejected_on_create(self):
+        assert self._create(OperatorFactory(), pppoe_password="x").status_code == 400
+
+    def test_a_plain_edit_cannot_change_the_password(self):
+        op = OperatorFactory()
+        client = PppoeClientFactory(operator=op, pppoe_password="original1")
+        staff(op).patch(
+            f"/api/v1/pppoe/clients/{client.id}/",
+            {"pppoe_password": "sneaky99", "full_name": "New Name"}, format="json",
+        )
+        client.refresh_from_db()
+        assert client.pppoe_password == "original1"  # creds untouched by a plain edit
+        assert client.full_name == "New Name"  # the real edit still applied
+
+    def test_reset_generates_a_new_password(self):
+        op = OperatorFactory()
+        client = PppoeClientFactory(operator=op, status="active", pppoe_password="original1")
+        resp = staff(op).post(f"/api/v1/pppoe/clients/{client.id}/reset_password/")
+        assert resp.status_code == 200, resp.content
+        new = resp.json()["pppoe_password"]
+        assert new and new != "original1"
+        client.refresh_from_db()
+        assert client.pppoe_password == new
+
+    def test_reset_with_a_typed_password(self):
+        op = OperatorFactory()
+        client = PppoeClientFactory(operator=op, status="active")
+        resp = staff(op).post(
+            f"/api/v1/pppoe/clients/{client.id}/reset_password/",
+            {"password": "chosen123"}, format="json",
+        )
+        assert resp.status_code == 200, resp.content
+        assert resp.json()["pppoe_password"] == "chosen123"
+        client.refresh_from_db()
+        assert client.pppoe_password == "chosen123"
+
+    def test_reset_rejects_a_short_password(self):
+        op = OperatorFactory()
+        client = PppoeClientFactory(operator=op, status="active")
+        resp = staff(op).post(
+            f"/api/v1/pppoe/clients/{client.id}/reset_password/",
+            {"password": "x"}, format="json",
+        )
+        assert resp.status_code == 400
+
+    def test_reset_keeps_a_suspended_client_suspended(self):
+        op = OperatorFactory()
+        client = PppoeClientFactory(operator=op, status="suspended")
+        assert staff(op).post(
+            f"/api/v1/pppoe/clients/{client.id}/reset_password/"
+        ).status_code == 200
+        client.refresh_from_db()
+        assert client.status == Client.Status.SUSPENDED  # reset didn't silently un-suspend
+
+    def test_delete_removes_the_client(self):
+        op = OperatorFactory()
+        client = PppoeClientFactory(operator=op, status="active")
+        assert staff(op).delete(f"/api/v1/pppoe/clients/{client.id}/").status_code == 204
+        assert not Client.objects.filter(pk=client.id).exists()
+
+    def test_cannot_reset_another_tenants_client(self):
+        op_a, op_b = OperatorFactory(slug="a"), OperatorFactory(slug="b")
+        client_b = PppoeClientFactory(operator=op_b)
+        assert staff(op_a).post(
+            f"/api/v1/pppoe/clients/{client_b.id}/reset_password/"
+        ).status_code == 404
+
+
+class TestClientImportExport:
+    """Adopt an ISP's pre-existing router PPPoE users, and export clients as CSV."""
+
+    def _secrets(self, secrets):
+        from apps.provisioning.adapters.dummy import DummyAdapter
+        DummyAdapter.pppoe_secrets = secrets
+
+    def test_export_returns_csv_of_clients(self):
+        op = OperatorFactory()
+        c1 = PppoeClientFactory(operator=op)
+        resp = staff(op).get("/api/v1/pppoe/clients/export/")
+        assert resp.status_code == 200
+        assert "text/csv" in resp["Content-Type"]
+        body = b"".join(resp.streaming_content).decode()
+        assert c1.account_number in body and c1.pppoe_username in body
+
+    def test_import_preview_flags_managed_and_suggests_a_plan(self):
+        op = OperatorFactory()
+        router = RouterFactory(operator=op)
+        plan = ServicePlanFactory(operator=op, mikrotik_profile="home-8m")
+        PppoeClientFactory(operator=op, pppoe_username="olduser")
+        self._secrets([
+            {"username": "olduser", "password": "x", "profile": "home-8m"},
+            {"username": "newuser", "password": "y", "profile": "home-8m", "comment": "Jane"},
+        ])
+        resp = staff(op).post(
+            "/api/v1/pppoe/clients/import-preview/", {"router": router.id}, format="json"
+        )
+        assert resp.status_code == 200, resp.content
+        rows = {r["username"]: r for r in resp.json()}
+        assert rows["olduser"]["already_managed"] is True
+        assert rows["newuser"]["already_managed"] is False
+        assert rows["newuser"]["suggested_plan"] == plan.id
+
+    def test_import_adopts_new_users_and_skips_managed(self):
+        op = OperatorFactory()
+        router = RouterFactory(operator=op)
+        plan = ServicePlanFactory(operator=op)
+        PppoeClientFactory(operator=op, pppoe_username="olduser")
+        self._secrets([
+            {"username": "olduser", "password": "x", "profile": "p"},
+            {"username": "newuser", "password": "secretpw", "profile": "p", "comment": "Jane"},
+        ])
+        resp = staff(op).post("/api/v1/pppoe/clients/import/", {
+            "router": router.id,
+            "items": [
+                {"username": "olduser", "plan": plan.id},
+                {"username": "newuser", "full_name": "Jane Doe", "plan": plan.id},
+            ],
+        }, format="json")
+        assert resp.status_code == 200, resp.content
+        body = resp.json()
+        assert [i["username"] for i in body["imported"]] == ["newuser"]
+        assert body["skipped"][0]["username"] == "olduser"
+        new = Client.objects.get(pppoe_username="newuser")
+        assert new.pppoe_password == "secretpw"  # adopted the router's exact password
+        assert new.full_name == "Jane Doe"
+        assert new.status == Client.Status.ACTIVE
+
+    def test_import_is_idempotent(self):
+        op = OperatorFactory()
+        router = RouterFactory(operator=op)
+        plan = ServicePlanFactory(operator=op)
+        self._secrets([{"username": "u1", "password": "p", "profile": "p"}])
+        payload = {"router": router.id, "items": [{"username": "u1", "plan": plan.id}]}
+        first = staff(op).post("/api/v1/pppoe/clients/import/", payload, format="json").json()
+        assert len(first["imported"]) == 1
+        second = staff(op).post("/api/v1/pppoe/clients/import/", payload, format="json").json()
+        assert len(second["imported"]) == 0
+        assert second["skipped"][0]["reason"] == "already managed"
+
+    def test_import_skips_a_row_with_no_valid_plan(self):
+        op = OperatorFactory()
+        router = RouterFactory(operator=op)
+        self._secrets([{"username": "u1", "password": "p", "profile": "p"}])
+        resp = staff(op).post("/api/v1/pppoe/clients/import/", {
+            "router": router.id, "items": [{"username": "u1", "plan": 999999}],
+        }, format="json")
+        assert resp.status_code == 200
+        assert resp.json()["skipped"][0]["reason"] == "no plan chosen"
+        assert not Client.objects.filter(pppoe_username="u1").exists()
+
+
+class TestClientEdit:
+    """Editing a client must change the ROUTER too — a DB-only save would leave the MikroTik
+    enforcing the old plan (or holding the secret on the old router) with nobody able to tell
+    which is true."""
+
+    def _calls(self):
+        from apps.provisioning.adapters.dummy import DummyAdapter
+        return DummyAdapter.calls
+
+    def _reset(self):
+        from apps.provisioning.adapters.dummy import DummyAdapter
+        DummyAdapter.calls = []
+
+    def test_editing_contact_details_saves_without_touching_the_router(self):
+        op = OperatorFactory()
+        client = PppoeClientFactory(operator=op, status="active")
+        self._reset()
+        resp = staff(op).patch(
+            f"/api/v1/pppoe/clients/{client.id}/",
+            {"full_name": "New Name", "phone": "0712000111", "physical_address": "Nyeri",
+             "billing_day": 15},
+            format="json",
+        )
+        assert resp.status_code == 200, resp.content
+        client.refresh_from_db()
+        assert client.full_name == "New Name"
+        assert client.billing_day == 15
+        assert self._calls() == []  # bookkeeping only — no router work
+
+    def test_changing_the_plan_repushes_the_profile_and_bounces_the_session(self):
+        op = OperatorFactory()
+        client = PppoeClientFactory(operator=op, status="active")
+        new_plan = ServicePlanFactory(operator=op, mikrotik_profile="home-gold")
+        self._reset()
+        resp = staff(op).patch(
+            f"/api/v1/pppoe/clients/{client.id}/", {"plan": new_plan.id}, format="json"
+        )
+        assert resp.status_code == 200, resp.content
+        client.refresh_from_db()
+        assert client.plan_id == new_plan.id
+        kinds = [c[0] for c in self._calls()]
+        assert "ensure_profile" in kinds  # new plan's profile exists on the router
+        assert "pppoe_create" in kinds    # secret re-pushed onto it
+        assert "pppoe_kick" in kinds      # live session bounced so the new speed applies now
+
+    def test_moving_to_another_router_creates_then_removes(self):
+        op = OperatorFactory()
+        old_router = RouterFactory(operator=op)
+        new_router = RouterFactory(operator=op)
+        client = PppoeClientFactory(operator=op, router=old_router, status="active")
+        self._reset()
+        resp = staff(op).patch(
+            f"/api/v1/pppoe/clients/{client.id}/", {"router": new_router.id}, format="json"
+        )
+        assert resp.status_code == 200, resp.content
+        client.refresh_from_db()
+        assert client.router_id == new_router.id
+        kinds = [c[0] for c in self._calls()]
+        # Create on the NEW router BEFORE removing from the old — never leave a customer
+        # with no secret anywhere.
+        assert kinds.index("pppoe_create") < kinds.index("pppoe_remove")
+
+    def test_a_suspended_client_stays_suspended_after_a_plan_change(self):
+        op = OperatorFactory()
+        client = PppoeClientFactory(operator=op, status="suspended")
+        new_plan = ServicePlanFactory(operator=op)
+        self._reset()
+        staff(op).patch(
+            f"/api/v1/pppoe/clients/{client.id}/", {"plan": new_plan.id}, format="json"
+        )
+        client.refresh_from_db()
+        assert client.status == Client.Status.SUSPENDED
+        # Re-walled: an edit must never quietly reconnect someone who hasn't paid.
+        assert "pppoe_suspend" in [c[0] for c in self._calls()]
+
+    def test_an_edit_cannot_change_the_account_number(self):
+        op = OperatorFactory()
+        client = PppoeClientFactory(operator=op)
+        original = client.account_number
+        staff(op).patch(
+            f"/api/v1/pppoe/clients/{client.id}/",
+            {"account_number": "HACKED1", "full_name": "Moved House"}, format="json",
+        )
+        client.refresh_from_db()
+        assert client.account_number == original  # permanent payment reference
+        assert client.full_name == "Moved House"  # the real edit still applied
+
+    def test_a_pending_client_edit_does_no_router_work(self):
+        op = OperatorFactory()
+        client = PppoeClientFactory(operator=op, status="pending_install")
+        new_plan = ServicePlanFactory(operator=op)
+        self._reset()
+        staff(op).patch(
+            f"/api/v1/pppoe/clients/{client.id}/", {"plan": new_plan.id}, format="json"
+        )
+        assert self._calls() == []  # nothing on a router yet; provision writes it later
+
+    def test_cannot_edit_another_tenants_client(self):
+        op_a, op_b = OperatorFactory(slug="a"), OperatorFactory(slug="b")
+        client_b = PppoeClientFactory(operator=op_b)
+        resp = staff(op_a).patch(
+            f"/api/v1/pppoe/clients/{client_b.id}/", {"full_name": "X"}, format="json"
+        )
+        assert resp.status_code == 404

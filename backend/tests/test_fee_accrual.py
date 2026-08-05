@@ -115,6 +115,8 @@ def test_an_aggregator_isp_with_a_wallet_owes_nothing_even_with_fees():
 
 def test_a_payout_is_capped_at_available_after_what_they_owe():
     """You cannot withdraw money we are keeping to cover your unpaid fee."""
+    # The factory already gives the operator a verified settlement account, so the payout
+    # clears the has-account guard and we can test the availability cap itself.
     operator = OperatorFactory(slug="cap", hotspot_commission_pct=Decimal("0.00"))
     zero_account(operator)
     a_sale(operator, "1000.00", Settlement.PLATFORM)
@@ -125,11 +127,9 @@ def test_a_payout_is_capped_at_available_after_what_they_owe():
     with pytest.raises(WalletError, match="available"):
         request_payout(
             operator=operator, amount=Decimal("700.01"), user=owner_of(operator),
-            method="mpesa", destination={"phone": "254700000001"},
         )
     payout = request_payout(
         operator=operator, amount=Decimal("700.00"), user=owner_of(operator),
-        method="mpesa", destination={"phone": "254700000001"},
     )
     assert payout.amount == Decimal("700.00")
 

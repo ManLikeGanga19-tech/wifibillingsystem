@@ -63,9 +63,31 @@ class ClientSerializer(serializers.ModelSerializer):
     cpe_equipment = TenantPrimaryKeyRelatedField(
         queryset=Equipment.objects.all(), required=False, allow_null=True
     )
+    # Credentials the CPE dials with. Writable ON CREATE (optional — blank auto-generates a
+    # strong one); a plain edit can't change them (see ClientViewSet.perform_update), so the
+    # DB never silently desyncs from the router — resets go through reset_password, which
+    # re-pushes to the MikroTik. Readable so the ISP can show them to an installer.
+    pppoe_username = serializers.CharField(
+        required=False, allow_blank=True, max_length=60,
+        help_text="Leave blank to auto-generate.",
+    )
+    pppoe_password = serializers.CharField(
+        required=False, allow_blank=True, max_length=60,
+        help_text="Leave blank to auto-generate a strong one.",
+    )
     # Live metering (pppoe.metering), read-only. `usage` is this cycle's consumption.
     data_cap_gb = serializers.IntegerField(source="plan.data_cap_gb", read_only=True)
     usage = serializers.SerializerMethodField()
+
+    def validate_pppoe_username(self, value):
+        if value and (any(c.isspace() for c in value) or len(value) < 3):
+            raise serializers.ValidationError("Use 3+ characters and no spaces.")
+        return value
+
+    def validate_pppoe_password(self, value):
+        if value and (any(c.isspace() for c in value) or len(value) < 6):
+            raise serializers.ValidationError("Use 6+ characters and no spaces.")
+        return value
 
     class Meta:
         model = Client
@@ -82,7 +104,6 @@ class ClientSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = [
             "account_number", "status", "balance", "next_due_date", "created_at",
-            "pppoe_username", "pppoe_password",
             "is_online", "last_online_at", "wan_ip", "session_uptime", "usage_synced_at",
         ]
 

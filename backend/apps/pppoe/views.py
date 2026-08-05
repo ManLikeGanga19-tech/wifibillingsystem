@@ -15,7 +15,7 @@ from rest_framework.views import APIView
 
 from apps.core.permissions import RequireTenant, TenantCanTransact, TenantIsOperational
 from apps.core.public import PublicAPIView
-from apps.core.schema import OBJECT_RESPONSE
+from apps.core.schema import OBJECT_REQUEST, OBJECT_RESPONSE
 from apps.core.services import audit
 from apps.core.tenancy import acting_tenant
 from apps.core.viewsets import TenantModelViewSet, TenantReadOnlyViewSet
@@ -30,7 +30,15 @@ from .serializers import (
     ServicePlanSerializer,
     TowerSerializer,
 )
-from .services import create_client, provision_client, restore_client, suspend_client
+from .services import (
+    create_client,
+    delete_client,
+    provision_client,
+    reset_pppoe_password,
+    restore_client,
+    suspend_client,
+    update_client,
+)
 
 
 class ServicePlanViewSet(TenantModelViewSet):
@@ -76,7 +84,7 @@ class ClientViewSet(TenantModelViewSet):
     #: unverified ISP may build their whole client list — they simply cannot turn
     #: anyone on, because that would mean money flowing through our paybill for a
     #: business we have not checked.
-    MONEY_ACTIONS = {"provision", "restore"}
+    MONEY_ACTIONS = {"provision", "restore", "import_run"}
 
     def get_permissions(self):
         perms = super().get_permissions()
@@ -139,6 +147,12 @@ class ClientViewSet(TenantModelViewSet):
     def perform_create(self, serializer):
         operator = self.get_operator()
         data = serializer.validated_data
+        # Blank credentials mean "auto-generate": drop them so create_client's own generator
+        # runs, rather than trying to set an empty username/password.
+        if not data.get("pppoe_username"):
+            data.pop("pppoe_username", None)
+        if not data.get("pppoe_password"):
+            data.pop("pppoe_password", None)
         client = create_client(
             operator=operator,
             plan=data.pop("plan"),
@@ -147,6 +161,61 @@ class ClientViewSet(TenantModelViewSet):
             **data,
         )
         serializer.instance = client
+
+    def perform_update(self, serializer):
+        # Credentials are set at create and changed only via reset_password (which re-pushes
+        # to the router). A plain edit must never change them here, or the DB password would
+        # silently diverge from the one on the MikroTik.
+        data = dict(serializer.validated_data)
+        data.pop("pppoe_username", None)
+        data.pop("pppoe_password", None)
+        # Route through the service so a plan/router change also reaches the ROUTER — a
+        # DB-only save would leave the MikroTik enforcing the old plan (or holding the secret
+        # on the old router) and nobody could tell which was true.
+        # Serializers hand back model instances for FKs; the service works in *_id so it can
+        # compare cheaply against the old values.
+        FK_FIELDS = {"plan", "router", "access_point", "cpe_equipment"}
+        changes = {}
+        for field, value in data.items():
+            if field in FK_FIELDS:
+                changes[f"{field}_id"] = value.pk if value is not None else None
+            else:
+                changes[field] = value
+        serializer.instance = update_client(
+            self.get_object(), changes=changes, actor=self.request.user
+        )
+
+    def destroy(self, request, *args, **kwargs):
+        # Remove the secret from the router BEFORE dropping the record — no orphaned
+        # /ppp/secret. If the router is unreachable, keep the record and say so (502).
+        instance = self.get_object()
+        try:
+            delete_client(instance, actor=request.user)
+        except ProvisioningError as exc:
+            return Response(
+                {"detail": f"Couldn't remove the user from the router: {exc}. "
+                           "Nothing was deleted — try again once the router is reachable."},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @extend_schema(request=OBJECT_REQUEST, responses=OBJECT_RESPONSE)
+    @action(detail=True, methods=["post"])
+    def reset_password(self, request, pk=None):
+        """Set a new PPPoE password (supplied, or auto-generated) and push it to the router.
+        Returns the new password so the ISP can read it back to the installer."""
+        client = self.get_object()
+        password = (request.data.get("password") or "").strip()
+        if password and (any(c.isspace() for c in password) or len(password) < 6):
+            return Response(
+                {"detail": "Use 6+ characters and no spaces, or leave blank to auto-generate."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            new_password = reset_pppoe_password(client, password=password, actor=request.user)
+        except ProvisioningError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+        return Response({"pppoe_username": client.pppoe_username, "pppoe_password": new_password})
 
     @action(detail=True, methods=["post"])
     def provision(self, request, pk=None):
@@ -184,6 +253,59 @@ class ClientViewSet(TenantModelViewSet):
         except ProvisioningError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
         return Response({"online": client.pppoe_username in active})
+
+    # --- import (adopt existing router users) / export --------------------------------
+    def _import_router(self, request):
+        from apps.provisioning.models import Router
+
+        return Router.objects.filter(
+            operator=self.get_operator(), pk=request.data.get("router")
+        ).first()
+
+    @extend_schema(request=OBJECT_REQUEST, responses=OBJECT_RESPONSE)
+    @action(detail=False, methods=["post"], url_path="import-preview")
+    def import_preview(self, request):
+        """Read a router's existing PPPoE secrets and preview what an import would adopt —
+        which are new, which are already managed, and the plan each maps to."""
+        from .porting import preview_import
+
+        router = self._import_router(request)
+        if router is None:
+            return Response({"detail": "Unknown router."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            return Response(preview_import(self.get_operator(), router))
+        except ProvisioningError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+
+    @extend_schema(request=OBJECT_REQUEST, responses=OBJECT_RESPONSE)
+    @action(detail=False, methods=["post"], url_path="import")
+    def import_run(self, request):
+        """Adopt the chosen router secrets as managed clients (DB-only, non-disruptive)."""
+        from .porting import import_clients
+
+        router = self._import_router(request)
+        if router is None:
+            return Response({"detail": "Unknown router."}, status=status.HTTP_400_BAD_REQUEST)
+        items = request.data.get("items")
+        if not isinstance(items, list):
+            return Response(
+                {"detail": "items must be a list."}, status=status.HTTP_400_BAD_REQUEST
+            )
+        try:
+            result = import_clients(
+                self.get_operator(), router, items=items, actor=request.user
+            )
+        except ProvisioningError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+        return Response(result)
+
+    @extend_schema(responses=OBJECT_RESPONSE)
+    @action(detail=False, methods=["get"])
+    def export(self, request):
+        """Download all of this ISP's clients as a CSV backup."""
+        from .porting import clients_csv
+
+        return clients_csv(self.get_operator())
 
 
 class InvoiceViewSet(TenantReadOnlyViewSet):

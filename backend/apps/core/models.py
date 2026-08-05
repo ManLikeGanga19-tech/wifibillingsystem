@@ -106,6 +106,9 @@ class Operator(TimeStampedModel):
     # paybill or a business bank account, Safaricom/the bank already ran full KYC on
     # this business — so we inherit it for free. A shell company cannot produce one.
     class Settlement(models.TextChoices):
+        # The common case for a small ISP with no registered business: money lands on
+        # their personal M-Pesa line.
+        MPESA = "mpesa", "M-Pesa (phone number)"
         PAYBILL = "paybill", "M-Pesa Paybill (B2B)"
         BANK = "bank", "Bank account (Pesalink/EFT)"
 
@@ -122,13 +125,17 @@ class Operator(TimeStampedModel):
         max_length=40, blank=True, help_text="Account number to credit at that paybill"
     )
     settlement_name = models.CharField(
-        max_length=120, blank=True, help_text="Registered name on the account"
+        max_length=120,
+        blank=True,
+        help_text="Account name — business or personal (small ISPs often use a personal name)",
     )
     payout_bank_name = models.CharField(max_length=80, blank=True)
     payout_bank_account_number = models.CharField(max_length=40, blank=True)
     payout_bank_account_name = models.CharField(max_length=120, blank=True)
-    # Legacy M-Pesa-phone payout destination (kept for existing tenants).
-    payout_phone = models.CharField(max_length=12, blank=True)
+    # The M-Pesa phone number money is sent to for the MPESA settlement method.
+    payout_phone = models.CharField(
+        max_length=12, blank=True, help_text="M-Pesa number we send your payout to"
+    )
 
     # ---- The payout destination is CONFIRMED, not pre-verified ---------------
     # Registering an account is plug-and-play: type it in, payments switch on. We do
@@ -270,6 +277,8 @@ class Operator(TimeStampedModel):
 
     @property
     def has_settlement_account(self) -> bool:
+        if self.settlement_method == self.Settlement.MPESA:
+            return bool(self.payout_phone)
         if self.settlement_method == self.Settlement.PAYBILL:
             # A paybill destination is only complete with BOTH the shortcode and the
             # account number to credit at it.
@@ -280,6 +289,9 @@ class Operator(TimeStampedModel):
 
     @property
     def settlement_destination(self) -> str:
+        if self.settlement_method == self.Settlement.MPESA:
+            name = f" ({self.settlement_name})" if self.settlement_name else ""
+            return f"M-Pesa {self.payout_phone}{name}"
         if self.settlement_method == self.Settlement.PAYBILL:
             acct = self.settlement_paybill_account
             suffix = f" acct {acct}" if acct else ""

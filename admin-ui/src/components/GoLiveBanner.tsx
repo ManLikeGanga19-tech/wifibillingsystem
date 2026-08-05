@@ -2,6 +2,14 @@ import { CheckCircle2, Circle, Rocket } from 'lucide-react';
 import { MeOperator } from '../api/client';
 import SettlementSetup from './SettlementSetup';
 
+// Terms live on the marketing (apex) site; derive the link from the current domain.
+const TERMS_URL = (() => {
+  const { protocol, hostname, port } = window.location;
+  if (hostname === 'localhost' || hostname === '127.0.0.1') return 'http://localhost:4900/terms';
+  const base = hostname.split('.').slice(1).join('.') || hostname;
+  return `${protocol}//${base}${port ? `:${port}` : ''}/terms`;
+})();
+
 /**
  * The honest explanation of the money gate.
  *
@@ -104,15 +112,13 @@ export default function GoLiveBanner({
         )}
 
         {!suspended && (
-          // The custody model, said out loud. An ISP WILL ask "why does my
-          // customers' money go to you?" — better they read the answer here than
-          // invent a worse one.
           <p className="text-[11px] font-mono text-[#141414]/50 mt-4 border-t border-[#141414]/10 pt-3 leading-relaxed">
-            <b>Why we hold the money:</b> one paybill means one M-Pesa integration and one
-            reconciliation — and <b>we absorb every transaction cost</b>, which you would
-            otherwise pay Safaricom yourself. Your customers pay WIFI.OS; we attribute every
-            shilling to you in a ledger you can see, and settle it to your own account on
-            request. Your first month is free.
+            Your customers pay WIFI.OS; we credit every shilling to you and settle it to your
+            account on request. First month free.{' '}
+            <a href={TERMS_URL} target="_blank" rel="noreferrer" className="underline">
+              Why we hold the money
+            </a>
+            .
           </p>
         )}
       </div>

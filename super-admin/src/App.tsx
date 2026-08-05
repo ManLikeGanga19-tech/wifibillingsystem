@@ -11,6 +11,7 @@ import {
   TrendingUp,
 } from 'lucide-react';
 import { api, logout, type Me } from './api/client';
+import { keepSessionFresh } from './api/auth';
 import { useHashRoute } from './utils/useHashRoute';
 import { ToastHost } from './components/ui';
 import LoginView from './components/LoginView';
@@ -28,7 +29,14 @@ const KNOWN_TABS: ReadonlySet<Tab> = new Set<Tab>([
   'command', 'finance', 'tenants', 'ops', 'governance', 'search',
 ]);
 
-const ISP_CONSOLE_URL = 'http://localhost:4600';
+// Derived from the CURRENT domain so links work on any deployment (dev localhost
+// ports, staging :8443, prod) — never a hardcoded localhost that 404s in production.
+export function ispConsoleOrigin(slug: string): string {
+  const { protocol, hostname, port } = window.location;
+  if (hostname === 'localhost' || hostname === '127.0.0.1') return 'http://localhost:4600';
+  const base = hostname.split('.').slice(1).join('.') || hostname;
+  return `${protocol}//${slug}.${base}${port ? `:${port}` : ''}`;
+}
 
 const NAV: { title: string | null; items: { id: Tab; label: string; icon: typeof Gauge }[] }[] = [
   { title: null, items: [{ id: 'command', label: 'Dashboard', icon: Gauge }] },
@@ -80,6 +88,9 @@ export default function App() {
   useEffect(() => {
     loadMe();
   }, [loadMe]);
+
+  // Keep the session renewed on focus + heartbeat so inactivity never forces re-login.
+  useEffect(() => keepSessionFresh(), []);
 
   const signOut = async () => {
     await logout(); // the server clears the cookies; nothing to clear here
@@ -217,15 +228,17 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-3 sm:gap-4 font-mono text-[10px] sm:text-xs">
-            <a
-              href={ISP_CONSOLE_URL}
-              target="_blank"
-              rel="noreferrer"
-              title="Open your own ISP console"
-              className="hidden sm:flex items-center gap-1.5 border border-[#141414] bg-[#E4E3E0] px-2 py-1.5 font-bold uppercase cursor-pointer hover:bg-[#141414] hover:text-white transition"
-            >
-              <Globe className="h-3.5 w-3.5" /> My ISP
-            </a>
+            {me.operator && (
+              <a
+                href={ispConsoleOrigin(me.operator.slug)}
+                target="_blank"
+                rel="noreferrer"
+                title="Open your own ISP console"
+                className="hidden sm:flex items-center gap-1.5 border border-[#141414] bg-[#E4E3E0] px-2 py-1.5 font-bold uppercase cursor-pointer hover:bg-[#141414] hover:text-white transition"
+              >
+                <Globe className="h-3.5 w-3.5" /> My ISP
+              </a>
+            )}
             <div className="border-l border-[#141414] pl-3 sm:pl-4 text-right">
               <div className="text-[11px] opacity-50 uppercase truncate max-w-[10rem]">
                 {me.name}

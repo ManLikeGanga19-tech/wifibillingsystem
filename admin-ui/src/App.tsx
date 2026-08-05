@@ -26,7 +26,7 @@ import {
 } from 'lucide-react';
 
 import { BandwidthProfile, Subscriber, OutboundCampaign } from './types';
-import { api, ApiPlan, ApiTenant, logout, Me, NavCounts } from './api/client';
+import { api, ApiPlan, ApiTenant, keepSessionFresh, logout, Me, NavCounts, setOnSessionExpired, setOnConnectionChange } from './api/client';
 import { planToProfile, profileToPlan, campaignToUi, subscriberToUi } from './api/mappers';
 import { useHashRoute } from './utils/useHashRoute';
 import { toast, ToastHost } from './components/ui';
@@ -153,7 +153,16 @@ const NAV_GROUPS: { title: string | null; items: NavItem[] }[] = [
 /** This app is now PURELY the ISP console. Everything cross-tenant (tenants,
  * payouts, reconciliation, audit, P&L) lives in the separate Platform Control
  * app — so an ISP never downloads platform code, and the two deploy apart. */
-const PLATFORM_CONSOLE_URL = 'http://localhost:4800';
+// Derived from the CURRENT domain so cross-console links work on ANY deployment —
+// dev localhost ports, staging on :8443, production — never a hardcoded host that
+// would 404 in the browser and make the system look broken.
+function consoleOrigin(subdomain: string, devPort: string): string {
+  const { protocol, hostname, port } = window.location;
+  if (hostname === 'localhost' || hostname === '127.0.0.1') return `http://localhost:${devPort}`;
+  const base = hostname.split('.').slice(1).join('.') || hostname;
+  return `${protocol}//${subdomain}.${base}${port ? `:${port}` : ''}`;
+}
+const PLATFORM_CONSOLE_URL = consoleOrigin('admin', '4800');
 
 export default function App() {
   // Session lives in an httpOnly cookie we cannot read, so "am I signed in?" is a
@@ -217,6 +226,32 @@ export default function App() {
       .catch(() => setMe(null)) // not signed in -> the login gate
       .finally(() => setChecking(false));
   }, [loadMe]);
+
+  // Keep the session renewed on tab-focus + a heartbeat, so returning after
+  // inactivity never lands on an expired token and forces a re-login.
+  useEffect(() => keepSessionFresh(), []);
+
+  // When a session dies mid-use and can't be renewed, return to the sign-in screen
+  // CENTRALLY — instead of every data call showing "could not load — is the API running?",
+  // which wrongly blames the backend. Only nudge if we were actually signed in (so a plain
+  // "not signed in" on first load stays silent and just shows the login gate).
+  useEffect(() => {
+    setOnSessionExpired(() =>
+      setMe((prev) => {
+        if (prev) toast('info', 'Your session ended — please sign in again.');
+        return null;
+      })
+    );
+    return () => setOnSessionExpired(null);
+  }, []);
+
+  // A brief API blip (a deploy, an overload) shows a subtle "Reconnecting…" chip instead of
+  // a scary "API is down". The client layer retries and auto-recovers; this is just the hint.
+  const [reconnecting, setReconnecting] = useState(false);
+  useEffect(() => {
+    setOnConnectionChange((s) => setReconnecting(s === 'reconnecting'));
+    return () => setOnConnectionChange(null);
+  }, []);
 
   /** Leave an ISP we were granted access to. The server ends the grant AND clears
    * the acting-tenant cookie, so we simply re-ask who we are. */
@@ -587,11 +622,23 @@ export default function App() {
         </div>
 
         <footer className="h-8 border-t border-[#141414] bg-white flex items-center justify-between px-4 sm:px-6 font-mono text-[10px] text-[#141414]/70 shrink-0 select-none">
-          <p className="truncate">WIFI.OS Billing • Connected to live API</p>
+          <p className="truncate">
+            {reconnecting ? (
+              <span className="text-[#B26B00]">Reconnecting to the API…</span>
+            ) : (
+              'WIFI.OS Billing • Connected to live API'
+            )}
+          </p>
           <div className="hidden sm:flex items-center gap-4">
             <span>{navCounts ? `${navCounts.mikrotik} router${navCounts.mikrotik !== 1 ? 's' : ''}` : ''}</span>
           </div>
         </footer>
+        {reconnecting && (
+          <div className="fixed bottom-12 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-[#141414] text-[#E4E3E0] px-3 py-1.5 text-[11px] font-mono shadow-lg">
+            <span className="h-2 w-2 rounded-full bg-[#E4A11B] animate-pulse" />
+            Reconnecting… your work is safe
+          </div>
+        )}
       </main>
       <AssistantWidget />
       <ToastHost />

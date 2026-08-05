@@ -291,3 +291,31 @@ def test_the_dashboard_summary_aggregates_the_base():
     assert body["online_now"] == 1
     assert body["over_fup"] == 1
     assert body["top_consumers"][0]["account_number"] == heavy.account_number
+
+
+# --- cheap presence sweep (separate from the heavy usage poll) ---------------------------
+
+
+def test_presence_marks_a_connected_client_online_without_usage_accounting():
+    from apps.pppoe.models import ClientUsage
+
+    client = a_client()
+    online(client, 1_000_000, 2_000_000, ip="10.6.0.254", uptime="5m")
+    seen = metering.poll_presence_all()
+    assert seen == 1
+    client.refresh_from_db()
+    assert client.is_online is True
+    assert client.wan_ip == "10.6.0.254"
+    assert client.session_uptime == "5m"
+    # Presence is CHEAP: it must not do byte-counter accounting.
+    assert not ClientUsage.objects.filter(client=client).exists()
+
+
+def test_presence_marks_a_dropped_client_offline():
+    client = a_client()
+    online(client, 1, 1)
+    metering.poll_presence_all()
+    assert Client.objects.get(pk=client.pk).is_online is True
+    DummyAdapter.pppoe_active = {}  # they dropped off the router
+    metering.poll_presence_all()
+    assert Client.objects.get(pk=client.pk).is_online is False

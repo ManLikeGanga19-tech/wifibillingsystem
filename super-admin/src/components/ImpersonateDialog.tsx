@@ -3,7 +3,14 @@ import { Eye, ShieldAlert } from 'lucide-react';
 import { api, type Tenant } from '../api/client';
 import { Btn, toast } from './ui';
 
-const ISP_CONSOLE = 'http://localhost:4600'; // dev; in prod: https://<slug>.wifios.co.ke
+// The tenant's console origin, derived from the CURRENT domain (dev localhost / staging
+// :8443 / prod) — never a hardcoded host.
+function ispConsoleOrigin(slug: string): string {
+  const { protocol, hostname, port } = window.location;
+  if (hostname === 'localhost' || hostname === '127.0.0.1') return 'http://localhost:4600';
+  const base = hostname.split('.').slice(1).join('.') || hostname;
+  return `${protocol}//${slug}.${base}${port ? `:${port}` : ''}`;
+}
 
 /**
  * The one door into a tenant's console — and it is deliberately a door, not a
@@ -33,7 +40,7 @@ export default function ImpersonateDialog({
       // The cookie and the grant that authorises it can never drift apart.
       await api.impersonation.start(tenant.slug, reason.trim(), minutes);
       toast('green', `Access to ${tenant.name} opened for ${minutes} minutes — and recorded.`);
-      window.open(ISP_CONSOLE, '_blank');
+      window.open(ispConsoleOrigin(tenant.slug), '_blank');
       onStarted();
     } catch {
       toast('red', 'Could not open access.');

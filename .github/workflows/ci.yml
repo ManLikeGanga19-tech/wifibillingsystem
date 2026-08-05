@@ -15,7 +15,7 @@ name: CI
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, staging]
   pull_request:
 
 concurrency:
@@ -189,3 +189,59 @@ jobs:
           image-ref: wifios/api:ci
           severity: HIGH,CRITICAL
           ignore-unfixed: true
+
+  # ---------------------------------------------------------------------------
+  # Deploy to STAGING — only after every check above is green, only on the `staging`
+  # branch, only on a real push (never a PR). `main` is reserved for PRODUCTION and is
+  # deliberately NOT a deploy trigger here, so a merge to main never touches the staging
+  # box (and won't touch production until a production deploy job is added). This is why
+  # we stopped deploying by hand: a broken build, a missing migration, or a committed
+  # secret never reaches the box, because deploy doesn't run unless backend + frontends
+  # + audit + images all pass first.
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: Deploy to staging
+    needs: [backend, frontends, audit, images]
+    if: github.ref == 'refs/heads/staging' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-staging
+      cancel-in-progress: false # never interrupt a deploy mid-flight
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Load the deploy key
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+
+      # Push the source the runner already checked out. We do NOT --delete (the VPS holds
+      # the .env and Caddy's cert volume, which are not in the repo).
+      - name: Sync source to the VPS
+        run: |
+          rsync -az -e "ssh -i ~/.ssh/deploy_key" \
+            --exclude node_modules --exclude .git --exclude dist \
+            --exclude __pycache__ --exclude '*.pyc' --exclude .pytest_cache \
+            backend admin-ui super-admin portal marketing deploy \
+            "deploy@${{ secrets.VPS_HOST }}:~/wifios/"
+
+      # Rebuild, run migrations (the api container migrates on boot), and roll. Caddy is
+      # restarted (not reloaded) so Caddyfile changes always take — a graceful reload has
+      # been observed to keep a stale header policy.
+      - name: Build, migrate, and bring up
+        run: |
+          ssh -i ~/.ssh/deploy_key "deploy@${{ secrets.VPS_HOST }}" 'bash -s' <<'REMOTE'
+          set -e
+          cd ~/wifios/deploy
+          C="docker compose -f docker-compose.prod.yml --env-file .env --profile staging"
+          $C build
+          # --wait: block until the api's health check passes (migrations applied, DB
+          # reachable) before we call the deploy done — a broken rollout fails here loudly
+          # instead of silently serving 500s. Caddy holds/retries client requests across the
+          # brief api swap (see Caddyfile api_backend), so the rollout is invisible to ISPs.
+          $C up -d --wait
+          $C restart caddy
+          $C ps --format '{{.Name}} {{.State}}'
+          REMOTE

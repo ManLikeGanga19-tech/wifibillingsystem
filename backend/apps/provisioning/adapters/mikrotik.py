@@ -13,6 +13,7 @@ from .base import (
     ActiveSession,
     DeviceInfo,
     HostEntry,
+    PppoeSecret,
     ProvisioningAdapter,
     ProvisioningAuthError,
     ProvisioningError,
@@ -252,6 +253,34 @@ class MikroTikRestAdapter(ProvisioningAdapter):
         rows = resp.json()
         return rows[0][".id"] if rows else None
 
+    def _pppoe_addressing(self, client_http) -> dict:
+        """The local-address (gateway) + remote-address (pool) a plan profile must carry.
+
+        A PPP secret is authenticated against its OWN profile, and if that profile has no
+        addressing the client comes up with no IP — authenticated but dead. Plan profiles
+        the platform creates therefore have to carry addressing too. We READ it from the
+        PPPoE server's default profile rather than hard-coding a pool, so this honours
+        whatever the ISP set up and works unchanged on any router. Empty if the ISP uses a
+        bridged/other scheme with no pool — we never invent one.
+        """
+        servers = client_http.get("/ppp/profile", params={"name": "pppoe-default"}).json()
+        # Prefer the pppoe-server's declared default profile; fall back to `pppoe-default`.
+        try:
+            srv = client_http.get("/interface/pppoe-server/server").json()
+            dp = srv[0].get("default-profile") if srv else None
+            if dp:
+                servers = client_http.get("/ppp/profile", params={"name": dp}).json()
+        except (httpx.HTTPError, IndexError, KeyError):
+            pass
+        if not servers:
+            return {}
+        p = servers[0]
+        return {
+            k: p[k]
+            for k in ("local-address", "remote-address")
+            if p.get(k)
+        }
+
     def ensure_pppoe_profile(self, plan) -> ProvisionResult:
         payload = {
             "name": plan.mikrotik_profile,
@@ -260,6 +289,9 @@ class MikroTikRestAdapter(ProvisioningAdapter):
         }
         try:
             with self._client() as c:
+                # Carry the same pool + gateway the ISP's PPPoE server hands out, or an
+                # authenticated client on this plan would get no IP.
+                payload.update(self._pppoe_addressing(c))
                 existing = self._find_id(c, "/ppp/profile", name=plan.mikrotik_profile)
                 if existing:
                     c.patch(f"/ppp/profile/{existing}", json=payload).raise_for_status()
@@ -369,6 +401,52 @@ class MikroTikRestAdapter(ProvisioningAdapter):
                 )
             )
         return sessions
+
+    def list_pppoe_secrets(self) -> list[PppoeSecret]:
+        """Read every PPPoE /ppp/secret off the router so an ISP can adopt pre-existing
+        users into WIFI.OS. Password is stored plaintext on RouterOS, so an adopted client
+        keeps its exact credentials and its live session is never disturbed."""
+        try:
+            with self._client() as c:
+                resp = c.get(
+                    "/ppp/secret",
+                    params={".proplist": "name,password,profile,comment,service"},
+                )
+                resp.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise ProvisioningError(
+                f"list_pppoe_secrets failed on {self.router}: {exc}"
+            ) from exc
+        secrets = []
+        for row in resp.json():
+            # service "any" also serves PPPoE; skip pure pptp/l2tp/etc. secrets.
+            if row.get("service", "any") not in ("pppoe", "any", ""):
+                continue
+            username = row.get("name", "")
+            if username:
+                secrets.append(
+                    PppoeSecret(
+                        username=username,
+                        password=row.get("password", ""),
+                        profile=row.get("profile", ""),
+                        comment=row.get("comment", ""),
+                    )
+                )
+        return secrets
+
+    def kick_pppoe_session(self, client) -> ProvisionResult:
+        """Drop the live session so the CPE redials onto the (changed) profile immediately.
+        Credentials are untouched, so the customer reconnects on their own within seconds."""
+        try:
+            with self._client() as c:
+                aid = self._find_id(c, "/ppp/active", name=client.pppoe_username)
+                if aid:
+                    c.delete(f"/ppp/active/{aid}").raise_for_status()
+            return ProvisionResult(ok=True, message="session kicked")
+        except httpx.HTTPError as exc:
+            raise ProvisioningError(
+                f"kick_pppoe_session failed on {self.router}: {exc}"
+            ) from exc
 
     def get_device_info(self) -> DeviceInfo:
         """Query the router's identity + live health. Stable fields are persisted

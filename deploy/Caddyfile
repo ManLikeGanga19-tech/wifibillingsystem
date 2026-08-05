@@ -27,7 +27,15 @@
 	# Wildcard certificates need a DNS challenge (Let's Encrypt will not issue *.x
 	# over HTTP-01). The token is scoped to DNS edits on this zone and lives in the
 	# environment — never in this file, never in the repo.
-	acme_dns cloudflare {$CLOUDFLARE_API_TOKEN}
+	#
+	# The apex and the wildcard both challenge on _acme-challenge.wifios.co.ke, so the
+	# record must be fully propagated before the CA validates or it races. We check
+	# against public resolvers (not the box's own) and give propagation real time.
+	acme_dns cloudflare {$CLOUDFLARE_API_TOKEN} {
+		resolvers 1.1.1.1 8.8.8.8
+		propagation_delay 45s
+		propagation_timeout 10m
+	}
 
 	# Staging ACME while you are still fighting DNS: Let's Encrypt's production rate
 	# limits are unforgiving (5 failures/hour), and hitting them locks you out for the
@@ -70,19 +78,39 @@
 	header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'"
 }
 
+# The Django upstream, everywhere it's proxied. Retry + active health so a rolling deploy
+# (the api container restarting) never returns a hard error: Caddy HOLDS the request and
+# retries for up to lb_try_duration until the api is serving again, and the health check
+# keeps it from routing to an api that isn't ready yet (still migrating on boot). Combined
+# with the console's own retry layer, a deploy is invisible to a logged-in ISP.
+(api_backend) {
+	reverse_proxy api:8000 {
+		lb_try_duration 30s
+		lb_try_interval 300ms
+		health_uri /api/v1/health/
+		health_interval 3s
+		health_timeout 4s
+	}
+}
+
 # ---------------------------------------------------------------------------
 # The marketing site
 # ---------------------------------------------------------------------------
 wifios.co.ke, www.wifios.co.ke {
 	import security_headers
-	# The marketing site embeds screen recordings and (eventually) an og image, so
-	# media-src is open to self; still no third-party scripts.
-	header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data:; media-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'"
+	# The marketing site is a static Astro build. Its islands (the signup wizard) hydrate
+	# via small INLINE scripts, so script-src needs 'unsafe-inline' here or the wizard
+	# never boots and shows a forever-spinner. This site renders no user-controlled HTML,
+	# so there is no injection point for inline script to be abused through — the risk that
+	# 'unsafe-inline' normally carries doesn't exist here. The money-handling CONSOLES keep
+	# the strict 'self'-only policy (their JS is all external bundles). media-src is open to
+	# self for the embedded screen recordings.
+	header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data:; media-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'"
 
 	# The signup wizard talks to the API from this origin. Same-origin, so the draft
 	# cookie rides along without CORS.
 	handle /api/* {
-		reverse_proxy api:8000
+		import api_backend
 	}
 
 	handle {
@@ -99,7 +127,7 @@ wifios.co.ke, www.wifios.co.ke {
 # ---------------------------------------------------------------------------
 api.wifios.co.ke {
 	import security_headers
-	reverse_proxy api:8000
+	import api_backend
 	encode zstd gzip
 }
 
@@ -112,7 +140,7 @@ admin.wifios.co.ke {
 	import csp_spa
 
 	handle /api/* {
-		reverse_proxy api:8000
+		import api_backend
 	}
 	handle {
 		reverse_proxy super-admin:80
@@ -135,15 +163,15 @@ admin.wifios.co.ke {
 
 	# Same-origin API: the cookie just works.
 	handle /api/* {
-		reverse_proxy api:8000
+		import api_backend
 	}
 
 	# Django's own surfaces (schema, admin) stay reachable per-tenant for support.
 	handle /admin/* {
-		reverse_proxy api:8000
+		import api_backend
 	}
 	handle /static/* {
-		reverse_proxy api:8000
+		import api_backend
 	}
 
 	# The captive portal: what an ISP's CUSTOMERS see when they connect to the wifi.

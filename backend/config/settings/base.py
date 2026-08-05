@@ -240,6 +240,13 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.pppoe.tasks.poll_pppoe_usage",
         "schedule": 300.0,
     },
+    # Cheap online/offline presence sweep, separate from the heavy usage poll above, so a
+    # customer who just dialed in lights up "live" within ~a minute instead of up to five.
+    # One /ppp/active call per router — safe to run this often.
+    "poll-pppoe-presence": {
+        "task": "apps.pppoe.tasks.poll_pppoe_presence",
+        "schedule": 60.0,
+    },
     # Captive-hotspot lifecycle (Settings > Hotspot). Both no-op for an ISP on the defaults.
     "prune-dormant-hotspot": {
         "task": "apps.provisioning.tasks.prune_dormant_hotspot_subscribers",
@@ -278,9 +285,13 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.payments.tasks.reconcile_pending_transactions",
         "schedule": 20.0,
     },
+    # Every 60s (was 300s) so a rebooted router recovers in the console on its own within
+    # ~a minute of its tunnel re-forming, instead of sitting "offline" for up to 5. The
+    # floor below that is the router's own boot + WireGuard re-dial. Manual "resync" does a
+    # live check for instant on-demand recovery.
     "check-router-health": {
         "task": "apps.provisioning.tasks.check_router_health",
-        "schedule": 300.0,
+        "schedule": 60.0,
     },
     "sync-all-routers-nightly": {
         "task": "apps.provisioning.tasks.sync_all_routers",
@@ -316,6 +327,19 @@ DARAJA_CALLBACK_TOKEN = os.getenv("DARAJA_CALLBACK_TOKEN", "dev-callback-token")
 # customer's phone is sent to by the captive portal, so it is baked into the hotspot
 # login page on every router — see provisioning.onboarding and core.domains.
 TENANT_BASE_DOMAIN = os.getenv("TENANT_BASE_DOMAIN", "wifios.co.ke")
+
+# --- WireGuard management plane (docs/WIREGUARD_MANAGEMENT_PLANE.md) ---
+# Every router dials the hub outbound (CGNAT-proof); the control plane addresses it back at
+# its overlay /32. NONE of these are secrets: WireGuard public keys and the hub endpoint are
+# public by definition. The only secret — each router's PRIVATE key — is generated per-router
+# and stored Fernet-encrypted (never here), honouring the no-secrets-in-code rule.
+WG_OVERLAY_CIDR = os.getenv("WG_OVERLAY_CIDR", "10.88.0.0/16")
+WG_HUB_IP = os.getenv("WG_HUB_IP", "10.88.0.1")
+# host:port the router dials, e.g. hub.wifios.co.ke:51820. Empty until the hub is stood up.
+WG_HUB_ENDPOINT = os.getenv("WG_HUB_ENDPOINT", "")
+# The hub's WireGuard public key (public by definition), pasted into each router's peer.
+WG_HUB_PUBLIC_KEY = os.getenv("WG_HUB_PUBLIC_KEY", "")
+WG_KEEPALIVE_SECONDS = int(os.getenv("WG_KEEPALIVE_SECONDS", "25"))
 
 # Dev/staging escape hatch: when set, routers redirect HERE instead of the tenant's real
 # subdomain (which does not resolve from a laptop or an ngrok tunnel). Unset in

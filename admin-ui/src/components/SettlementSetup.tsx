@@ -1,8 +1,17 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
-import { Banknote, CheckCircle2, KeyRound, Loader2, Pencil, ShieldAlert, Smartphone, X, Zap } from 'lucide-react';
+import { Banknote, Building2, CheckCircle2, KeyRound, Loader2, Pencil, ShieldAlert, Smartphone, X, Zap } from 'lucide-react';
 import { api, ApiError, asMfaChallenge, type MfaChallenge, Settlement } from '../api/client';
 import MfaGate from './MfaGate';
 import { toast } from './ui';
+
+// The Terms of Service live on the marketing site (the apex domain), so link there from
+// the console — derived from the current domain, never a hardcoded host.
+const TERMS_URL = (() => {
+  const { protocol, hostname, port } = window.location;
+  if (hostname === 'localhost' || hostname === '127.0.0.1') return 'http://localhost:4900/terms';
+  const base = hostname.split('.').slice(1).join('.') || hostname;
+  return `${protocol}//${base}${port ? `:${port}` : ''}/terms`;
+})();
 
 /**
  * "Where should we pay you?" — the last thing between a new ISP and their first
@@ -24,7 +33,7 @@ import { toast } from './ui';
  */
 export default function SettlementSetup({ onWentLive }: { onWentLive: () => void }) {
   const [state, setState] = useState<Settlement | null>(null);
-  const [method, setMethod] = useState<'paybill' | 'bank'>('paybill');
+  const [method, setMethod] = useState<'mpesa' | 'paybill' | 'bank'>('mpesa');
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   // Held in memory only, never in storage, and dropped the moment the change lands.
@@ -215,8 +224,9 @@ export default function SettlementSetup({ onWentLive }: { onWentLive: () => void
       <div className="flex gap-2">
         {(
           [
-            ['paybill', 'M-Pesa Paybill', Smartphone],
-            ['bank', 'Bank account', Banknote],
+            ['mpesa', 'M-Pesa number', Smartphone],
+            ['paybill', 'Paybill', Building2],
+            ['bank', 'Bank', Banknote],
           ] as const
         ).map(([value, label, Icon]) => (
           <button
@@ -235,7 +245,13 @@ export default function SettlementSetup({ onWentLive }: { onWentLive: () => void
         ))}
       </div>
 
-      {method === 'paybill' ? (
+      {method === 'mpesa' ? (
+        // The common case for a small ISP with no registered business — pay their own line.
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <Field name="payout_phone" label="M-Pesa number" placeholder="07XX XXX XXX" />
+          <Field name="settlement_name" label="Account name" placeholder="Jane Doe" />
+        </div>
+      ) : method === 'paybill' ? (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
           <Field name="settlement_paybill" label="Your paybill number" placeholder="123456" />
           <Field
@@ -243,17 +259,13 @@ export default function SettlementSetup({ onWentLive }: { onWentLive: () => void
             label="Account number"
             placeholder="account to credit"
           />
-          <Field
-            name="settlement_name"
-            label="Registered business name"
-            placeholder="Acme Networks Ltd"
-          />
+          <Field name="settlement_name" label="Account name" placeholder="Acme Networks Ltd" />
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
           <Field name="payout_bank_name" label="Bank" placeholder="I&M Bank" />
           <Field name="payout_bank_account_number" label="Account number" placeholder="0123456789" />
-          <Field name="payout_bank_account_name" label="Account name" placeholder="Acme Networks Ltd" />
+          <Field name="payout_bank_account_name" label="Account name" placeholder="Jane Doe or Acme Ltd" />
         </div>
       )}
 
@@ -280,7 +292,11 @@ export default function SettlementSetup({ onWentLive }: { onWentLive: () => void
 
       {!state.has_account && (
         <p className="text-[10px] font-mono text-[#141414]/50 leading-relaxed">
-          Payments switch on the moment you save — no documents, no waiting. {state.explainer}
+          Payments switch on the moment you save. {state.explainer}{' '}
+          <a href={TERMS_URL} target="_blank" rel="noreferrer" className="underline">
+            How settlement works
+          </a>
+          .
         </p>
       )}
     </form>
