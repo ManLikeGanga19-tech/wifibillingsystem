@@ -150,6 +150,13 @@ class ProvisioningAdapter(ABC):
         pre-existing users into WIFI.OS. Default empty for adapters that can't read them."""
         return []
 
+    def kick_pppoe_session(self, client) -> ProvisionResult:
+        """Drop a client's LIVE PPPoE session without touching their credentials, so the CPE
+        redials at once and picks up a changed profile (e.g. a new plan's speed). A running
+        session keeps its old queue until it reconnects, so this is what makes a plan change
+        take effect now rather than whenever the customer next reboots."""
+        return ProvisionResult(ok=True, message="noop")
+
     def ensure_pppoe_mss_clamp(self) -> ProvisionResult:
         """Clamp TCP MSS to the path MTU on the router so PPPoE customers (whose link MTU is
         ~1480, below Ethernet's 1500) don't get slow or hung connections to the many sites

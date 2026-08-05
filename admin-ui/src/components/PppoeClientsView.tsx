@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { Users, Plus, Ban, RotateCcw, Zap, Printer, X, Loader2, Wifi, WifiOff, AlertTriangle, Key, Copy, Eye, EyeOff, Trash2, RefreshCw, Upload, Download } from 'lucide-react';
+import { Users, Plus, Ban, RotateCcw, Zap, Printer, X, Loader2, Wifi, WifiOff, AlertTriangle, Key, Copy, Eye, EyeOff, Trash2, RefreshCw, Upload, Download, Pencil, Save } from 'lucide-react';
 import { api, ApiError, PppoeClient, PppoePlan, ApiRouter, AccessPoint, PppoeUsageSummary, CapacityWarning, PppoeImportRow, PppoeImportItem } from '../api/client';
 import {
   Badge, Btn, Field, FilterChips, inputCls, Panel, RefreshBtn, TableShell, tdCls, toast, useList, ViewHeader, fmtDateTime, fmtKsh,
@@ -124,6 +124,7 @@ export default function PppoeClientsView() {
   const [showForm, setShowForm] = useState(false);
   const [sheetFor, setSheetFor] = useState<PppoeClient | null>(null);
   const [credsFor, setCredsFor] = useState<PppoeClient | null>(null);
+  const [editFor, setEditFor] = useState<PppoeClient | null>(null);
   const [showImport, setShowImport] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -309,7 +310,13 @@ export default function PppoeClientsView() {
           <tr key={c.id} className="hover:bg-[#f0efec]/40 transition">
             <td className={`${tdCls} font-mono font-bold`}>{c.account_number}</td>
             <td className={tdCls}>
-              {c.full_name}
+              <button
+                onClick={() => setEditFor(c)}
+                className="text-left hover:underline cursor-pointer"
+                title="Edit this client"
+              >
+                {c.full_name}
+              </button>
               <span className="block text-[11px] font-mono text-[#141414]/50">{c.pppoe_username}</span>
             </td>
             <td className={tdCls}>{c.plan_name}</td>
@@ -334,6 +341,9 @@ export default function PppoeClientsView() {
                   <RotateCcw className="h-3.5 w-3.5" /> Restore
                 </Btn>
               )}
+              <Btn variant="outline" onClick={() => setEditFor(c)} title="Edit this client's details">
+                <Pencil className="h-3.5 w-3.5" /> Edit
+              </Btn>
               <Btn variant="outline" onClick={() => setCredsFor(c)} title="PPPoE username & password, reset, delete">
                 <Key className="h-3.5 w-3.5" /> Credentials
               </Btn>
@@ -361,6 +371,17 @@ export default function PppoeClientsView() {
           onContinue={() => submit(true)}
         />
       )}
+      {editFor && (
+        <EditClientDialog
+          client={editFor}
+          plans={plans}
+          routers={routers}
+          aps={aps}
+          onClose={() => setEditFor(null)}
+          onSaved={reload}
+          onOpenCredentials={(c) => { setEditFor(null); setCredsFor(c); }}
+        />
+      )}
       {showImport && (
         <ImportDialog
           routers={routers}
@@ -369,6 +390,197 @@ export default function PppoeClientsView() {
           onDone={reload}
         />
       )}
+    </div>
+  );
+}
+
+/**
+ * Edit a client. Everything here is editable EXCEPT the account number — that is the
+ * customer's permanent M-Pesa payment reference, so it stays with them when they move house
+ * (you just change the address). Changes that the router needs to know about — the plan, the
+ * site/router — are pushed to the MikroTik by the server, so the console and the network
+ * never disagree. The password lives in Credentials (it has to re-push), linked from here.
+ */
+function EditClientDialog({
+  client, plans, routers, aps, onClose, onSaved, onOpenCredentials,
+}: {
+  client: PppoeClient;
+  plans: PppoePlan[];
+  routers: ApiRouter[];
+  aps: AccessPoint[];
+  onClose: () => void;
+  onSaved: () => void;
+  onOpenCredentials: (c: PppoeClient) => void;
+}) {
+  const [form, setForm] = useState({
+    full_name: client.full_name ?? '',
+    phone: client.phone ?? '',
+    email: client.email ?? '',
+    physical_address: client.physical_address ?? '',
+    plan: String(client.plan),
+    router: String(client.router),
+    delivery_method: client.delivery_method,
+    access_point: client.access_point ? String(client.access_point) : '',
+    billing_day: String(client.billing_day),
+    notes: client.notes ?? '',
+  });
+  const [busy, setBusy] = useState(false);
+  const isWireless = form.delivery_method.startsWith('wireless');
+
+  const planChanged = Number(form.plan) !== client.plan;
+  const routerChanged = Number(form.router) !== client.router;
+
+  const save = async (e: FormEvent) => {
+    e.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    try {
+      await api.pppoe.clients.update(client.id, {
+        full_name: form.full_name,
+        phone: form.phone,
+        email: form.email,
+        physical_address: form.physical_address,
+        plan: Number(form.plan),
+        router: Number(form.router),
+        delivery_method: form.delivery_method as PppoeClient['delivery_method'],
+        access_point: isWireless && form.access_point ? Number(form.access_point) : null,
+        billing_day: Number(form.billing_day),
+        notes: form.notes,
+      });
+      toast(
+        'success',
+        planChanged || routerChanged
+          ? 'Saved — and pushed to the router.'
+          : `${form.full_name} updated.`,
+      );
+      onSaved();
+      onClose();
+    } catch (err) {
+      toast('error', err instanceof Error ? err.message : 'Could not save those changes.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-[#141414]/50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white border border-[#141414] w-full max-w-2xl max-h-[88vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-4 border-b border-[#141414]">
+          <h3 className="font-bold font-mono uppercase text-sm flex items-center gap-2">
+            <Pencil className="h-4 w-4" /> Edit client
+          </h3>
+          <button onClick={onClose} className="cursor-pointer"><X className="h-4 w-4" /></button>
+        </div>
+        <form onSubmit={save} className="p-5 space-y-4">
+          <div className="flex items-baseline justify-between border border-[#141414]/15 bg-[#f0efec] px-3 py-2">
+            <span className="font-mono text-[10px] uppercase tracking-wide text-[#141414]/50">Account number</span>
+            <b className="font-mono">{client.account_number}</b>
+          </div>
+          <p className="text-[11px] text-[#141414]/55 leading-relaxed -mt-2">
+            The account number never changes — it&apos;s how this customer&apos;s M-Pesa
+            payments find them, so it moves with them if they relocate.
+          </p>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <Field label="Full name">
+              <input required value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} className={inputCls} />
+            </Field>
+            <Field label="Phone">
+              <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} className={inputCls} placeholder="07XX…" />
+            </Field>
+            <Field label="Email">
+              <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className={inputCls} />
+            </Field>
+            <Field label="Address">
+              <input value={form.physical_address} onChange={(e) => setForm({ ...form, physical_address: e.target.value })} className={inputCls} />
+            </Field>
+            <Field label="Plan">
+              <select value={form.plan} onChange={(e) => setForm({ ...form, plan: e.target.value })} className={inputCls}>
+                {plans.map((p) => <option key={p.id} value={p.id}>{p.name} — {fmtKsh(p.price)}/mo</option>)}
+              </select>
+            </Field>
+            <Field label="Router / site">
+              <select value={form.router} onChange={(e) => setForm({ ...form, router: e.target.value })} className={inputCls}>
+                {routers.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+              </select>
+            </Field>
+            <Field label="Delivery">
+              <select value={form.delivery_method} onChange={(e) => setForm({ ...form, delivery_method: e.target.value })} className={inputCls}>
+                {DELIVERY.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
+              </select>
+            </Field>
+            {isWireless && (
+              <Field label="Access point (sector)">
+                <select value={form.access_point} onChange={(e) => setForm({ ...form, access_point: e.target.value })} className={inputCls}>
+                  <option value="">Unassigned</option>
+                  {aps.map((ap) => <option key={ap.id} value={ap.id}>{ap.tower_name} / {ap.name}</option>)}
+                </select>
+              </Field>
+            )}
+          </div>
+
+          <BillingDayPicker
+            value={Number(form.billing_day)}
+            onChange={(d) => setForm({ ...form, billing_day: String(d) })}
+          />
+
+          <Field label="Notes">
+            <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} className={`${inputCls} h-20`} />
+          </Field>
+
+          {(planChanged || routerChanged) && (
+            <div className="border border-[#B26B00]/40 bg-[#FFF8EC] px-3 py-2 text-xs text-[#B26B00] leading-relaxed">
+              {planChanged && <p>Changing the plan re-pushes the speed to the router and briefly reconnects this customer so the new rate applies immediately.</p>}
+              {routerChanged && <p>Moving them to another site transfers their PPPoE account to that router.</p>}
+            </div>
+          )}
+
+          <div className="flex items-center justify-between border-t border-[#141414]/10 pt-3">
+            <Btn variant="outline" type="button" onClick={() => onOpenCredentials(client)}>
+              <Key className="h-3.5 w-3.5" /> Change password
+            </Btn>
+            <div className="flex items-center gap-2">
+              <Btn variant="outline" type="button" onClick={onClose} disabled={busy}><X className="h-3.5 w-3.5" /> Cancel</Btn>
+              <Btn variant="green" type="submit" disabled={busy}>
+                {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                Save changes
+              </Btn>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+/** Billing day = which day of the month the ISP invoices this client. A month grid reads
+ *  like a calendar but picks a RECURRING day; 29–31 don't exist in every month, so 28 is the
+ *  ceiling (the server enforces the same). */
+function BillingDayPicker({ value, onChange }: { value: number; onChange: (d: number) => void }) {
+  return (
+    <div>
+      <label className="block font-mono text-[10px] uppercase tracking-wide text-[#141414]/50 mb-1.5">
+        Billing day — invoiced on day {value} of every month
+      </label>
+      <div className="grid grid-cols-7 gap-1 max-w-sm">
+        {Array.from({ length: 28 }, (_, i) => i + 1).map((d) => (
+          <button
+            key={d}
+            type="button"
+            onClick={() => onChange(d)}
+            className={`h-8 font-mono text-xs border cursor-pointer transition ${
+              d === value
+                ? 'bg-[#141414] text-[#E4E3E0] border-[#141414] font-bold'
+                : 'bg-white border-[#141414]/15 hover:border-[#141414]/50'
+            }`}
+          >
+            {d}
+          </button>
+        ))}
+      </div>
+      <p className="text-[11px] text-[#141414]/45 mt-1.5">
+        Months don&apos;t all have 29–31, so billing days run 1–28.
+      </p>
     </div>
   );
 }

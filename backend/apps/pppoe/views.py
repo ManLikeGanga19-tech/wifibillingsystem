@@ -37,6 +37,7 @@ from .services import (
     reset_pppoe_password,
     restore_client,
     suspend_client,
+    update_client,
 )
 
 
@@ -165,9 +166,24 @@ class ClientViewSet(TenantModelViewSet):
         # Credentials are set at create and changed only via reset_password (which re-pushes
         # to the router). A plain edit must never change them here, or the DB password would
         # silently diverge from the one on the MikroTik.
-        serializer.validated_data.pop("pppoe_username", None)
-        serializer.validated_data.pop("pppoe_password", None)
-        serializer.save()
+        data = dict(serializer.validated_data)
+        data.pop("pppoe_username", None)
+        data.pop("pppoe_password", None)
+        # Route through the service so a plan/router change also reaches the ROUTER — a
+        # DB-only save would leave the MikroTik enforcing the old plan (or holding the secret
+        # on the old router) and nobody could tell which was true.
+        # Serializers hand back model instances for FKs; the service works in *_id so it can
+        # compare cheaply against the old values.
+        FK_FIELDS = {"plan", "router", "access_point", "cpe_equipment"}
+        changes = {}
+        for field, value in data.items():
+            if field in FK_FIELDS:
+                changes[f"{field}_id"] = value.pk if value is not None else None
+            else:
+                changes[field] = value
+        serializer.instance = update_client(
+            self.get_object(), changes=changes, actor=self.request.user
+        )
 
     def destroy(self, request, *args, **kwargs):
         # Remove the secret from the router BEFORE dropping the record — no orphaned
