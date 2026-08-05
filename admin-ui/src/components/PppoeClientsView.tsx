@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { Users, Plus, Ban, RotateCcw, Zap, Printer, X, Loader2, Wifi, WifiOff, AlertTriangle } from 'lucide-react';
+import { Users, Plus, Ban, RotateCcw, Zap, Printer, X, Loader2, Wifi, WifiOff, AlertTriangle, Key, Copy, Eye, EyeOff, Trash2, RefreshCw } from 'lucide-react';
 import { api, ApiError, PppoeClient, PppoePlan, ApiRouter, AccessPoint, PppoeUsageSummary, CapacityWarning } from '../api/client';
 import {
   Badge, Btn, Field, FilterChips, inputCls, Panel, RefreshBtn, TableShell, tdCls, toast, useList, ViewHeader, fmtDateTime, fmtKsh,
@@ -123,10 +123,12 @@ export default function PppoeClientsView() {
   const [aps, setAps] = useState<AccessPoint[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [sheetFor, setSheetFor] = useState<PppoeClient | null>(null);
+  const [credsFor, setCredsFor] = useState<PppoeClient | null>(null);
   const [busy, setBusy] = useState(false);
   const blank = {
     full_name: '', phone: '', email: '', physical_address: '',
     plan: '', router: '', delivery_method: 'fibre', access_point: '', billing_day: '1',
+    pppoe_username: '', pppoe_password: '',
   };
   const [form, setForm] = useState(blank);
 
@@ -156,6 +158,9 @@ export default function PppoeClientsView() {
         delivery_method: form.delivery_method as PppoeClient['delivery_method'],
         access_point: isWireless && form.access_point ? Number(form.access_point) : null,
         billing_day: Number(form.billing_day),
+        // Blank = auto-generate (the server generates a strong one).
+        pppoe_username: form.pppoe_username.trim(),
+        pppoe_password: form.pppoe_password,
         ...(force ? { force: true } : {}),
       });
       setCapWarn(null);
@@ -254,6 +259,12 @@ export default function PppoeClientsView() {
             <Field label="Address" className="md:col-span-2">
               <input value={form.physical_address} onChange={(e) => setForm({ ...form, physical_address: e.target.value })} className={inputCls} />
             </Field>
+            <Field label="PPPoE username (optional)">
+              <input value={form.pppoe_username} onChange={(e) => setForm({ ...form, pppoe_username: e.target.value })} className={inputCls} placeholder="Auto-generated if blank" />
+            </Field>
+            <Field label="PPPoE password (optional)">
+              <input value={form.pppoe_password} onChange={(e) => setForm({ ...form, pppoe_password: e.target.value })} className={inputCls} placeholder="Auto-generated if blank" />
+            </Field>
             <Btn type="submit" variant="green" disabled={busy}>
               {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
               Create & provision
@@ -299,6 +310,9 @@ export default function PppoeClientsView() {
                   <RotateCcw className="h-3.5 w-3.5" /> Restore
                 </Btn>
               )}
+              <Btn variant="outline" onClick={() => setCredsFor(c)} title="PPPoE username & password, reset, delete">
+                <Key className="h-3.5 w-3.5" /> Credentials
+              </Btn>
               <Btn variant="outline" onClick={() => setSheetFor(c)} title="Printable account sheet">
                 <Printer className="h-3.5 w-3.5" /> Sheet
               </Btn>
@@ -308,6 +322,13 @@ export default function PppoeClientsView() {
       </TableShell>
 
       {sheetFor && <AccountSheet client={sheetFor} onClose={() => setSheetFor(null)} />}
+      {credsFor && (
+        <CredentialsDialog
+          client={credsFor}
+          onClose={() => setCredsFor(null)}
+          onChanged={reload}
+        />
+      )}
       {capWarn && (
         <CapacityWarningModal
           warning={capWarn}
@@ -408,6 +429,146 @@ function Row({ label, value }: { label: string; value: string }) {
     <div className="flex justify-between">
       <span className="opacity-50">{label}</span>
       <b>{value}</b>
+    </div>
+  );
+}
+
+/**
+ * The ISP-only credentials panel: the username + password the customer's CPE dials with,
+ * plus a hybrid reset (type your own, or generate) and delete. Deliberately separate from
+ * the printable customer account sheet — the password must never go on the customer's copy.
+ */
+function CredentialsDialog({
+  client, onClose, onChanged,
+}: {
+  client: PppoeClient;
+  onClose: () => void;
+  onChanged: () => void;
+}) {
+  const [password, setPassword] = useState(client.pppoe_password);
+  const [reveal, setReveal] = useState(false);
+  const [newPwd, setNewPwd] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [confirmDel, setConfirmDel] = useState(false);
+
+  const copy = (text: string, what: string) =>
+    navigator.clipboard?.writeText(text).then(
+      () => toast('success', `${what} copied.`),
+      () => toast('error', 'Could not copy.'),
+    );
+
+  const reset = async () => {
+    if (busy) return;
+    if (newPwd && (newPwd.length < 6 || /\s/.test(newPwd))) {
+      toast('error', 'Password needs 6+ characters and no spaces.');
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await api.pppoe.clients.resetPassword(client.id, newPwd || undefined);
+      setPassword(res.pppoe_password);
+      setNewPwd('');
+      setReveal(true);
+      toast('success', 'Password reset and pushed to the router.');
+      onChanged();
+    } catch (e) {
+      toast('error', e instanceof Error ? e.message : 'Reset failed.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const del = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await api.pppoe.clients.remove(client.id);
+      toast('success', `${client.full_name} deleted.`);
+      onChanged();
+      onClose();
+    } catch (e) {
+      toast('error', e instanceof Error ? e.message : 'Delete failed.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-[#141414]/50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white border border-[#141414] w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-4 border-b border-[#141414]">
+          <h3 className="font-bold font-mono uppercase text-sm flex items-center gap-2">
+            <Key className="h-4 w-4" /> PPPoE credentials
+          </h3>
+          <button onClick={onClose} className="cursor-pointer"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="p-5 space-y-4 text-sm">
+          <p className="text-[11px] text-[#141414]/55 leading-relaxed">
+            What the customer&apos;s router (CPE) dials with — enter these in its
+            {' '}<b>WAN → PPPoE</b> settings. Keep them private; don&apos;t print them on the
+            customer account sheet.
+          </p>
+
+          <div>
+            <label className="block font-mono text-[10px] uppercase tracking-wide text-[#141414]/50 mb-1">Username</label>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 font-mono text-sm bg-[#f0efec] border border-[#141414]/15 px-2.5 py-1.5 break-all">{client.pppoe_username}</code>
+              <Btn variant="outline" onClick={() => copy(client.pppoe_username, 'Username')} title="Copy"><Copy className="h-3.5 w-3.5" /></Btn>
+            </div>
+          </div>
+
+          <div>
+            <label className="block font-mono text-[10px] uppercase tracking-wide text-[#141414]/50 mb-1">Password</label>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 font-mono text-sm bg-[#f0efec] border border-[#141414]/15 px-2.5 py-1.5 break-all">
+                {reveal ? password : '•'.repeat(Math.max(password.length, 8))}
+              </code>
+              <Btn variant="outline" onClick={() => setReveal(!reveal)} title={reveal ? 'Hide' : 'Reveal'}>
+                {reveal ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+              </Btn>
+              <Btn variant="outline" onClick={() => copy(password, 'Password')} title="Copy"><Copy className="h-3.5 w-3.5" /></Btn>
+            </div>
+          </div>
+
+          <div className="border-t border-[#141414]/10 pt-3 space-y-2">
+            <label className="block font-mono text-[10px] uppercase tracking-wide text-[#141414]/50">Reset password</label>
+            <div className="flex items-center gap-2">
+              <input
+                value={newPwd}
+                onChange={(e) => setNewPwd(e.target.value)}
+                placeholder="Type a new one, or leave blank to generate"
+                className={`${inputCls} flex-1`}
+              />
+              <Btn variant="green" onClick={reset} disabled={busy}>
+                {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                {newPwd ? 'Set' : 'Generate'}
+              </Btn>
+            </div>
+            <p className="text-[11px] text-[#141414]/45">Pushed to the router immediately — update the CPE to match.</p>
+          </div>
+
+          <div className="border-t border-[#B22222]/20 pt-3">
+            {confirmDel ? (
+              <div className="space-y-2">
+                <p className="text-xs text-[#B22222] leading-relaxed">
+                  Delete <b>{client.full_name}</b>? This removes the user from the router and
+                  can&apos;t be undone.
+                </p>
+                <div className="flex items-center gap-2">
+                  <Btn variant="danger" onClick={del} disabled={busy}>
+                    {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />} Yes, delete
+                  </Btn>
+                  <Btn variant="outline" onClick={() => setConfirmDel(false)} disabled={busy}><X className="h-3.5 w-3.5" /> Cancel</Btn>
+                </div>
+              </div>
+            ) : (
+              <Btn variant="danger" onClick={() => setConfirmDel(true)}>
+                <Trash2 className="h-3.5 w-3.5" /> Delete client
+              </Btn>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

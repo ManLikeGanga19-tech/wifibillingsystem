@@ -15,7 +15,7 @@ from rest_framework.views import APIView
 
 from apps.core.permissions import RequireTenant, TenantCanTransact, TenantIsOperational
 from apps.core.public import PublicAPIView
-from apps.core.schema import OBJECT_RESPONSE
+from apps.core.schema import OBJECT_REQUEST, OBJECT_RESPONSE
 from apps.core.services import audit
 from apps.core.tenancy import acting_tenant
 from apps.core.viewsets import TenantModelViewSet, TenantReadOnlyViewSet
@@ -30,7 +30,14 @@ from .serializers import (
     ServicePlanSerializer,
     TowerSerializer,
 )
-from .services import create_client, provision_client, restore_client, suspend_client
+from .services import (
+    create_client,
+    delete_client,
+    provision_client,
+    reset_pppoe_password,
+    restore_client,
+    suspend_client,
+)
 
 
 class ServicePlanViewSet(TenantModelViewSet):
@@ -139,6 +146,12 @@ class ClientViewSet(TenantModelViewSet):
     def perform_create(self, serializer):
         operator = self.get_operator()
         data = serializer.validated_data
+        # Blank credentials mean "auto-generate": drop them so create_client's own generator
+        # runs, rather than trying to set an empty username/password.
+        if not data.get("pppoe_username"):
+            data.pop("pppoe_username", None)
+        if not data.get("pppoe_password"):
+            data.pop("pppoe_password", None)
         client = create_client(
             operator=operator,
             plan=data.pop("plan"),
@@ -147,6 +160,46 @@ class ClientViewSet(TenantModelViewSet):
             **data,
         )
         serializer.instance = client
+
+    def perform_update(self, serializer):
+        # Credentials are set at create and changed only via reset_password (which re-pushes
+        # to the router). A plain edit must never change them here, or the DB password would
+        # silently diverge from the one on the MikroTik.
+        serializer.validated_data.pop("pppoe_username", None)
+        serializer.validated_data.pop("pppoe_password", None)
+        serializer.save()
+
+    def destroy(self, request, *args, **kwargs):
+        # Remove the secret from the router BEFORE dropping the record — no orphaned
+        # /ppp/secret. If the router is unreachable, keep the record and say so (502).
+        instance = self.get_object()
+        try:
+            delete_client(instance, actor=request.user)
+        except ProvisioningError as exc:
+            return Response(
+                {"detail": f"Couldn't remove the user from the router: {exc}. "
+                           "Nothing was deleted — try again once the router is reachable."},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @extend_schema(request=OBJECT_REQUEST, responses=OBJECT_RESPONSE)
+    @action(detail=True, methods=["post"])
+    def reset_password(self, request, pk=None):
+        """Set a new PPPoE password (supplied, or auto-generated) and push it to the router.
+        Returns the new password so the ISP can read it back to the installer."""
+        client = self.get_object()
+        password = (request.data.get("password") or "").strip()
+        if password and (any(c.isspace() for c in password) or len(password) < 6):
+            return Response(
+                {"detail": "Use 6+ characters and no spaces, or leave blank to auto-generate."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            new_password = reset_pppoe_password(client, password=password, actor=request.user)
+        except ProvisioningError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+        return Response({"pppoe_username": client.pppoe_username, "pppoe_password": new_password})
 
     @action(detail=True, methods=["post"])
     def provision(self, request, pk=None):

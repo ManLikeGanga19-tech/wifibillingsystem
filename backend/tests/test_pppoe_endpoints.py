@@ -337,3 +337,105 @@ class TestSectorCapacity:
             {"access_point": full.id, "force": True}, format="json",
         )
         assert forced.status_code == 200, forced.content
+
+
+class TestClientCredentials:
+    """PPPoE dial credentials: readable on the dashboard, settable at create, resettable
+    (hybrid — typed or generated), and never changed by a plain edit."""
+
+    def _create(self, op, **extra):
+        plan = ServicePlanFactory(operator=op)
+        router = RouterFactory(operator=op)
+        payload = {"full_name": "Jane", "plan": plan.id, "router": router.id, **extra}
+        return staff(op).post("/api/v1/pppoe/clients/", payload, format="json")
+
+    def test_password_is_readable_on_the_dashboard(self):
+        # The gap this feature closes: the create response (and detail) carries the password
+        # so the ISP can hand it to an installer.
+        resp = self._create(OperatorFactory())
+        assert resp.status_code == 201, resp.content
+        body = resp.json()
+        assert body["pppoe_username"] and body["pppoe_password"]
+
+    def test_blank_credentials_autogenerate(self):
+        resp = self._create(OperatorFactory(), pppoe_username="", pppoe_password="")
+        assert resp.status_code == 201, resp.content
+        body = resp.json()
+        assert len(body["pppoe_username"]) >= 3
+        assert len(body["pppoe_password"]) >= 6
+
+    def test_isp_can_set_their_own_credentials(self):
+        resp = self._create(
+            OperatorFactory(), pppoe_username="janedoe", pppoe_password="hunter2x"
+        )
+        assert resp.status_code == 201, resp.content
+        body = resp.json()
+        assert body["pppoe_username"] == "janedoe"
+        assert body["pppoe_password"] == "hunter2x"
+
+    def test_short_password_is_rejected_on_create(self):
+        assert self._create(OperatorFactory(), pppoe_password="x").status_code == 400
+
+    def test_a_plain_edit_cannot_change_the_password(self):
+        op = OperatorFactory()
+        client = PppoeClientFactory(operator=op, pppoe_password="original1")
+        staff(op).patch(
+            f"/api/v1/pppoe/clients/{client.id}/",
+            {"pppoe_password": "sneaky99", "full_name": "New Name"}, format="json",
+        )
+        client.refresh_from_db()
+        assert client.pppoe_password == "original1"  # creds untouched by a plain edit
+        assert client.full_name == "New Name"  # the real edit still applied
+
+    def test_reset_generates_a_new_password(self):
+        op = OperatorFactory()
+        client = PppoeClientFactory(operator=op, status="active", pppoe_password="original1")
+        resp = staff(op).post(f"/api/v1/pppoe/clients/{client.id}/reset_password/")
+        assert resp.status_code == 200, resp.content
+        new = resp.json()["pppoe_password"]
+        assert new and new != "original1"
+        client.refresh_from_db()
+        assert client.pppoe_password == new
+
+    def test_reset_with_a_typed_password(self):
+        op = OperatorFactory()
+        client = PppoeClientFactory(operator=op, status="active")
+        resp = staff(op).post(
+            f"/api/v1/pppoe/clients/{client.id}/reset_password/",
+            {"password": "chosen123"}, format="json",
+        )
+        assert resp.status_code == 200, resp.content
+        assert resp.json()["pppoe_password"] == "chosen123"
+        client.refresh_from_db()
+        assert client.pppoe_password == "chosen123"
+
+    def test_reset_rejects_a_short_password(self):
+        op = OperatorFactory()
+        client = PppoeClientFactory(operator=op, status="active")
+        resp = staff(op).post(
+            f"/api/v1/pppoe/clients/{client.id}/reset_password/",
+            {"password": "x"}, format="json",
+        )
+        assert resp.status_code == 400
+
+    def test_reset_keeps_a_suspended_client_suspended(self):
+        op = OperatorFactory()
+        client = PppoeClientFactory(operator=op, status="suspended")
+        assert staff(op).post(
+            f"/api/v1/pppoe/clients/{client.id}/reset_password/"
+        ).status_code == 200
+        client.refresh_from_db()
+        assert client.status == Client.Status.SUSPENDED  # reset didn't silently un-suspend
+
+    def test_delete_removes_the_client(self):
+        op = OperatorFactory()
+        client = PppoeClientFactory(operator=op, status="active")
+        assert staff(op).delete(f"/api/v1/pppoe/clients/{client.id}/").status_code == 204
+        assert not Client.objects.filter(pk=client.id).exists()
+
+    def test_cannot_reset_another_tenants_client(self):
+        op_a, op_b = OperatorFactory(slug="a"), OperatorFactory(slug="b")
+        client_b = PppoeClientFactory(operator=op_b)
+        assert staff(op_a).post(
+            f"/api/v1/pppoe/clients/{client_b.id}/reset_password/"
+        ).status_code == 404
