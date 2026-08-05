@@ -86,6 +86,14 @@ def create_client(*, operator, plan: ServicePlan, router, created_by=None, **fie
 def provision_client(client: Client) -> None:
     """Push the plan profile + client secret to the router. Called after install."""
     adapter = get_adapter(client.router)
+    # Router-wide TCP-MSS clamp: a PPPoE link's MTU (~1480) is below Ethernet's 1500, and the
+    # many sites that break Path-MTU Discovery then hang or half-load for the customer. One
+    # idempotent rule per router fixes it for every client on it — for EVERY tenant's routers,
+    # not just ours. Best-effort: never fail a provisioning the ISP just asked for.
+    try:
+        adapter.ensure_pppoe_mss_clamp()
+    except Exception:
+        logger.exception("Could not ensure the MSS clamp on router %s", client.router_id)
     adapter.ensure_pppoe_profile(client.plan)
     adapter.create_pppoe_user(client)
     first_activation = client.status == Client.Status.PENDING_INSTALL

@@ -93,6 +93,10 @@ class DummyAdapter(ProvisioningAdapter):
             )
         return out
 
+    def ensure_pppoe_mss_clamp(self) -> ProvisionResult:
+        DummyAdapter.calls.append(("mss_clamp", self.router.pk))
+        return ProvisionResult(ok=True, message="mss clamp ensured")
+
     #: Tests set this to drive PPPoE import: a list of PppoeSecret (or dicts).
     pppoe_secrets: list = []
 

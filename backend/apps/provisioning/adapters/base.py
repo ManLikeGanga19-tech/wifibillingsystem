@@ -150,6 +150,12 @@ class ProvisioningAdapter(ABC):
         pre-existing users into WIFI.OS. Default empty for adapters that can't read them."""
         return []
 
+    def ensure_pppoe_mss_clamp(self) -> ProvisionResult:
+        """Clamp TCP MSS to the path MTU on the router so PPPoE customers (whose link MTU is
+        ~1480, below Ethernet's 1500) don't get slow or hung connections to the many sites
+        that break Path-MTU Discovery. Router-wide and idempotent; default no-op."""
+        return ProvisionResult(ok=True, message="noop")
+
     # -- Captive portal ----------------------------------------------------
     def push_portal(self, portal_url: str) -> ProvisionResult:
         """Point this router's captive portal at `portal_url`.

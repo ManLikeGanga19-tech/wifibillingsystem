@@ -33,6 +33,9 @@ def _safe_json(resp) -> dict:
 # this profile firewalled to a walled garden that redirects http to a pay page.
 SUSPENDED_PROFILE = "wifios-suspended"
 
+#: Marks our MSS-clamp rule so ensure_pppoe_mss_clamp is idempotent (never double-adds it).
+MSS_CLAMP_COMMENT = "wifi.os: pppoe mss clamp"
+
 
 def _to_int(value):
     try:
@@ -433,6 +436,33 @@ class MikroTikRestAdapter(ProvisioningAdapter):
                     )
                 )
         return secrets
+
+    def ensure_pppoe_mss_clamp(self) -> ProvisionResult:
+        """Add the forward-chain TCP-MSS clamp (clamp-to-pmtu) if it isn't already there.
+        Idempotent via a WIFI.OS comment, so it's safe to call on every provision. One rule
+        fixes the whole router — the classic PPPoE 'some sites are slow/half-load' problem."""
+        rule = {
+            "chain": "forward",
+            "protocol": "tcp",
+            "tcp-flags": "syn",
+            "action": "change-mss",
+            "new-mss": "clamp-to-pmtu",
+            "passthrough": "yes",
+            "comment": MSS_CLAMP_COMMENT,
+        }
+        try:
+            with self._client() as c:
+                existing = c.get(
+                    "/ip/firewall/mangle", params={"comment": MSS_CLAMP_COMMENT}
+                )
+                existing.raise_for_status()
+                if not existing.json():
+                    c.put("/ip/firewall/mangle", json=rule).raise_for_status()
+            return ProvisionResult(ok=True, message="mss clamp ensured")
+        except httpx.HTTPError as exc:
+            raise ProvisioningError(
+                f"ensure_pppoe_mss_clamp failed on {self.router}: {exc}"
+            ) from exc
 
     def get_device_info(self) -> DeviceInfo:
         """Query the router's identity + live health. Stable fields are persisted

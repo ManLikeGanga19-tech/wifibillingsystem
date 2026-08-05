@@ -301,3 +301,29 @@ class TestReconciliation:
         data = c.get("/api/v1/platform/reconciliation/").json()
         assert data["scope"] == "all_isps"
         assert Decimal(str(data["owed_to_isps"])) == Decimal("2000.00")
+
+
+def test_provisioning_ensures_the_mss_clamp_on_the_router():
+    """A PPPoE link's MTU is below Ethernet's, so without an MSS clamp some sites hang for
+    the customer. Provisioning ensures the router-wide rule — for every tenant's routers."""
+    DummyAdapter.calls = []
+    client = PppoeClientFactory(status="pending_install")
+    provision_client(client)
+    assert any(c[0] == "mss_clamp" for c in DummyAdapter.calls)
+
+
+def test_a_failing_mss_clamp_never_blocks_provisioning():
+    """Best-effort: the customer still gets connected even if the clamp call fails."""
+    client = PppoeClientFactory(status="pending_install")
+    original = DummyAdapter.ensure_pppoe_mss_clamp
+
+    def boom(self):
+        raise RuntimeError("router refused")
+
+    DummyAdapter.ensure_pppoe_mss_clamp = boom
+    try:
+        provision_client(client)
+    finally:
+        DummyAdapter.ensure_pppoe_mss_clamp = original
+    client.refresh_from_db()
+    assert client.status == Client.Status.ACTIVE
