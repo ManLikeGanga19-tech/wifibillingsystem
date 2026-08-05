@@ -111,6 +111,26 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * A 401 that a silent refresh could NOT recover — the session is genuinely over.
+ * Distinct from ApiError so views can stay quiet (the app is returning you to sign-in)
+ * instead of each one showing a misleading "could not load — is the API running?".
+ */
+export class SessionExpiredError extends ApiError {
+  constructor(body: unknown) {
+    super(401, body);
+    this.name = 'SessionExpiredError';
+  }
+}
+
+// The app registers a single handler; we call it ONCE when a request finds the session
+// truly gone, so the whole app returns to the sign-in screen centrally rather than every
+// data call surfacing its own error.
+let onSessionExpired: (() => void) | null = null;
+export function setOnSessionExpired(cb: (() => void) | null): void {
+  onSessionExpired = cb;
+}
+
 async function request<T>(path: string, init?: RequestInit, retried = false): Promise<T> {
   const resp = await fetch(`${BASE}/api/v1${path}`, {
     ...withCookies,
@@ -121,9 +141,14 @@ async function request<T>(path: string, init?: RequestInit, retried = false): Pr
       ...init?.headers,
     },
   });
-  // Access cookie expired -> renew silently and replay once.
-  if (resp.status === 401 && !retried && (await tryRefresh())) {
-    return request<T>(path, init, true);
+  // Access cookie expired: renew silently and replay once. If the refresh ALSO fails the
+  // session is genuinely over — tell the app (which returns to sign-in) and throw a quiet,
+  // typed error, instead of a generic one every view would read as "the API is down".
+  if (resp.status === 401 && !retried) {
+    if (await tryRefresh()) return request<T>(path, init, true);
+    const expiredBody = await resp.json().catch(() => null);
+    onSessionExpired?.();
+    throw new SessionExpiredError(expiredBody);
   }
   const body = resp.status === 204 ? null : await resp.json().catch(() => null);
   if (!resp.ok) throw new ApiError(resp.status, body);
