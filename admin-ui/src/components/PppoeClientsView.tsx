@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { Users, Plus, Ban, RotateCcw, Zap, Printer, X, Loader2, Wifi, WifiOff, AlertTriangle, Key, Copy, Eye, EyeOff, Trash2, RefreshCw } from 'lucide-react';
-import { api, ApiError, PppoeClient, PppoePlan, ApiRouter, AccessPoint, PppoeUsageSummary, CapacityWarning } from '../api/client';
+import { Users, Plus, Ban, RotateCcw, Zap, Printer, X, Loader2, Wifi, WifiOff, AlertTriangle, Key, Copy, Eye, EyeOff, Trash2, RefreshCw, Upload, Download } from 'lucide-react';
+import { api, ApiError, PppoeClient, PppoePlan, ApiRouter, AccessPoint, PppoeUsageSummary, CapacityWarning, PppoeImportRow, PppoeImportItem } from '../api/client';
 import {
   Badge, Btn, Field, FilterChips, inputCls, Panel, RefreshBtn, TableShell, tdCls, toast, useList, ViewHeader, fmtDateTime, fmtKsh,
 } from './ui';
@@ -124,7 +124,17 @@ export default function PppoeClientsView() {
   const [showForm, setShowForm] = useState(false);
   const [sheetFor, setSheetFor] = useState<PppoeClient | null>(null);
   const [credsFor, setCredsFor] = useState<PppoeClient | null>(null);
+  const [showImport, setShowImport] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  const exportCsv = () => {
+    const a = document.createElement('a');
+    a.href = api.pppoe.clients.exportUrl();
+    a.download = '';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
   const blank = {
     full_name: '', phone: '', email: '', physical_address: '',
     plan: '', router: '', delivery_method: 'fibre', access_point: '', billing_day: '1',
@@ -213,6 +223,12 @@ export default function PppoeClientsView() {
       >
         <Btn onClick={() => setShowForm(!showForm)}>
           <Plus className="h-3.5 w-3.5" /> New Client
+        </Btn>
+        <Btn variant="outline" onClick={() => setShowImport(true)} title="Adopt existing PPPoE users off a router">
+          <Upload className="h-3.5 w-3.5" /> Import
+        </Btn>
+        <Btn variant="outline" onClick={exportCsv} title="Download all clients as CSV">
+          <Download className="h-3.5 w-3.5" /> Export
         </Btn>
         <RefreshBtn onClick={reload} />
       </ViewHeader>
@@ -337,6 +353,180 @@ export default function PppoeClientsView() {
           onContinue={() => submit(true)}
         />
       )}
+      {showImport && (
+        <ImportDialog
+          routers={routers}
+          plans={plans}
+          onClose={() => setShowImport(false)}
+          onDone={reload}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Adopt an ISP's pre-existing PPPoE users off a router into WIFI.OS. Preview first (what's
+ * new / already managed / which plan each maps to), tweak name + plan per row, then import
+ * the selected ones. DB-only on the server — a client's live session is never disturbed.
+ */
+function ImportDialog({
+  routers, plans, onClose, onDone,
+}: {
+  routers: ApiRouter[];
+  plans: PppoePlan[];
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [routerId, setRouterId] = useState<number | ''>(routers[0]?.id ?? '');
+  const [rows, setRows] = useState<PppoeImportRow[] | null>(null);
+  const [sel, setSel] = useState<Record<string, { include: boolean; full_name: string; plan: number | '' }>>({});
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{ imported: number; skipped: number; failed: number } | null>(null);
+
+  const preview = async () => {
+    if (!routerId || busy) return;
+    setBusy(true);
+    setResult(null);
+    try {
+      const data = await api.pppoe.clients.importPreview(Number(routerId));
+      setRows(data);
+      const seed: typeof sel = {};
+      for (const r of data) {
+        seed[r.username] = {
+          include: !r.already_managed,
+          full_name: r.comment || r.username,
+          plan: r.suggested_plan ?? '',
+        };
+      }
+      setSel(seed);
+    } catch (e) {
+      toast('error', e instanceof Error ? e.message : 'Could not read the router.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const run = async () => {
+    if (!routerId || busy || !rows) return;
+    const items: PppoeImportItem[] = rows
+      .filter((r) => sel[r.username]?.include && sel[r.username]?.plan)
+      .map((r) => ({
+        username: r.username,
+        full_name: sel[r.username].full_name,
+        plan: Number(sel[r.username].plan),
+      }));
+    if (items.length === 0) {
+      toast('warning', 'Pick at least one user and a plan for it.');
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await api.pppoe.clients.importRun(Number(routerId), items);
+      setResult({ imported: res.imported.length, skipped: res.skipped.length, failed: res.failed.length });
+      toast('success', `Imported ${res.imported.length} client(s).`);
+      onDone();
+    } catch (e) {
+      toast('error', e instanceof Error ? e.message : 'Import failed.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const candidates = (rows ?? []).filter((r) => !r.already_managed).length;
+
+  return (
+    <div className="fixed inset-0 z-50 bg-[#141414]/50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white border border-[#141414] w-full max-w-2xl max-h-[88vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-4 border-b border-[#141414]">
+          <h3 className="font-bold font-mono uppercase text-sm flex items-center gap-2">
+            <Upload className="h-4 w-4" /> Import PPPoE users from a router
+          </h3>
+          <button onClick={onClose} className="cursor-pointer"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="p-5 space-y-4 text-sm">
+          <p className="text-[11px] text-[#141414]/55 leading-relaxed">
+            Reads the PPPoE accounts already on the router and adopts the ones you choose as
+            managed clients — keeping their exact username/password. It never disturbs their
+            live connection. Users WIFI.OS already manages are skipped.
+          </p>
+
+          <div className="flex items-end gap-2">
+            <Field label="Router" className="flex-1">
+              <select value={routerId} onChange={(e) => { setRouterId(Number(e.target.value)); setRows(null); }} className={inputCls}>
+                {routers.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+              </select>
+            </Field>
+            <Btn onClick={preview} disabled={busy || !routerId}>
+              {busy && rows === null ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+              Preview
+            </Btn>
+          </div>
+
+          {rows && rows.length === 0 && (
+            <p className="text-xs text-[#141414]/60">No PPPoE users found on this router.</p>
+          )}
+
+          {rows && rows.length > 0 && (
+            <div className="border border-[#141414]/15">
+              <div className="grid grid-cols-[auto_1fr_1fr_1fr] gap-2 px-3 py-2 bg-[#f0efec] font-mono text-[10px] uppercase tracking-wide text-[#141414]/50">
+                <span></span><span>User</span><span>Name</span><span>Plan</span>
+              </div>
+              {rows.map((r) => {
+                const s = sel[r.username];
+                return (
+                  <div key={r.username} className={`grid grid-cols-[auto_1fr_1fr_1fr] gap-2 px-3 py-2 items-center border-t border-[#141414]/10 ${r.already_managed ? 'opacity-50' : ''}`}>
+                    <input
+                      type="checkbox"
+                      disabled={r.already_managed}
+                      checked={!!s?.include}
+                      onChange={(e) => setSel({ ...sel, [r.username]: { ...s, include: e.target.checked } })}
+                    />
+                    <span className="font-mono text-xs truncate" title={r.username}>
+                      {r.username}
+                      {r.already_managed && <span className="block text-[10px] text-[#141414]/50">already managed</span>}
+                    </span>
+                    {r.already_managed ? <span /> : (
+                      <input
+                        value={s?.full_name ?? ''}
+                        onChange={(e) => setSel({ ...sel, [r.username]: { ...s, full_name: e.target.value } })}
+                        className={`${inputCls} text-xs py-1`}
+                      />
+                    )}
+                    {r.already_managed ? <span /> : (
+                      <select
+                        value={s?.plan ?? ''}
+                        onChange={(e) => setSel({ ...sel, [r.username]: { ...s, plan: e.target.value ? Number(e.target.value) : '' } })}
+                        className={`${inputCls} text-xs py-1`}
+                      >
+                        <option value="">Choose plan…</option>
+                        {plans.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                      </select>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {result && (
+            <div className="text-xs font-mono border border-[#141414]/15 bg-[#faf9f7] p-2.5">
+              Imported <b>{result.imported}</b> · skipped <b>{result.skipped}</b>
+              {result.failed > 0 && <> · <span className="text-[#B22222]">failed {result.failed}</span></>}
+            </div>
+          )}
+
+          {rows && rows.length > 0 && (
+            <div className="flex items-center gap-2">
+              <Btn variant="green" onClick={run} disabled={busy || candidates === 0}>
+                {busy && rows !== null ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+                Import selected
+              </Btn>
+              <Btn variant="outline" onClick={onClose}><X className="h-3.5 w-3.5" /> Close</Btn>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

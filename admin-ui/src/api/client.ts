@@ -999,6 +999,25 @@ export interface PppoeUsageSummary {
   synced_at: string | null;
 }
 
+export interface PppoeImportRow {
+  username: string;
+  profile: string;
+  comment: string;
+  already_managed: boolean;
+  suggested_plan: number | null;
+  suggested_plan_name: string | null;
+}
+export interface PppoeImportItem {
+  username: string;
+  full_name?: string;
+  plan: number;
+}
+export interface PppoeImportResult {
+  imported: { username: string; account_number: string }[];
+  skipped: { username: string; reason: string }[];
+  failed: { username: string; reason: string }[];
+}
+
 export interface PppoeInvoice {
   id: number;
   number: string;
@@ -1598,6 +1617,18 @@ export const api = {
           `/pppoe/clients/${id}/reset_password/`,
           { method: 'POST', body: JSON.stringify(password ? { password } : {}) },
         ),
+      // Adopt an ISP's pre-existing router PPPoE users. Preview first (what's new / already
+      // managed / suggested plan), then import the chosen rows — DB-only, never disrupts them.
+      importPreview: (router: number) =>
+        request<PppoeImportRow[]>('/pppoe/clients/import-preview/', {
+          method: 'POST', body: JSON.stringify({ router }),
+        }),
+      importRun: (router: number, items: PppoeImportItem[]) =>
+        request<PppoeImportResult>('/pppoe/clients/import/', {
+          method: 'POST', body: JSON.stringify({ router, items }),
+        }),
+      // A CSV backup of every client. Cookie-auth GET, so a plain download link works.
+      exportUrl: () => `${BASE}/api/v1/pppoe/clients/export/`,
     },
     usageSummary: () => request<PppoeUsageSummary>('/pppoe/usage-summary/'),
     invoices: {
