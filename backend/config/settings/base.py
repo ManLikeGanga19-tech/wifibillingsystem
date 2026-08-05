@@ -123,8 +123,20 @@ REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 50,
+    # WITHOUT THESE THE RATES BELOW DO NOTHING. DRF only applies a default throttle if a
+    # class is named here; the rates alone are inert configuration that READS like
+    # protection. Every endpoint that doesn't declare its own scope was unlimited until
+    # this was added (audit F1). Views with an explicit `throttle_classes` still override.
+    "DEFAULT_THROTTLE_CLASSES": [
+        "rest_framework.throttling.AnonRateThrottle",
+        "rest_framework.throttling.UserRateThrottle",
+    ],
     "DEFAULT_THROTTLE_RATES": {
         "anon": "60/min",
+        # Signed-in staff are generous by comparison — a busy console legitimately makes a
+        # burst of calls per screen — but still bounded, so a stolen session or a runaway
+        # script can't scrape a whole tenant's data at machine speed.
+        "user": "600/min",
         # Password guessing. Per-IP, and paired with a per-ACCOUNT lockout in
         # auth_views — an attacker with a botnet walks straight past an IP limit, and
         # an attacker spraying one password across every account walks straight past an
@@ -132,6 +144,9 @@ REST_FRAMEWORK = {
         "login": "10/min",
         "stk-push": "10/min",
         "voucher-redeem": "15/min",
+        # Anonymous, and answers questions about a NAMED customer — the natural place to
+        # enumerate an ISP's whole base. Tight, and paired with a phone-digits check.
+        "account-lookup": "10/min",
         # Tap-to-approve device management — token-gated, but bounded so a leaked token
         # can't hammer the router.
         "device-mgmt": "40/min",

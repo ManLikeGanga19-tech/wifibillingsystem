@@ -27,3 +27,9 @@ REST_FRAMEWORK = {**REST_FRAMEWORK}  # noqa: F405
 REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"] = {
     scope: "1000/min" for scope in REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]
 }
+# The DEFAULT (anon/user) throttles apply to EVERY request, and the whole suite shares one
+# cache — so a long run would eventually trip them and fail unrelated tests for a reason
+# that has nothing to do with the code under test. Drop them here; views that declare their
+# own throttle_classes are unaffected, so the abuse tests still exercise real throttling,
+# and test_throttling_is_enforced.py pins the production configuration.
+REST_FRAMEWORK["DEFAULT_THROTTLE_CLASSES"] = []

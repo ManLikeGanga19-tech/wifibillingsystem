@@ -677,3 +677,110 @@ class TestClientSearchAndBillingDate:
         row = staff(op).get(f"/api/v1/pppoe/clients/{client.id}/").json()
         assert row["next_billing_date"] == "2026-09-03"
         assert row["next_due_is_projected"] is False
+
+
+class TestPublicAccountLookupIsNotEnumerable:
+    """Audit F2. This endpoint is anonymous and returns a real person's name and debt, so
+    knowing the account number must not be enough on its own."""
+
+    def _client_on(self, op, **kw):
+        router = RouterFactory(operator=op)
+        return PppoeClientFactory(operator=op, router=router, **kw), router
+
+    def _lookup(self, router, **params):
+        from urllib.parse import urlencode
+        qs = urlencode({"router": router.id, **params})
+        return APIClient().get(f"/api/v1/pppoe/account-lookup/?{qs}")
+
+    def test_the_right_account_and_phone_digits_succeed(self):
+        op = OperatorFactory()
+        client, router = self._client_on(op, phone="0722123456", full_name="Jane Ngure")
+        resp = self._lookup(router, account=client.account_number, phone="3456")
+        assert resp.status_code == 200, resp.content
+        assert resp.json()["full_name"] == "Jane Ngure"
+
+    def test_the_account_number_alone_is_not_enough(self):
+        op = OperatorFactory()
+        client, router = self._client_on(op, phone="0722123456")
+        assert self._lookup(router, account=client.account_number).status_code == 404
+
+    def test_wrong_phone_digits_are_refused(self):
+        op = OperatorFactory()
+        client, router = self._client_on(op, phone="0722123456")
+        assert self._lookup(
+            router, account=client.account_number, phone="0000"
+        ).status_code == 404
+
+    def test_a_wrong_account_and_a_wrong_phone_are_indistinguishable(self):
+        """Otherwise the endpoint is an oracle: 'this account exists, keep guessing'."""
+        op = OperatorFactory()
+        client, router = self._client_on(op, phone="0722123456")
+        real_account_wrong_phone = self._lookup(
+            router, account=client.account_number, phone="0000"
+        )
+        no_such_account = self._lookup(router, account="NOSUCH1", phone="3456")
+        assert real_account_wrong_phone.status_code == no_such_account.status_code == 404
+        assert real_account_wrong_phone.json() == no_such_account.json()
+
+    def test_a_client_with_no_phone_on_file_cannot_be_looked_up(self):
+        op = OperatorFactory()
+        client, router = self._client_on(op, phone="")
+        assert self._lookup(
+            router, account=client.account_number, phone="1234"
+        ).status_code == 404
+
+    def test_full_phone_number_also_works(self):
+        """Customers type what they know; we compare the last four either way."""
+        op = OperatorFactory()
+        client, router = self._client_on(op, phone="0722123456")
+        assert self._lookup(
+            router, account=client.account_number, phone="0722123456"
+        ).status_code == 200
+
+
+class TestCredentialExportIsGated:
+    """Audit F3. PPPoE passwords are plaintext of necessity, so a bulk export must be
+    deliberate, restricted, and recorded — without ever blocking an ISP from leaving."""
+
+    def _export(self, op, **params):
+        from urllib.parse import urlencode
+        qs = f"?{urlencode(params)}" if params else ""
+        return staff(op).get(f"/api/v1/pppoe/clients/export/{qs}")
+
+    def test_the_plain_export_carries_no_passwords(self):
+        op = OperatorFactory()
+        client = PppoeClientFactory(operator=op, pppoe_password="topsecret1")
+        body = b"".join(self._export(op).streaming_content).decode()
+        assert client.account_number in body  # the data is all still there
+        assert "topsecret1" not in body
+        assert "pppoe_password" not in body
+
+    def test_the_owner_can_still_take_their_credentials_with_them(self):
+        """Data portability is a promise: an ISP leaving must be able to take everything,
+        or they would have to re-provision every customer's router by hand."""
+        op = OperatorFactory()
+        client = PppoeClientFactory(operator=op, pppoe_password="topsecret1")
+        body = b"".join(
+            self._export(op, include_credentials="true").streaming_content
+        ).decode()
+        assert "topsecret1" in body
+        assert client.pppoe_username in body
+
+    def test_a_credential_export_is_audited(self):
+        from apps.core.models import AuditLog
+
+        op = OperatorFactory()
+        PppoeClientFactory(operator=op)
+        self._export(op, include_credentials="true")
+        entry = AuditLog.objects.filter(action="pppoe_clients_exported").first()
+        assert entry is not None
+        assert entry.metadata.get("include_credentials") is True
+
+    def test_the_export_is_tenant_scoped(self):
+        op_a, op_b = OperatorFactory(slug="a"), OperatorFactory(slug="b")
+        theirs = PppoeClientFactory(operator=op_b, pppoe_password="theirsecret")
+        body = b"".join(
+            self._export(op_a, include_credentials="true").streaming_content
+        ).decode()
+        assert theirs.account_number not in body
+        assert "theirsecret" not in body

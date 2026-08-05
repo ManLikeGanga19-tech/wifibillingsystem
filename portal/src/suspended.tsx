@@ -28,6 +28,9 @@ export default function SuspendedNotice() {
   const [notice, setNotice] = useState<Notice | null>(null);
   const [error, setError] = useState('');
   const [account, setAccount] = useState('');
+  // The last 4 digits of the phone on the account. The account number alone is short and
+  // guessable, so it must not be enough to reveal a customer's name and balance.
+  const [phone, setPhone] = useState('');
   const [looking, setLooking] = useState(false);
 
   const q = (extra = '') => {
@@ -45,15 +48,22 @@ export default function SuspendedNotice() {
   }, []);
 
   const lookup = async () => {
-    if (!account.trim()) return;
+    if (!account.trim() || phone.trim().length < 4) return;
     setLooking(true);
     try {
-      const r = await fetch(`${BASE}/api/v1/pppoe/account-lookup/${q(`account=${account.trim()}`)}`);
+      const r = await fetch(
+        `${BASE}/api/v1/pppoe/account-lookup/${q(
+          `account=${account.trim()}&phone=${encodeURIComponent(phone.trim())}`,
+        )}`,
+      );
       if (r.ok) {
         const client = await r.json();
         setNotice((n) => (n ? { ...n, client } : n));
       } else {
-        setError('Account not found — check the number on your account sheet.');
+        setError(
+          "We couldn't match that account number and phone number. Check both — the phone "
+          + 'must be the one your provider has on file.',
+        );
       }
     } finally {
       setLooking(false);
@@ -106,7 +116,20 @@ export default function SuspendedNotice() {
                 {looking ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
               </button>
             </div>
-            <p className="text-[11px] text-[#141414]/50">It's on the account sheet your provider gave you.</p>
+            <label className="text-xs font-bold uppercase text-[#141414]/60 block mt-3">
+              Last 4 digits of your phone
+            </label>
+            <input
+              value={phone}
+              onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
+              placeholder="e.g. 3456"
+              inputMode="numeric"
+              className="w-full border border-[#141414] p-2.5 font-mono outline-none mt-1"
+            />
+            <p className="text-[11px] text-[#141414]/50">
+              Your account number is on the sheet your provider gave you. We ask for your phone
+              digits so nobody else can look up your account.
+            </p>
           </div>
         )}
 

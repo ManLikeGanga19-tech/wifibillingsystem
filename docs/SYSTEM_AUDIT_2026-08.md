@@ -54,6 +54,21 @@ Worth stating plainly, because the rest of the report depends on it.
 
 ---
 
+## Status — updated 2026-08-05
+
+| Finding | Status |
+|---|---|
+| F1 — throttling not enforced | ✅ **Fixed** — `DEFAULT_THROTTLE_CLASSES` wired + a `user` rate; pinned by `tests/test_prod_settings.py` |
+| F2 — account lookup enumerable | ✅ **Fixed** — tight per-IP throttle + last-4-phone-digits required; identical 404 for wrong account vs wrong phone (no oracle) |
+| F3 — bulk credential export | ✅ **Fixed** — passwords opt-in (`?include_credentials=true`), refused on a borrowed identity, and audited. The ISP owner can still take everything (portability preserved) |
+| F4 — hand-rolled tenant scoping | ✅ **Fixed** — `SubscriberViewSet` and `ApiTokenViewSet` now inherit the scoping mixin |
+| F5 — prod-only config untested | ✅ **Fixed** — `tests/test_prod_settings.py` asserts throttling, cookies, HSTS, proxy header, redirect-exemption and fail-loud secrets against the REAL prod module |
+| F6 — import preview username | ⚪ Won't fix — informational; the global check is required for correctness |
+
+The findings below are the original write-up, kept as the record of what was found and why.
+
+---
+
 ## 3. Findings
 
 ### F1 — `anon` throttle is defined but never enforced (Medium)

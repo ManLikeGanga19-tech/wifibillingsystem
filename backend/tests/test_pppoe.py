@@ -272,9 +272,14 @@ class TestSuspendedNotice:
     def test_account_lookup(self):
         op = OperatorFactory(slug="paynet2")
         router = RouterFactory(operator=op)
-        client = PppoeClientFactory(operator=op, router=router, plan__price=Decimal("1500"))
+        client = PppoeClientFactory(
+            operator=op, router=router, plan__price=Decimal("1500"), phone="0722123456"
+        )
+        # The last 4 digits of their phone are required — the account number alone is
+        # guessable, so on its own it must not unlock a customer's name and balance.
         resp = APIClient().get(
-            f"/api/v1/pppoe/account-lookup/?router={router.id}&account={client.account_number}"
+            f"/api/v1/pppoe/account-lookup/?router={router.id}"
+            f"&account={client.account_number}&phone=3456"
         )
         assert resp.status_code == 200
         assert resp.json()["monthly"] == "1500.00"

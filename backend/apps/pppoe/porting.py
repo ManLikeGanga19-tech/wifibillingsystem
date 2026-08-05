@@ -92,26 +92,45 @@ def import_clients(operator, router, *, items, actor=None) -> dict:
     return {"imported": imported, "skipped": skipped, "failed": failed}
 
 
+#: The export shape. `pppoe_password` is deliberately LAST and opt-in — see clients_csv.
+#: This is also the shape the CSV importer expects, so an export round-trips back in.
 CLIENT_CSV_COLUMNS = [
     "account_number", "full_name", "phone", "email", "physical_address", "plan",
-    "pppoe_username", "pppoe_password", "status", "billing_day", "balance",
+    "pppoe_username", "status", "billing_day", "balance",
     "next_due_date", "delivery_method", "static_ip", "created_at",
 ]
+CREDENTIAL_COLUMN = "pppoe_password"
 
 
-def clients_csv(operator):
-    """Stream every client as CSV — a portable backup / migration export."""
+def clients_csv(operator, *, include_credentials: bool = False):
+    """Stream every client as CSV — a portable backup, and how an ISP leaves with their data.
+
+    PPPoE passwords are opt-in. They are plaintext of necessity (CHAP needs a retrievable
+    secret, and RouterOS stores them in plaintext anyway), which makes an unconditional
+    export a silent bulk credential dump on every click. Opt-in keeps the ISP's right to
+    take everything — without handing it over by accident. The caller enforces WHO may ask.
+    """
+    columns = [*CLIENT_CSV_COLUMNS]
+    if include_credentials:
+        columns.append(CREDENTIAL_COLUMN)
+
     def rows():
         for c in (
             Client.objects.filter(operator=operator)
             .select_related("plan").order_by("account_number").iterator()
         ):
-            yield [
+            row = [
                 c.account_number, c.full_name, c.phone, c.email, c.physical_address,
-                c.plan.name if c.plan_id else "", c.pppoe_username, c.pppoe_password,
+                c.plan.name if c.plan_id else "", c.pppoe_username,
                 c.status, c.billing_day, c.balance, c.next_due_date or "",
                 c.delivery_method, c.static_ip or "", c.created_at.isoformat(),
             ]
+            if include_credentials:
+                row.append(c.pppoe_password)
+            yield row
 
     stamp = timezone.localdate().isoformat()
-    return _stream_csv(f"clients-{operator.slug}-{stamp}.csv", CLIENT_CSV_COLUMNS, rows())
+    suffix = "-with-credentials" if include_credentials else ""
+    return _stream_csv(
+        f"clients-{operator.slug}-{stamp}{suffix}.csv", columns, rows()
+    )
