@@ -439,3 +439,86 @@ class TestClientCredentials:
         assert staff(op_a).post(
             f"/api/v1/pppoe/clients/{client_b.id}/reset_password/"
         ).status_code == 404
+
+
+class TestClientImportExport:
+    """Adopt an ISP's pre-existing router PPPoE users, and export clients as CSV."""
+
+    def _secrets(self, secrets):
+        from apps.provisioning.adapters.dummy import DummyAdapter
+        DummyAdapter.pppoe_secrets = secrets
+
+    def test_export_returns_csv_of_clients(self):
+        op = OperatorFactory()
+        c1 = PppoeClientFactory(operator=op)
+        resp = staff(op).get("/api/v1/pppoe/clients/export/")
+        assert resp.status_code == 200
+        assert "text/csv" in resp["Content-Type"]
+        body = b"".join(resp.streaming_content).decode()
+        assert c1.account_number in body and c1.pppoe_username in body
+
+    def test_import_preview_flags_managed_and_suggests_a_plan(self):
+        op = OperatorFactory()
+        router = RouterFactory(operator=op)
+        plan = ServicePlanFactory(operator=op, mikrotik_profile="home-8m")
+        PppoeClientFactory(operator=op, pppoe_username="olduser")
+        self._secrets([
+            {"username": "olduser", "password": "x", "profile": "home-8m"},
+            {"username": "newuser", "password": "y", "profile": "home-8m", "comment": "Jane"},
+        ])
+        resp = staff(op).post(
+            "/api/v1/pppoe/clients/import-preview/", {"router": router.id}, format="json"
+        )
+        assert resp.status_code == 200, resp.content
+        rows = {r["username"]: r for r in resp.json()}
+        assert rows["olduser"]["already_managed"] is True
+        assert rows["newuser"]["already_managed"] is False
+        assert rows["newuser"]["suggested_plan"] == plan.id
+
+    def test_import_adopts_new_users_and_skips_managed(self):
+        op = OperatorFactory()
+        router = RouterFactory(operator=op)
+        plan = ServicePlanFactory(operator=op)
+        PppoeClientFactory(operator=op, pppoe_username="olduser")
+        self._secrets([
+            {"username": "olduser", "password": "x", "profile": "p"},
+            {"username": "newuser", "password": "secretpw", "profile": "p", "comment": "Jane"},
+        ])
+        resp = staff(op).post("/api/v1/pppoe/clients/import/", {
+            "router": router.id,
+            "items": [
+                {"username": "olduser", "plan": plan.id},
+                {"username": "newuser", "full_name": "Jane Doe", "plan": plan.id},
+            ],
+        }, format="json")
+        assert resp.status_code == 200, resp.content
+        body = resp.json()
+        assert [i["username"] for i in body["imported"]] == ["newuser"]
+        assert body["skipped"][0]["username"] == "olduser"
+        new = Client.objects.get(pppoe_username="newuser")
+        assert new.pppoe_password == "secretpw"  # adopted the router's exact password
+        assert new.full_name == "Jane Doe"
+        assert new.status == Client.Status.ACTIVE
+
+    def test_import_is_idempotent(self):
+        op = OperatorFactory()
+        router = RouterFactory(operator=op)
+        plan = ServicePlanFactory(operator=op)
+        self._secrets([{"username": "u1", "password": "p", "profile": "p"}])
+        payload = {"router": router.id, "items": [{"username": "u1", "plan": plan.id}]}
+        first = staff(op).post("/api/v1/pppoe/clients/import/", payload, format="json").json()
+        assert len(first["imported"]) == 1
+        second = staff(op).post("/api/v1/pppoe/clients/import/", payload, format="json").json()
+        assert len(second["imported"]) == 0
+        assert second["skipped"][0]["reason"] == "already managed"
+
+    def test_import_skips_a_row_with_no_valid_plan(self):
+        op = OperatorFactory()
+        router = RouterFactory(operator=op)
+        self._secrets([{"username": "u1", "password": "p", "profile": "p"}])
+        resp = staff(op).post("/api/v1/pppoe/clients/import/", {
+            "router": router.id, "items": [{"username": "u1", "plan": 999999}],
+        }, format="json")
+        assert resp.status_code == 200
+        assert resp.json()["skipped"][0]["reason"] == "no plan chosen"
+        assert not Client.objects.filter(pppoe_username="u1").exists()

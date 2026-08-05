@@ -13,6 +13,7 @@ from .base import (
     ActiveSession,
     DeviceInfo,
     HostEntry,
+    PppoeSecret,
     ProvisioningAdapter,
     ProvisioningAuthError,
     ProvisioningError,
@@ -400,6 +401,38 @@ class MikroTikRestAdapter(ProvisioningAdapter):
                 )
             )
         return sessions
+
+    def list_pppoe_secrets(self) -> list[PppoeSecret]:
+        """Read every PPPoE /ppp/secret off the router so an ISP can adopt pre-existing
+        users into WIFI.OS. Password is stored plaintext on RouterOS, so an adopted client
+        keeps its exact credentials and its live session is never disturbed."""
+        try:
+            with self._client() as c:
+                resp = c.get(
+                    "/ppp/secret",
+                    params={".proplist": "name,password,profile,comment,service"},
+                )
+                resp.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise ProvisioningError(
+                f"list_pppoe_secrets failed on {self.router}: {exc}"
+            ) from exc
+        secrets = []
+        for row in resp.json():
+            # service "any" also serves PPPoE; skip pure pptp/l2tp/etc. secrets.
+            if row.get("service", "any") not in ("pppoe", "any", ""):
+                continue
+            username = row.get("name", "")
+            if username:
+                secrets.append(
+                    PppoeSecret(
+                        username=username,
+                        password=row.get("password", ""),
+                        profile=row.get("profile", ""),
+                        comment=row.get("comment", ""),
+                    )
+                )
+        return secrets
 
     def get_device_info(self) -> DeviceInfo:
         """Query the router's identity + live health. Stable fields are persisted
