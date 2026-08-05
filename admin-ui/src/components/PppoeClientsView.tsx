@@ -1,5 +1,5 @@
-import { useEffect, useState, type FormEvent } from 'react';
-import { Users, Plus, Ban, RotateCcw, Zap, Printer, X, Loader2, Wifi, WifiOff, AlertTriangle, Key, Copy, Eye, EyeOff, Trash2, RefreshCw, Upload, Download, Pencil, Save } from 'lucide-react';
+import React, { useEffect, useState, type FormEvent } from 'react';
+import { Users, Plus, Ban, RotateCcw, Zap, Printer, X, Loader2, Wifi, WifiOff, AlertTriangle, Key, Copy, Eye, EyeOff, Trash2, RefreshCw, Upload, Download, Pencil, Save, Search, MoreHorizontal } from 'lucide-react';
 import { api, ApiError, PppoeClient, PppoePlan, ApiRouter, AccessPoint, PppoeUsageSummary, CapacityWarning, PppoeImportRow, PppoeImportItem } from '../api/client';
 import {
   Badge, Btn, Field, FilterChips, inputCls, Panel, RefreshBtn, TableShell, tdCls, toast, useList, ViewHeader, fmtDateTime, fmtKsh,
@@ -66,24 +66,89 @@ function UsageSummaryTile() {
         <Stat label="Over FUP" value={String(s.over_fup)} alert={s.over_fup > 0} />
         <Stat label="Clients" value={String(s.clients_total)} />
       </div>
-      {s.top_consumers.length > 0 && (
-        <div className="mt-4 border-t border-[#141414]/10 pt-3">
-          <p className="mb-1.5 font-mono text-[10px] font-bold uppercase tracking-wide text-[#141414]/50">
-            Top consumers this cycle
-          </p>
-          {s.top_consumers.slice(0, 5).map((c) => (
-            <div key={c.account_number} className="flex items-baseline justify-between py-0.5 text-xs">
-              <span className="truncate">
-                <span className="font-mono text-[#141414]/60">{c.account_number}</span> {c.full_name}
-              </span>
-              <span className="font-mono">
-                {c.gb_total} GB{c.percent_used !== null ? ` · ${c.percent_used}%` : ''}
-              </span>
-            </div>
-          ))}
+    </Panel>
+  );
+}
+
+/** When this client is next billed. The server projects it from their billing day until the
+ *  first invoice exists, so this is never blank — a blank date read as "billing isn't set
+ *  up". A projected date is shown lighter, with the real one taking over once invoiced. */
+function NextDueCell({ client }: { client: PppoeClient }) {
+  const date = client.next_billing_date ?? client.next_due_date;
+  if (!date) return <span className="text-[#141414]/30">—</span>;
+  const projected = client.next_due_is_projected;
+  return (
+    <span
+      className={projected ? 'text-[#141414]/45' : ''}
+      title={projected ? 'Projected from their billing day — no invoice issued yet' : 'From their current invoice'}
+    >
+      {date}
+      {projected && <span className="block text-[10px] uppercase tracking-wide">expected</span>}
+    </span>
+  );
+}
+
+/** The per-row tools, behind a menu. Keeping only the status action inline stops the row
+ *  turning into a wall of buttons once an ISP has a few hundred clients. */
+function RowMenu({
+  onEdit, onCredentials, onSheet,
+}: {
+  onEdit: () => void;
+  onCredentials: () => void;
+  onSheet: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  // Close on any outside click or Escape, so the menu can never get stuck open.
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    window.addEventListener('click', close);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('click', close);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const pick = (fn: () => void) => (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setOpen(false);
+    fn();
+  };
+
+  return (
+    <div className="relative inline-block">
+      <Btn
+        variant="outline"
+        onClick={(e?: React.MouseEvent) => { e?.stopPropagation(); setOpen((v) => !v); }}
+        title="More actions"
+      >
+        <MoreHorizontal className="h-3.5 w-3.5" />
+      </Btn>
+      {open && (
+        <div
+          className="absolute right-0 top-full mt-1 z-30 min-w-[11rem] bg-white border border-[#141414] shadow-lg"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <MenuItem icon={<Pencil className="h-3.5 w-3.5" />} label="Edit details" onClick={pick(onEdit)} />
+          <MenuItem icon={<Key className="h-3.5 w-3.5" />} label="Credentials" onClick={pick(onCredentials)} />
+          <MenuItem icon={<Printer className="h-3.5 w-3.5" />} label="Account sheet" onClick={pick(onSheet)} />
         </div>
       )}
-    </Panel>
+    </div>
+  );
+}
+
+function MenuItem({ icon, label, onClick }: { icon: React.ReactNode; label: string; onClick: (e: React.MouseEvent) => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="w-full flex items-center gap-2 px-3 py-2 text-xs font-mono text-left hover:bg-[#f0efec] cursor-pointer"
+    >
+      {icon} {label}
+    </button>
   );
 }
 
@@ -114,10 +179,21 @@ const DELIVERY = [
 
 export default function PppoeClientsView() {
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>('all');
-  const { rows, count, error, reload } = useList(
-    () => api.pppoe.clients.list(filter === 'all' ? '' : `?status=${filter}`),
-    [filter]
-  );
+  // Search box -> `query` is debounced so we don't fire a request per keystroke.
+  const [search, setSearch] = useState('');
+  const [query, setQuery] = useState('');
+  useEffect(() => {
+    const t = window.setTimeout(() => setQuery(search.trim()), 300);
+    return () => window.clearTimeout(t);
+  }, [search]);
+
+  const { rows, count, error, refreshing, reload } = useList(() => {
+    const params = new URLSearchParams();
+    if (filter !== 'all') params.set('status', filter);
+    if (query) params.set('search', query);
+    const qs = params.toString();
+    return api.pppoe.clients.list(qs ? `?${qs}` : '');
+  }, [filter, query]);
   const [plans, setPlans] = useState<PppoePlan[]>([]);
   const [routers, setRouters] = useState<ApiRouter[]>([]);
   const [aps, setAps] = useState<AccessPoint[]>([]);
@@ -239,7 +315,7 @@ export default function PppoeClientsView() {
         <Btn variant="outline" onClick={exportCsv} title="Download all clients as CSV">
           <Download className="h-3.5 w-3.5" /> Export
         </Btn>
-        <RefreshBtn onClick={reload} />
+        <RefreshBtn onClick={reload} spinning={refreshing} />
       </ViewHeader>
 
       <UsageSummaryTile />
@@ -298,10 +374,31 @@ export default function PppoeClientsView() {
         </Panel>
       )}
 
-      <FilterChips options={FILTERS} value={filter} onChange={setFilter} right={<span className="text-[11px] font-mono text-[#141414]/50">{count} clients</span>} />
+      <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+        <div className="relative flex-1 max-w-sm">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[#141414]/40" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search name, account number, phone or PPPoE user…"
+            className={`${inputCls} pl-8 pr-8`}
+          />
+          {search && (
+            <button
+              onClick={() => setSearch('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 cursor-pointer text-[#141414]/40 hover:text-[#141414]"
+              title="Clear search"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      <FilterChips options={FILTERS} value={filter} onChange={setFilter} right={<span className="text-[11px] font-mono text-[#141414]/50">{count} client{count === 1 ? '' : 's'}{query ? ' found' : ''}</span>} />
 
       <TableShell
-        headers={['Account', 'Name', 'Plan', 'Live', 'Usage (cycle)', 'Status', 'Balance', 'Next due', '']}
+        headers={['Account', 'Name', 'Plan', 'Live', 'Usage (cycle)', 'Status', 'Balance', 'Next billing', '']}
         loading={rows === null}
         error={error}
         empty="No broadband clients yet."
@@ -324,32 +421,33 @@ export default function PppoeClientsView() {
             <td className={tdCls}><UsageCell client={c} /></td>
             <td className={tdCls}><Badge color={STATUS_COLOR[c.status]}>{c.status.replace('_', ' ')}</Badge></td>
             <td className={`${tdCls} font-mono text-right ${Number(c.balance) < 0 ? 'text-[#B22222]' : ''}`}>{fmtKsh(c.balance)}</td>
-            <td className={`${tdCls} font-mono whitespace-nowrap`}>{c.next_due_date ?? '—'}</td>
-            <td className={`${tdCls} whitespace-nowrap space-x-1.5`}>
-              {c.status === 'pending_install' && (
-                <Btn variant="green" onClick={() => act(c, () => api.pppoe.clients.provision(c.id), 'provisioned')}>
-                  <Zap className="h-3.5 w-3.5" /> Provision
-                </Btn>
-              )}
-              {c.status === 'active' && (
-                <Btn variant="danger" onClick={() => act(c, () => api.pppoe.clients.suspend(c.id), 'suspended')}>
-                  <Ban className="h-3.5 w-3.5" /> Suspend
-                </Btn>
-              )}
-              {c.status === 'suspended' && (
-                <Btn variant="green" onClick={() => act(c, () => api.pppoe.clients.restore(c.id), 'restored')}>
-                  <RotateCcw className="h-3.5 w-3.5" /> Restore
-                </Btn>
-              )}
-              <Btn variant="outline" onClick={() => setEditFor(c)} title="Edit this client's details">
-                <Pencil className="h-3.5 w-3.5" /> Edit
-              </Btn>
-              <Btn variant="outline" onClick={() => setCredsFor(c)} title="PPPoE username & password, reset, delete">
-                <Key className="h-3.5 w-3.5" /> Credentials
-              </Btn>
-              <Btn variant="outline" onClick={() => setSheetFor(c)} title="Printable account sheet">
-                <Printer className="h-3.5 w-3.5" /> Sheet
-              </Btn>
+            <td className={`${tdCls} font-mono whitespace-nowrap`}><NextDueCell client={c} /></td>
+            <td className={`${tdCls} whitespace-nowrap`}>
+              <div className="flex items-center justify-end gap-1.5">
+                {/* The one status action stays visible — it's what an ISP reaches for. */}
+                {c.status === 'pending_install' && (
+                  <Btn variant="green" onClick={() => act(c, () => api.pppoe.clients.provision(c.id), 'provisioned')}>
+                    <Zap className="h-3.5 w-3.5" /> Provision
+                  </Btn>
+                )}
+                {c.status === 'active' && (
+                  <Btn variant="danger" onClick={() => act(c, () => api.pppoe.clients.suspend(c.id), 'suspended')}>
+                    <Ban className="h-3.5 w-3.5" /> Suspend
+                  </Btn>
+                )}
+                {c.status === 'suspended' && (
+                  <Btn variant="green" onClick={() => act(c, () => api.pppoe.clients.restore(c.id), 'restored')}>
+                    <RotateCcw className="h-3.5 w-3.5" /> Restore
+                  </Btn>
+                )}
+                {/* …and the tools collapse into a menu, so the row stays readable as the
+                    client base grows. */}
+                <RowMenu
+                  onEdit={() => setEditFor(c)}
+                  onCredentials={() => setCredsFor(c)}
+                  onSheet={() => setSheetFor(c)}
+                />
+              </div>
             </td>
           </tr>
         ))}

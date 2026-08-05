@@ -14,7 +14,7 @@ export default function EmailsView() {
   const [body, setBody] = useState('');
   const [audience, setAudience] = useState<'all' | 'active' | 'expired'>('all');
   const [busy, setBusy] = useState(false);
-  const { rows, error, reload } = useList(() => api.messages.list('?channel=email'));
+  const { rows, error, refreshing, reload } = useList(() => api.messages.list('?channel=email'));
 
   const send = async (e: FormEvent) => {
     e.preventDefault();
@@ -46,7 +46,7 @@ export default function EmailsView() {
         title="Emails"
         subtitle="Email broadcasts to clients who have an email on file. Individual deliveries are logged below."
       >
-        <RefreshBtn onClick={reload} />
+        <RefreshBtn onClick={reload} spinning={refreshing} />
       </ViewHeader>
 
       <Panel title="Compose email broadcast">

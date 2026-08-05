@@ -97,6 +97,17 @@ class ClientViewSet(TenantModelViewSet):
         status_param = self.request.query_params.get("status")
         if status_param:
             qs = qs.filter(status=status_param)
+        # Find one customer fast, however the ISP remembers them: the account number they
+        # quote on the phone, their name, the number they call from, or their PPPoE login.
+        # super() has already scoped to the tenant, so this only ever searches their own base.
+        search = (self.request.query_params.get("search") or "").strip()
+        if search:
+            qs = qs.filter(
+                Q(account_number__icontains=search)
+                | Q(full_name__icontains=search)
+                | Q(phone__icontains=search)
+                | Q(pppoe_username__icontains=search)
+            )
         return qs
 
     # --- sector capacity: a soft, audited over-subscription gate ------------------------
