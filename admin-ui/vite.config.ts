@@ -6,6 +6,22 @@ import {defineConfig} from 'vite';
 export default defineConfig(() => {
   return {
     plugins: [react(), tailwindcss()],
+    build: {
+      // Split the vendor libraries out of the app bundle so no single chunk is oversized
+      // and the rarely-changing framework code caches independently of our app code. A
+      // function (not the object form) so deep imports like `react-dom/client` land in the
+      // framework chunk too, instead of leaking back into the app bundle.
+      rollupOptions: {
+        output: {
+          manualChunks(id: string) {
+            if (!id.includes('node_modules')) return undefined;
+            if (id.includes('lucide-react')) return 'icons';
+            if (/[/\\](react|react-dom|scheduler)[/\\]/.test(id)) return 'react-vendor';
+            return 'vendor';
+          },
+        },
+      },
+    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
