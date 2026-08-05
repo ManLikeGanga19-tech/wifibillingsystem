@@ -28,8 +28,26 @@ _missing = [v for v in _required if not os.getenv(v)]
 if _missing:
     raise RuntimeError(f"Missing required production env vars: {', '.join(_missing)}")
 
+# The container-internal names the HEALTH CHECKS dial: Docker's healthcheck hits
+# localhost:8000, and Caddy's active health check dials the compose service name
+# (api:8000). Without them Django answers both with 400 DisallowedHost — the container is
+# marked unhealthy and Caddy stops routing to an API that is actually fine, which takes the
+# whole site down. They are not a Host-header hole: Caddy only forwards requests that
+# matched one of its real site blocks, so nothing off the internet can arrive claiming to
+# be "api" or "localhost".
+ALLOWED_HOSTS = [
+    *[h.strip() for h in os.getenv("DJANGO_ALLOWED_HOSTS", "").split(",") if h.strip()],
+    "localhost",
+    "127.0.0.1",
+    "api",
+]
+
 # ---- transport ---------------------------------------------------------------------
 SECURE_SSL_REDIRECT = True
+# ...but NOT for the health check. Those probes speak plain HTTP inside the private docker
+# network and set no X-Forwarded-Proto, so the redirect would answer them with a 301 to an
+# https:// URL on the plain-HTTP port — which every health checker reads as "unhealthy".
+SECURE_REDIRECT_EXEMPT = [r"^api/v1/health/$"]
 # Caddy terminates TLS and forwards over the private network. Without this, Django
 # believes every request is plain http:// and redirect-loops forever.
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
