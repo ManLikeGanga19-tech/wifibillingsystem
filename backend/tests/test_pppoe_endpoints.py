@@ -784,3 +784,222 @@ class TestCredentialExportIsGated:
         ).decode()
         assert theirs.account_number not in body
         assert "theirsecret" not in body
+
+
+class TestCsvImport:
+    """Migrating an ISP in from another billing system. The router import brings credentials;
+    this brings the PEOPLE — names, phones, addresses, billing days — which no router holds."""
+
+    def _setup(self, op):
+        return RouterFactory(operator=op), ServicePlanFactory(operator=op, name="Home 8M")
+
+    def _preview(self, op, csv_text):
+        return staff(op).post(
+            "/api/v1/pppoe/clients/import-csv-preview/", {"csv": csv_text}, format="json"
+        )
+
+    def _import(self, op, csv_text, router, **extra):
+        return staff(op).post(
+            "/api/v1/pppoe/clients/import-csv/",
+            {"csv": csv_text, "router": router.id, **extra},
+            format="json",
+        )
+
+    def test_preview_reports_what_would_happen_without_writing(self):
+        op = OperatorFactory()
+        router, plan = self._setup(op)
+        csv_text = (
+            "full_name,phone,plan,billing_day\n"
+            "Jane Ngure,0722123456,Home 8M,15\n"
+            "Peter Kamau,0733000111,Home 8M,1\n"
+        )
+        resp = self._preview(op, csv_text)
+        assert resp.status_code == 200, resp.content
+        body = resp.json()
+        assert body["importable"] == 2 and body["blocked"] == 0
+        assert body["plans"][0]["plan"] == plan.id  # matched by name
+        assert Client.objects.filter(operator=op).count() == 0  # nothing written
+
+    def test_import_creates_the_clients(self):
+        op = OperatorFactory()
+        router, plan = self._setup(op)
+        csv_text = (
+            "full_name,phone,physical_address,plan,billing_day\n"
+            "Jane Ngure,0722123456,Nyeri,Home 8M,15\n"
+        )
+        resp = self._import(op, csv_text, router, plan_map={"Home 8M": plan.id})
+        assert resp.status_code == 200, resp.content
+        assert len(resp.json()["imported"]) == 1
+        client = Client.objects.get(operator=op, full_name="Jane Ngure")
+        assert client.phone == "0722123456"
+        assert client.physical_address == "Nyeri"
+        assert client.billing_day == 15
+        assert client.plan_id == plan.id
+
+    def test_imported_clients_wait_for_provisioning(self):
+        """We have no evidence these accounts exist on any router, so marking them ACTIVE
+        would bill for customers who may not be connected — and would put the console at
+        odds with the router from minute one."""
+        op = OperatorFactory()
+        router, plan = self._setup(op)
+        self._import(op, "full_name,plan\nJane,Home 8M\n", router, plan_map={"Home 8M": plan.id})
+        assert Client.objects.get(operator=op).status == Client.Status.PENDING_INSTALL
+
+    def test_credentials_in_the_file_are_carried_over(self):
+        """So a migrated customer's router keeps working without being reconfigured."""
+        op = OperatorFactory()
+        router, plan = self._setup(op)
+        csv_text = (
+            "full_name,plan,pppoe_username,pppoe_password\n"
+            "Jane,Home 8M,jane-old,keepthis1\n"
+        )
+        self._import(op, csv_text, router, plan_map={"Home 8M": plan.id})
+        client = Client.objects.get(operator=op)
+        assert client.pppoe_username == "jane-old"
+        assert client.pppoe_password == "keepthis1"
+
+    def test_missing_credentials_are_generated(self):
+        op = OperatorFactory()
+        router, plan = self._setup(op)
+        self._import(op, "full_name,plan\nJane,Home 8M\n", router, plan_map={"Home 8M": plan.id})
+        client = Client.objects.get(operator=op)
+        assert client.pppoe_username and client.pppoe_password
+
+    def test_a_username_taken_by_another_tenant_is_refused_not_renamed(self):
+        """It is what the customer's router dials with, so it cannot be silently changed."""
+        op_a, op_b = OperatorFactory(slug="a"), OperatorFactory(slug="b")
+        PppoeClientFactory(operator=op_b, pppoe_username="taken-name")
+        router, plan = self._setup(op_a)
+        csv_text = "full_name,plan,pppoe_username\nJane,Home 8M,taken-name\n"
+        body = self._import(op_a, csv_text, router, plan_map={"Home 8M": plan.id}).json()
+        assert body["imported"] == []
+        assert "already taken" in body["skipped"][0]["reason"]
+
+    def test_one_bad_row_does_not_stop_the_others(self):
+        op = OperatorFactory()
+        router, plan = self._setup(op)
+        csv_text = (
+            "full_name,plan,billing_day\n"
+            "Good One,Home 8M,5\n"
+            ",Home 8M,5\n"                 # no name
+            "Bad Day,Home 8M,99\n"         # billing day out of range
+            "Good Two,Home 8M,5\n"
+        )
+        body = self._import(op, csv_text, router, plan_map={"Home 8M": plan.id}).json()
+        assert sorted(i["name"] for i in body["imported"]) == ["Good One", "Good Two"]
+        assert len(body["skipped"]) == 2
+
+    def test_duplicate_usernames_inside_one_file_are_caught(self):
+        op = OperatorFactory()
+        router, plan = self._setup(op)
+        csv_text = (
+            "full_name,plan,pppoe_username\n"
+            "First,Home 8M,samename\n"
+            "Second,Home 8M,samename\n"
+        )
+        body = self._import(op, csv_text, router, plan_map={"Home 8M": plan.id}).json()
+        assert len(body["imported"]) == 1
+        assert "Duplicate" in body["skipped"][0]["reason"]
+
+    def test_headers_are_tolerant_of_case_spacing_and_a_bom(self):
+        """Excel writes a BOM, and people rename columns. Rejecting those would make the
+        feature feel broken for exactly the non-technical ISP it exists to help."""
+        op = OperatorFactory()
+        router, plan = self._setup(op)
+        csv_text = "﻿ Full_Name , PLAN \nJane,Home 8M\n"
+        assert self._preview(op, csv_text).json()["importable"] == 1
+
+    def test_a_file_with_no_name_column_is_rejected_clearly(self):
+        op = OperatorFactory()
+        self._setup(op)
+        resp = self._preview(op, "phone,plan\n0722,Home 8M\n")
+        assert resp.status_code == 400
+        assert "full_name" in resp.json()["detail"]
+
+    def test_an_empty_file_is_rejected(self):
+        op = OperatorFactory()
+        self._setup(op)
+        assert self._preview(op, "").status_code == 400
+
+    def test_import_requires_a_router(self):
+        op = OperatorFactory()
+        self._setup(op)
+        resp = staff(op).post(
+            "/api/v1/pppoe/clients/import-csv/",
+            {"csv": "full_name\nJane\n"}, format="json",
+        )
+        assert resp.status_code == 400
+
+    def test_cannot_import_onto_another_tenants_router(self):
+        op_a, op_b = OperatorFactory(slug="a"), OperatorFactory(slug="b")
+        their_router = RouterFactory(operator=op_b)
+        ServicePlanFactory(operator=op_a, name="Home 8M")
+        resp = staff(op_a).post(
+            "/api/v1/pppoe/clients/import-csv/",
+            {"csv": "full_name,plan\nJane,Home 8M\n", "router": their_router.id},
+            format="json",
+        )
+        assert resp.status_code == 400  # not found for this tenant
+        assert not Client.objects.filter(operator=op_a).exists()
+
+    def test_the_import_is_audited(self):
+        from apps.core.models import AuditLog
+
+        op = OperatorFactory()
+        router, plan = self._setup(op)
+        self._import(op, "full_name,plan\nJane,Home 8M\n", router, plan_map={"Home 8M": plan.id})
+        assert AuditLog.objects.filter(action="pppoe_clients_csv_imported").exists()
+
+    def test_an_export_round_trips_back_in(self):
+        """The promise both ways: a file that leaves WIFI.OS comes straight back. This is the
+        restore-from-backup path — export, lose the records, re-import and be whole again."""
+        op = OperatorFactory()
+        router, plan = self._setup(op)
+        original = PppoeClientFactory(
+            operator=op, router=router, plan=plan, full_name="Jane Ngure",
+            phone="0722123456", billing_day=12, pppoe_username="jane-x1",
+            pppoe_password="herpassword1",
+        )
+        exported = b"".join(
+            staff(op).get(
+                "/api/v1/pppoe/clients/export/?include_credentials=true"
+            ).streaming_content
+        ).decode()
+
+        original.delete()  # the records are gone; only the file remains
+        body = self._import(op, exported, router, plan_map={"Home 8M": plan.id}).json()
+
+        assert len(body["imported"]) == 1, body
+        restored = Client.objects.get(operator=op)
+        assert restored.full_name == "Jane Ngure"
+        assert restored.phone == "0722123456"
+        assert restored.billing_day == 12
+        # The credentials come back too — otherwise every customer's router would have to be
+        # reconfigured by hand, which is not a restore in any meaningful sense.
+        assert restored.pppoe_username == "jane-x1"
+        assert restored.pppoe_password == "herpassword1"
+
+    def test_the_same_username_cannot_land_on_two_tenants(self):
+        """Migrating a file into a DIFFERENT tenant while the original still exists must be
+        refused: a PPPoE username is globally unique, and two ISPs cannot both dial it."""
+        source, target = OperatorFactory(slug="source"), OperatorFactory(slug="target")
+        PppoeClientFactory(
+            operator=source, full_name="Jane", pppoe_username="jane-x1", plan__name="Home 8M"
+        )
+        exported = b"".join(
+            staff(source).get(
+                "/api/v1/pppoe/clients/export/?include_credentials=true"
+            ).streaming_content
+        ).decode()
+
+        router, plan = RouterFactory(operator=target), ServicePlanFactory(
+            operator=target, name="Home 8M"
+        )
+        body = staff(target).post(
+            "/api/v1/pppoe/clients/import-csv/",
+            {"csv": exported, "router": router.id, "plan_map": {"Home 8M": plan.id}},
+            format="json",
+        ).json()
+        assert body["imported"] == []
+        assert "already taken" in body["skipped"][0]["reason"]
+        assert not Client.objects.filter(operator=target).exists()

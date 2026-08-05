@@ -88,7 +88,7 @@ class ClientViewSet(TenantModelViewSet):
     #: unverified ISP may build their whole client list — they simply cannot turn
     #: anyone on, because that would mean money flowing through our paybill for a
     #: business we have not checked.
-    MONEY_ACTIONS = {"provision", "restore", "import_run"}
+    MONEY_ACTIONS = {"provision", "restore", "import_run", "import_csv"}
 
     def get_permissions(self):
         perms = super().get_permissions()
@@ -313,6 +313,63 @@ class ClientViewSet(TenantModelViewSet):
         except ProvisioningError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
         return Response(result)
+
+    def _csv_rows(self, request):
+        """Parse the posted CSV text, or raise a 400-shaped error message. The file arrives as
+        TEXT in the JSON body (the browser reads it) rather than multipart — same CSRF and
+        auth path as every other call, and no parser configuration to get subtly wrong."""
+        from .porting import CsvImportError, parse_client_csv
+
+        try:
+            return parse_client_csv(request.data.get("csv") or ""), None
+        except CsvImportError as exc:
+            return None, Response(
+                {"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+    @extend_schema(request=OBJECT_REQUEST, responses=OBJECT_RESPONSE)
+    @action(detail=False, methods=["post"], url_path="import-csv-preview")
+    def import_csv_preview(self, request):
+        """Read a CSV and describe exactly what importing it would do — per row, plus the
+        plan names found in it. Writes nothing."""
+        from .porting import preview_csv_import
+
+        rows, error = self._csv_rows(request)
+        if error:
+            return error
+        return Response(preview_csv_import(self.get_operator(), rows))
+
+    @extend_schema(request=OBJECT_REQUEST, responses=OBJECT_RESPONSE)
+    @action(detail=False, methods=["post"], url_path="import-csv")
+    def import_csv(self, request):
+        """Create clients from a CSV — an ISP migrating in from another billing system."""
+        from apps.provisioning.models import Router
+
+        from .porting import import_clients_from_csv
+
+        operator = self.get_operator()
+        router = Router.objects.filter(
+            operator=operator, pk=request.data.get("router")
+        ).first()
+        if router is None:
+            return Response(
+                {"detail": "Choose which router these clients belong to."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        rows, error = self._csv_rows(request)
+        if error:
+            return error
+
+        default_plan = ServicePlan.objects.filter(
+            operator=operator, pk=request.data.get("default_plan")
+        ).first()
+        return Response(
+            import_clients_from_csv(
+                operator, router, rows=rows,
+                plan_map=request.data.get("plan_map") or {},
+                default_plan=default_plan, actor=request.user,
+            )
+        )
 
     @extend_schema(responses=OBJECT_RESPONSE)
     @action(detail=False, methods=["get"])
