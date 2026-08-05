@@ -138,6 +138,14 @@ export default function PppoeClientsView() {
     api.pppoe.accessPoints.list().then((r) => setAps(r.results)).catch(() => {});
   }, []);
 
+  // Auto-refresh so a client that just connected flips to "live" on its own. The backend
+  // presence sweep updates the online flag within ~a minute; this reflects it without the
+  // ISP hitting refresh. A silent re-fetch (reload doesn't blank the table).
+  useEffect(() => {
+    const id = window.setInterval(reload, 30_000);
+    return () => window.clearInterval(id);
+  }, [reload]);
+
   const isWireless = form.delivery_method.startsWith('wireless');
 
   // When the chosen sector is full the server answers 409 with a warning; we surface it as
