@@ -1070,6 +1070,29 @@ export interface PppoeUsageSummary {
   synced_at: string | null;
 }
 
+export interface PppoeCsvRow {
+  line: number;
+  full_name: string;
+  phone: string;
+  account_number: string;
+  pppoe_username: string;
+  csv_plan: string;
+  has_password: boolean;
+  problem: string;
+  importable: boolean;
+}
+export interface PppoeCsvPlan {
+  csv_plan: string;
+  plan: number | null;
+  plan_name: string | null;
+}
+export interface PppoeCsvPreview {
+  rows: PppoeCsvRow[];
+  importable: number;
+  blocked: number;
+  plans: PppoeCsvPlan[];
+}
+
 export interface PppoeImportRow {
   username: string;
   profile: string;
@@ -1693,6 +1716,17 @@ export const api = {
       importPreview: (router: number) =>
         request<PppoeImportRow[]>('/pppoe/clients/import-preview/', {
           method: 'POST', body: JSON.stringify({ router }),
+        }),
+      // Migrating in from another billing system: the file carries the PEOPLE (names,
+      // phones, billing days) that a router never knows about.
+      importCsvPreview: (csv: string) =>
+        request<PppoeCsvPreview>('/pppoe/clients/import-csv-preview/', {
+          method: 'POST', body: JSON.stringify({ csv }),
+        }),
+      importCsv: (csv: string, router: number, planMap: Record<string, number>) =>
+        request<PppoeImportResult>('/pppoe/clients/import-csv/', {
+          method: 'POST',
+          body: JSON.stringify({ csv, router, plan_map: planMap }),
         }),
       importRun: (router: number, items: PppoeImportItem[]) =>
         request<PppoeImportResult>('/pppoe/clients/import/', {

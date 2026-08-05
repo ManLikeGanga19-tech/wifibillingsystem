@@ -1,6 +1,6 @@
 import React, { useEffect, useState, type FormEvent } from 'react';
-import { Users, Plus, Ban, RotateCcw, Zap, Printer, X, Loader2, Wifi, WifiOff, AlertTriangle, Key, Copy, Eye, EyeOff, Trash2, RefreshCw, Upload, Download, Pencil, Save, Search, MoreHorizontal } from 'lucide-react';
-import { api, ApiError, PppoeClient, PppoePlan, ApiRouter, AccessPoint, PppoeUsageSummary, CapacityWarning, PppoeImportRow, PppoeImportItem } from '../api/client';
+import { Users, Plus, Ban, RotateCcw, Zap, Printer, X, Loader2, Wifi, WifiOff, AlertTriangle, Key, Copy, Eye, EyeOff, Trash2, RefreshCw, Upload, Download, Pencil, Save, Search, MoreHorizontal, ArrowRight } from 'lucide-react';
+import { api, ApiError, PppoeClient, PppoePlan, ApiRouter, AccessPoint, PppoeUsageSummary, CapacityWarning, PppoeImportRow, PppoeImportItem, PppoeCsvPreview, PppoeImportResult } from '../api/client';
 import {
   Badge, Btn, Field, FilterChips, inputCls, Panel, RefreshBtn, TableShell, tdCls, toast, useList, ViewHeader, fmtDateTime, fmtKsh,
 } from './ui';
@@ -760,6 +760,9 @@ function ImportDialog({
   onClose: () => void;
   onDone: () => void;
 }) {
+  // Two ways an ISP arrives with data: the router knows the CREDENTIALS of users already
+  // dialling in; a CSV from their old billing system knows the PEOPLE. Both, not either.
+  const [mode, setMode] = useState<'router' | 'csv'>('router');
   const [routerId, setRouterId] = useState<number | ''>(routers[0]?.id ?? '');
   const [rows, setRows] = useState<PppoeImportRow[] | null>(null);
   const [sel, setSel] = useState<Record<string, { include: boolean; full_name: string; plan: number | '' }>>({});
@@ -822,10 +825,28 @@ function ImportDialog({
       <div className="bg-white border border-[#141414] w-full max-w-2xl max-h-[88vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between p-4 border-b border-[#141414]">
           <h3 className="font-bold font-mono uppercase text-sm flex items-center gap-2">
-            <Upload className="h-4 w-4" /> Import PPPoE users from a router
+            <Upload className="h-4 w-4" /> Import clients
           </h3>
           <button onClick={onClose} className="cursor-pointer"><X className="h-4 w-4" /></button>
         </div>
+
+        <div className="flex border-b border-[#141414]">
+          {([['router', 'From the router'], ['csv', 'From a CSV file']] as const).map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => setMode(key)}
+              className={`flex-1 py-2.5 text-xs font-bold font-mono uppercase transition cursor-pointer ${
+                mode === key ? 'bg-[#141414] text-[#E4E3E0]' : 'bg-white hover:bg-[#f0efec]'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {mode === 'csv' ? (
+          <CsvImportPanel routers={routers} plans={plans} onClose={onClose} onDone={onDone} />
+        ) : (
         <div className="p-5 space-y-4 text-sm">
           <p className="text-[11px] text-[#141414]/55 leading-relaxed">
             Reads the PPPoE accounts already on the router and adopts the ones you choose as
@@ -908,6 +929,194 @@ function ImportDialog({
             </div>
           )}
         </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Migrating in from another billing system. The ISP picks their exported file, we show
+ * exactly what would happen to every row BEFORE anything is written, they map the plan names
+ * their old system used onto their WIFI.OS plans, and only then does it import.
+ *
+ * Imported clients land as pending-install: we have no evidence these accounts are on a
+ * router yet, and quietly marking them active would bill for customers who may not be
+ * connected. The ISP presses Provision when they're ready.
+ */
+function CsvImportPanel({
+  routers, plans, onClose, onDone,
+}: {
+  routers: ApiRouter[];
+  plans: PppoePlan[];
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [csv, setCsv] = useState('');
+  const [fileName, setFileName] = useState('');
+  const [routerId, setRouterId] = useState<number | ''>(routers[0]?.id ?? '');
+  const [preview, setPreview] = useState<PppoeCsvPreview | null>(null);
+  const [planMap, setPlanMap] = useState<Record<string, number | ''>>({});
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<PppoeImportResult | null>(null);
+
+  const readFile = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      setCsv(String(reader.result ?? ''));
+      setFileName(file.name);
+      setPreview(null);
+      setResult(null);
+    };
+    reader.readAsText(file);
+  };
+
+  const doPreview = async () => {
+    if (!csv.trim() || busy) return;
+    setBusy(true);
+    try {
+      const data = await api.pppoe.clients.importCsvPreview(csv);
+      setPreview(data);
+      // Pre-fill whatever we could match by name; the ISP fills in the rest.
+      const seed: Record<string, number | ''> = {};
+      for (const p of data.plans) seed[p.csv_plan] = p.plan ?? '';
+      setPlanMap(seed);
+    } catch (e) {
+      toast('error', e instanceof Error ? e.message : 'Could not read that file.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const unmapped = (preview?.plans ?? []).filter((p) => !planMap[p.csv_plan]);
+
+  const run = async () => {
+    if (!routerId || busy || !preview) return;
+    if (unmapped.length) {
+      toast('warning', `Choose a plan for "${unmapped[0].csv_plan}" first.`);
+      return;
+    }
+    setBusy(true);
+    try {
+      const map: Record<string, number> = {};
+      for (const [k, v] of Object.entries(planMap)) if (v) map[k] = Number(v);
+      const res = await api.pppoe.clients.importCsv(csv, Number(routerId), map);
+      setResult(res);
+      toast('success', `Imported ${res.imported.length} client(s).`);
+      onDone();
+    } catch (e) {
+      toast('error', e instanceof Error ? e.message : 'Import failed.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="p-5 space-y-4 text-sm">
+      <p className="text-[11px] text-[#141414]/55 leading-relaxed">
+        Bringing your customers over from another billing system? Upload its CSV export. We
+        show you exactly what will happen before anything is saved. A file exported from
+        WIFI.OS works as-is — that&apos;s also how you restore from a backup.
+      </p>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="CSV file">
+          <input
+            type="file"
+            accept=".csv,text/csv"
+            onChange={(e) => e.target.files?.[0] && readFile(e.target.files[0])}
+            className="w-full text-xs file:mr-2 file:border file:border-[#141414] file:bg-white file:px-2 file:py-1 file:text-xs file:font-mono file:cursor-pointer"
+          />
+        </Field>
+        <Field label="Put these clients on">
+          <select value={routerId} onChange={(e) => setRouterId(Number(e.target.value))} className={inputCls}>
+            {routers.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+          </select>
+        </Field>
+      </div>
+
+      {fileName && (
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] font-mono text-[#141414]/55 truncate flex-1">{fileName}</span>
+          <Btn onClick={doPreview} disabled={busy || !csv.trim()}>
+            {busy && !preview ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+            Preview
+          </Btn>
+        </div>
+      )}
+
+      {preview && (
+        <>
+          <div className="text-xs font-mono border border-[#141414]/15 bg-[#faf9f7] p-2.5">
+            <b>{preview.importable}</b> ready to import
+            {preview.blocked > 0 && (
+              <> · <span className="text-[#B22222]"><b>{preview.blocked}</b> can&apos;t be</span></>
+            )}
+          </div>
+
+          {preview.plans.length > 0 && (
+            <div className="space-y-2">
+              <p className="font-mono text-[10px] uppercase tracking-wide text-[#141414]/50">
+                Match their plans to yours
+              </p>
+              {preview.plans.map((p) => (
+                <div key={p.csv_plan} className="flex items-center gap-2">
+                  <span className="flex-1 font-mono text-xs truncate">{p.csv_plan || '(no plan named)'}</span>
+                  <ArrowRight className="h-3.5 w-3.5 text-[#141414]/30" />
+                  <select
+                    value={planMap[p.csv_plan] ?? ''}
+                    onChange={(e) => setPlanMap({ ...planMap, [p.csv_plan]: e.target.value ? Number(e.target.value) : '' })}
+                    className={`${inputCls} flex-1 text-xs py-1`}
+                  >
+                    <option value="">Choose plan…</option>
+                    {plans.map((pl) => <option key={pl.id} value={pl.id}>{pl.name}</option>)}
+                  </select>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="border border-[#141414]/15 max-h-60 overflow-y-auto">
+            <div className="grid grid-cols-[3rem_1fr_1fr_1fr] gap-2 px-3 py-2 bg-[#f0efec] font-mono text-[10px] uppercase tracking-wide text-[#141414]/50 sticky top-0">
+              <span>Line</span><span>Name</span><span>Phone</span><span>Status</span>
+            </div>
+            {preview.rows.map((r) => (
+              <div key={r.line} className={`grid grid-cols-[3rem_1fr_1fr_1fr] gap-2 px-3 py-1.5 items-center border-t border-[#141414]/10 text-xs ${r.importable ? '' : 'bg-[#B22222]/5'}`}>
+                <span className="font-mono text-[#141414]/50">{r.line}</span>
+                <span className="truncate">{r.full_name || <span className="text-[#141414]/40">—</span>}</span>
+                <span className="font-mono truncate">{r.phone}</span>
+                <span className={r.importable ? 'text-[#228B22]' : 'text-[#B22222]'}>
+                  {r.importable ? 'ready' : r.problem}
+                </span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {result && (
+        <div className="text-xs font-mono border border-[#141414]/15 bg-[#faf9f7] p-2.5 space-y-1">
+          <div>
+            Imported <b>{result.imported.length}</b> · skipped <b>{result.skipped.length}</b>
+            {result.failed.length > 0 && <> · <span className="text-[#B22222]">failed {result.failed.length}</span></>}
+          </div>
+          {result.imported.length > 0 && (
+            <p className="text-[11px] text-[#141414]/55 leading-relaxed">
+              They&apos;re saved as <b>pending install</b>. Press Provision on each (or fix
+              anything first) to push them to the router.
+            </p>
+          )}
+        </div>
+      )}
+
+      <div className="flex items-center gap-2">
+        {preview && preview.importable > 0 && (
+          <Btn variant="green" onClick={run} disabled={busy || !routerId}>
+            {busy && preview ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+            Import {preview.importable} client{preview.importable === 1 ? '' : 's'}
+          </Btn>
+        )}
+        <Btn variant="outline" onClick={onClose}><X className="h-3.5 w-3.5" /> Close</Btn>
       </div>
     </div>
   );
