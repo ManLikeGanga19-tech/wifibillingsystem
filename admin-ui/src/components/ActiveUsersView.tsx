@@ -15,7 +15,7 @@ const STATUS_COLOR: Record<ApiSession['status'], 'green' | 'gray' | 'red' | 'amb
 export default function ActiveUsersView() {
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>('active');
   const [expanded, setExpanded] = useState<number | null>(null);
-  const { rows, count, error, reload } = useList(
+  const { rows, count, error, refreshing, reload } = useList(
     () => api.sessions.list(filter === 'all' ? '' : `?status=${filter}`),
     [filter]
   );
@@ -38,7 +38,7 @@ export default function ActiveUsersView() {
         title="Active Users"
         subtitle="Live hotspot sessions on your routers. Suspend cuts the user off immediately."
       >
-        <RefreshBtn onClick={reload} />
+        <RefreshBtn onClick={reload} spinning={refreshing} />
       </ViewHeader>
 
       <FilterChips

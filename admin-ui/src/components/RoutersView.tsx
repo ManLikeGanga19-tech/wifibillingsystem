@@ -19,7 +19,7 @@ export default function RoutersView() {
   const [testing, setTesting] = useState<number | null>(null);
   const [infoFor, setInfoFor] = useState<ApiRouter | null>(null);
   const [info, setInfo] = useState<DeviceInfo | null>(null);
-  const { rows, error, reload } = useList(() => api.routers.list());
+  const { rows, error, refreshing, reload } = useList(() => api.routers.list());
 
   const openInfo = async (r: ApiRouter) => {
     setInfoFor(r);
@@ -104,7 +104,7 @@ export default function RoutersView() {
         <Btn onClick={() => setShowAdd(!showAdd)}>
           <Plus className="h-3.5 w-3.5" /> Add Router
         </Btn>
-        <RefreshBtn onClick={reload} />
+        <RefreshBtn onClick={reload} spinning={refreshing} />
       </ViewHeader>
 
       {showAdd && (

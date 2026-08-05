@@ -6,10 +6,10 @@ import { Badge, Btn, Field, inputCls, Panel, RefreshBtn, TableShell, tdCls, toas
 const mbps = (kbps: number) => (kbps >= 1024 ? `${Math.round(kbps / 1024)} Mbps` : `${kbps} Kbps`);
 
 export default function PppoePlansView() {
-  const { rows, error, reload } = useList(() => api.pppoe.plans.list());
+  const { rows, error, refreshing, reload } = useList(() => api.pppoe.plans.list());
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({
-    name: '', price: '', download: '', upload: '', mikrotik_profile: '',
+    name: '', price: '', download: '', upload: '', mikrotik_profile: '', data_cap_gb: '',
   });
 
   const create = async (e: FormEvent) => {
@@ -21,9 +21,11 @@ export default function PppoePlansView() {
         download_kbps: Math.round(Number(form.download) * 1024),
         upload_kbps: Math.round(Number(form.upload) * 1024),
         mikrotik_profile: form.mikrotik_profile || form.name.toLowerCase().replace(/\s+/g, '-'),
+        // Blank = unlimited. The cap drives the FUP alerts and the usage bar.
+        data_cap_gb: form.data_cap_gb.trim() ? Number(form.data_cap_gb) : null,
       });
       toast('success', 'Broadband plan created.');
-      setForm({ name: '', price: '', download: '', upload: '', mikrotik_profile: '' });
+      setForm({ name: '', price: '', download: '', upload: '', mikrotik_profile: '', data_cap_gb: '' });
       setShowForm(false);
       reload();
     } catch {
@@ -41,7 +43,7 @@ export default function PppoePlansView() {
         <Btn onClick={() => setShowForm(!showForm)}>
           <Plus className="h-3.5 w-3.5" /> New Plan
         </Btn>
-        <RefreshBtn onClick={reload} />
+        <RefreshBtn onClick={reload} spinning={refreshing} />
       </ViewHeader>
 
       {showForm && (
@@ -60,6 +62,9 @@ export default function PppoePlansView() {
               <input type="number" required value={form.upload} onChange={(e) => setForm({ ...form, upload: e.target.value })} className={inputCls} />
             </Field>
             <Btn type="submit" variant="green">Create</Btn>
+            <Field label="Data cap (GB) — blank = unlimited">
+              <input type="number" min="1" value={form.data_cap_gb} onChange={(e) => setForm({ ...form, data_cap_gb: e.target.value })} className={inputCls} placeholder="Unlimited" />
+            </Field>
             <Field label="MikroTik profile (optional)" className="md:col-span-2">
               <input value={form.mikrotik_profile} onChange={(e) => setForm({ ...form, mikrotik_profile: e.target.value })} className={inputCls} placeholder="auto from name" />
             </Field>
@@ -68,7 +73,7 @@ export default function PppoePlansView() {
       )}
 
       <TableShell
-        headers={['Name', 'Price/mo', 'Download', 'Upload', 'Profile', 'Status']}
+        headers={['Name', 'Price/mo', 'Download', 'Upload', 'Data cap', 'Profile', 'Status']}
         loading={rows === null}
         error={error}
         empty="No broadband plans yet — create one to start signing up clients."
@@ -79,6 +84,9 @@ export default function PppoePlansView() {
             <td className={`${tdCls} font-mono`}>{fmtKsh(p.price)}</td>
             <td className={`${tdCls} font-mono`}>{mbps(p.download_kbps)}</td>
             <td className={`${tdCls} font-mono`}>{mbps(p.upload_kbps)}</td>
+            <td className={`${tdCls} font-mono`}>
+              {p.data_cap_gb ? `${p.data_cap_gb} GB` : <span className="text-[#141414]/40">Unlimited</span>}
+            </td>
             <td className={`${tdCls} font-mono`}>{p.mikrotik_profile}</td>
             <td className={tdCls}>
               <Badge color={p.is_active ? 'green' : 'gray'}>{p.is_active ? 'active' : 'inactive'}</Badge>

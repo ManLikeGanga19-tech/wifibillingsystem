@@ -15,7 +15,7 @@ export default function ExpensesView() {
     description: '',
     amount: '',
   });
-  const { rows, count, error, reload } = useList(() => api.expenses.list());
+  const { rows, count, error, refreshing, reload } = useList(() => api.expenses.list());
 
   // Auto side: what the ISP paid WIFI.OS (Danamo) this month, pulled live from billing.
   const [platform, setPlatform] = useState<PlatformFees | null>(null);
@@ -55,7 +55,7 @@ export default function ExpensesView() {
         <Btn onClick={() => setShowForm(!showForm)}>
           <Plus className="h-3.5 w-3.5" /> Record Expense
         </Btn>
-        <RefreshBtn onClick={reload} />
+        <RefreshBtn onClick={reload} spinning={refreshing} />
       </ViewHeader>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">

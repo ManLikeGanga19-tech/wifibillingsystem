@@ -628,3 +628,52 @@ class TestClientEdit:
             f"/api/v1/pppoe/clients/{client_b.id}/", {"full_name": "X"}, format="json"
         )
         assert resp.status_code == 404
+
+
+class TestClientSearchAndBillingDate:
+    def test_search_matches_account_name_phone_and_username(self):
+        op = OperatorFactory()
+        target = PppoeClientFactory(
+            operator=op, full_name="Jane Ngure", phone="0722123456",
+            pppoe_username="jane-x1", account_number="HOME99001",
+        )
+        PppoeClientFactory(operator=op, full_name="Other Person", phone="0700000000")
+        c = staff(op)
+        for term in ("HOME99001", "ngure", "0722123456", "jane-x1"):
+            rows = c.get(f"/api/v1/pppoe/clients/?search={term}").json()["results"]
+            assert [r["id"] for r in rows] == [target.id], f"search {term!r} failed"
+
+    def test_search_never_reaches_another_tenant(self):
+        op_a, op_b = OperatorFactory(slug="a"), OperatorFactory(slug="b")
+        PppoeClientFactory(operator=op_b, full_name="Jane Ngure")
+        rows = staff(op_a).get("/api/v1/pppoe/clients/?search=ngure").json()["results"]
+        assert rows == []
+
+    def test_search_combines_with_the_status_filter(self):
+        op = OperatorFactory()
+        PppoeClientFactory(operator=op, full_name="Jane A", status="active")
+        PppoeClientFactory(operator=op, full_name="Jane B", status="suspended")
+        rows = staff(op).get(
+            "/api/v1/pppoe/clients/?search=jane&status=active"
+        ).json()["results"]
+        assert [r["full_name"] for r in rows] == ["Jane A"]
+
+    def test_next_billing_date_is_projected_before_the_first_invoice(self):
+        """A freshly-onboarded client showed a blank due date until the monthly run, which
+        reads as 'billing isn't set up'. Project it from their billing day instead."""
+        op = OperatorFactory()
+        client = PppoeClientFactory(operator=op, billing_day=15, next_due_date=None)
+        row = staff(op).get(f"/api/v1/pppoe/clients/{client.id}/").json()
+        assert row["next_billing_date"]  # never blank
+        assert row["next_due_is_projected"] is True
+        assert row["next_billing_date"].endswith("-15")  # their billing day
+
+    def test_a_real_invoice_due_date_wins_over_the_projection(self):
+        import datetime
+
+        op = OperatorFactory()
+        due = datetime.date(2026, 9, 3)
+        client = PppoeClientFactory(operator=op, billing_day=15, next_due_date=due)
+        row = staff(op).get(f"/api/v1/pppoe/clients/{client.id}/").json()
+        assert row["next_billing_date"] == "2026-09-03"
+        assert row["next_due_is_projected"] is False

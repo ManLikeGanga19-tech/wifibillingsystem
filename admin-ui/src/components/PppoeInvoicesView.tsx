@@ -13,7 +13,7 @@ const COLOR: Record<PppoeInvoice['status'], 'green' | 'amber' | 'red' | 'gray'> 
 
 export default function PppoeInvoicesView() {
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>('all');
-  const { rows, count, error, reload } = useList(
+  const { rows, count, error, refreshing, reload } = useList(
     () => api.pppoe.invoices.list(filter === 'all' ? '' : `?status=${filter}`),
     [filter]
   );
@@ -25,7 +25,7 @@ export default function PppoeInvoicesView() {
         title="Broadband Invoices"
         subtitle="Monthly bills issued to PPPoE clients. Paid automatically when the client pays their account via M-Pesa."
       >
-        <RefreshBtn onClick={reload} />
+        <RefreshBtn onClick={reload} spinning={refreshing} />
       </ViewHeader>
 
       <FilterChips options={FILTERS} value={filter} onChange={setFilter} right={<span className="text-[11px] font-mono text-[#141414]/50">{count} invoices</span>} />

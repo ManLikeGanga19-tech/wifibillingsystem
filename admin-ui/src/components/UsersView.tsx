@@ -4,7 +4,7 @@ import { api } from '../api/client';
 import { Badge, inputCls, RefreshBtn, TableShell, tdCls, useList, ViewHeader, fmtDateTime } from './ui';
 
 export default function UsersView() {
-  const { rows, count, error, reload } = useList(() => api.subscribers.list());
+  const { rows, count, error, refreshing, reload } = useList(() => api.subscribers.list());
   const [query, setQuery] = useState('');
 
   const filtered = useMemo(() => {
@@ -23,7 +23,7 @@ export default function UsersView() {
         title="Users"
         subtitle="Every client who has ever bought access. Created automatically on first payment."
       >
-        <RefreshBtn onClick={reload} />
+        <RefreshBtn onClick={reload} spinning={refreshing} />
       </ViewHeader>
 
       <div className="relative max-w-sm">

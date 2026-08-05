@@ -28,8 +28,11 @@ export default function WalletView() {
   // The second factor. Held in memory for one request and then dropped — a code that
   // authorises a withdrawal is the last thing that should ever touch storage.
   const [challenge, setChallenge] = useState<MfaChallenge | null>(null);
+  // So the Refresh button visibly does something even when nothing has changed.
+  const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
+    setRefreshing(true);
     try {
       const [s, l, p, st] = await Promise.all([
         api.billing.wallet(),
@@ -44,6 +47,9 @@ export default function WalletView() {
       setError('');
     } catch {
       setError('Could not load your wallet.');
+    } finally {
+      // Hold briefly so the Refresh click always produces visible feedback.
+      setTimeout(() => setRefreshing(false), 400);
     }
   }, []);
 
@@ -109,7 +115,7 @@ export default function WalletView() {
         title="Wallet"
         subtitle="Your earnings, commission already deducted. Withdraw to your payout account anytime."
       >
-        <RefreshBtn onClick={load} />
+        <RefreshBtn onClick={load} spinning={refreshing} />
       </ViewHeader>
 
       {challenge && (

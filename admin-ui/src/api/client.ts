@@ -1032,6 +1032,9 @@ export interface PppoeClient {
   billing_day: number;
   balance: string;
   next_due_date: string | null;
+  /** Never blank: the real invoice due date, or one projected from their billing day. */
+  next_billing_date: string;
+  next_due_is_projected: boolean;
   installed_at: string | null;
   notes: string;
   created_at: string;

@@ -30,12 +30,18 @@ export default function MessagingView() {
   const [gateway, setGateway] = useState<{ name: string; managed: boolean } | null | false>(null);
   const pollRef = useRef<number | undefined>(undefined);
 
+  // So the Refresh button visibly does something even when nothing has changed.
+  const [refreshing, setRefreshing] = useState(false);
+
   const loadCampaigns = useCallback(async () => {
+    setRefreshing(true);
     try {
       const r = await api.campaigns.list();
       setCampaigns(r.results);
     } catch {
       /* keep the last list */
+    } finally {
+      setTimeout(() => setRefreshing(false), 400);
     }
   }, []);
 
@@ -106,7 +112,7 @@ export default function MessagingView() {
         title="Campaigns"
         subtitle="Send bulk SMS or WhatsApp to your customers — reminders, offers, notices."
       >
-        <RefreshBtn onClick={loadCampaigns} />
+        <RefreshBtn onClick={loadCampaigns} spinning={refreshing} />
       </ViewHeader>
 
       {/* Gateway + credit banner — ties this to the communications module and shows what a

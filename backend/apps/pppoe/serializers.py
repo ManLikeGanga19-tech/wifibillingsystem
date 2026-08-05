@@ -1,3 +1,4 @@
+from django.utils import timezone
 from rest_framework import serializers
 
 from apps.core.serializer_fields import TenantPrimaryKeyRelatedField
@@ -78,6 +79,28 @@ class ClientSerializer(serializers.ModelSerializer):
     # Live metering (pppoe.metering), read-only. `usage` is this cycle's consumption.
     data_cap_gb = serializers.IntegerField(source="plan.data_cap_gb", read_only=True)
     usage = serializers.SerializerMethodField()
+    # When this client is next billed. next_due_date only exists once an invoice has been
+    # issued, so a freshly-onboarded client showed a blank column until the monthly run —
+    # which reads as "no billing set up". This projects the date from their billing day so
+    # the answer is always visible; `next_due_is_projected` tells the UI which one it is.
+    next_billing_date = serializers.SerializerMethodField()
+    next_due_is_projected = serializers.SerializerMethodField()
+
+    def _projected_due(self, obj):
+        from datetime import date
+
+        today = timezone.localdate()
+        day = min(obj.billing_day or 1, 28)
+        if today.day < day:
+            return date(today.year, today.month, day)
+        year, month = (today.year, today.month + 1) if today.month < 12 else (today.year + 1, 1)
+        return date(year, month, day)
+
+    def get_next_billing_date(self, obj) -> str:
+        return str(obj.next_due_date or self._projected_due(obj))
+
+    def get_next_due_is_projected(self, obj) -> bool:
+        return obj.next_due_date is None
 
     def validate_pppoe_username(self, value):
         if value and (any(c.isspace() for c in value) or len(value) < 3):
@@ -96,7 +119,8 @@ class ClientSerializer(serializers.ModelSerializer):
             "gps_lat", "gps_lng", "plan", "plan_name", "router",
             "pppoe_username", "pppoe_password", "static_ip",
             "delivery_method", "access_point", "cpe_equipment",
-            "status", "billing_day", "balance", "next_due_date", "installed_at", "notes",
+            "status", "billing_day", "balance", "next_due_date",
+            "next_billing_date", "next_due_is_projected", "installed_at", "notes",
             "created_at",
             # Live status + usage
             "is_online", "last_online_at", "wan_ip", "session_uptime", "usage_synced_at",

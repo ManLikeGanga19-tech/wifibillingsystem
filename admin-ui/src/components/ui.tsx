@@ -55,7 +55,11 @@ export function useList<T>(fetcher: () => Promise<{ results: T[]; count: number 
   const [rows, setRows] = useState<T[] | null>(null);
   const [count, setCount] = useState(0);
   const [error, setError] = useState('');
+  // Refreshing state exists so the Refresh button can SHOW it did something. Without it a
+  // refresh over unchanged data looks broken and people click it again and again.
+  const [refreshing, setRefreshing] = useState(false);
   const load = useCallback(async () => {
+    setRefreshing(true);
     try {
       const r = await fetcher();
       setRows(r.results);
@@ -66,6 +70,10 @@ export function useList<T>(fetcher: () => Promise<{ results: T[]; count: number 
       // a "check the API connection" message that wrongly blames the backend.
       if (e instanceof SessionExpiredError) return;
       setError('Could not load data — check the API connection.');
+    } finally {
+      // A local API answers in ~30ms, which is too fast to see. Hold the spinner briefly so
+      // the click always produces visible feedback.
+      setTimeout(() => setRefreshing(false), 400);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
@@ -76,7 +84,7 @@ export function useList<T>(fetcher: () => Promise<{ results: T[]; count: number 
     // to hit refresh to clear a stale "could not load" error.
     return onReconnect(load);
   }, [load]);
-  return { rows, count, error, reload: load };
+  return { rows, count, error, refreshing, reload: load };
 }
 
 // ---- layout pieces --------------------------------------------------------

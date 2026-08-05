@@ -12,7 +12,7 @@ const STATUS_COLOR: Record<ApiMessage['status'], 'green' | 'gray' | 'red' | 'amb
 
 export default function MessagesView() {
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>('all');
-  const { rows, count, error, reload } = useList(
+  const { rows, count, error, refreshing, reload } = useList(
     () => api.messages.list(filter === 'all' ? '' : `?channel=${filter}`),
     [filter]
   );
@@ -24,7 +24,7 @@ export default function MessagesView() {
         title="Messages"
         subtitle="Every individual SMS, WhatsApp and email the system has sent — delivery status included."
       >
-        <RefreshBtn onClick={reload} />
+        <RefreshBtn onClick={reload} spinning={refreshing} />
       </ViewHeader>
 
       <FilterChips options={FILTERS} value={filter} onChange={setFilter} right={<span className="text-[11px] font-mono text-[#141414]/50">{count} messages</span>} />

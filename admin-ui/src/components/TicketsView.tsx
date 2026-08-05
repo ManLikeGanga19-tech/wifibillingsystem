@@ -30,7 +30,7 @@ export default function TicketsView() {
   const [subject, setSubject] = useState('');
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState<ApiTicket['priority']>('normal');
-  const { rows, count, error, reload } = useList(
+  const { rows, count, error, refreshing, reload } = useList(
     () => api.tickets.list(filter === 'all' ? '' : `?status=${filter}`),
     [filter]
   );
@@ -70,7 +70,7 @@ export default function TicketsView() {
         <Btn onClick={() => setShowForm(!showForm)}>
           <Plus className="h-3.5 w-3.5" /> New Ticket
         </Btn>
-        <RefreshBtn onClick={reload} />
+        <RefreshBtn onClick={reload} spinning={refreshing} />
       </ViewHeader>
 
       {showForm && (

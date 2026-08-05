@@ -60,7 +60,7 @@ export default function NetworkView() {
       >
         <Btn onClick={() => setShowTower(!showTower)}><Plus className="h-3.5 w-3.5" /> Tower</Btn>
         <Btn onClick={() => setShowAp(!showAp)}><Plus className="h-3.5 w-3.5" /> Access Point</Btn>
-        <RefreshBtn onClick={() => { towers.reload(); aps.reload(); }} />
+        <RefreshBtn onClick={() => { towers.reload(); aps.reload(); }} spinning={towers.refreshing || aps.refreshing} />
       </ViewHeader>
 
       {showTower && (
