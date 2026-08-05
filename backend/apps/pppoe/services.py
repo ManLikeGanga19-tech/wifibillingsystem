@@ -133,6 +133,87 @@ def restore_client(client: Client) -> None:
     _emit(client.operator, "subscriber.resumed", _client_payload(client))
 
 
+#: Fields an edit may change that the ROUTER also needs to know about. Everything else
+#: (name, phone, email, address, billing day, notes…) is bookkeeping the router never sees.
+ROUTER_VISIBLE_FIELDS = ("plan_id", "router_id", "static_ip")
+
+
+def update_client(client: Client, *, changes: dict, actor=None) -> Client:
+    """Apply an edit AND make the router agree with it.
+
+    The trap this closes: saving only the database leaves the MikroTik still enforcing the
+    OLD plan (or still holding the secret on the OLD router), so the console and the network
+    disagree and nobody can tell which is true. So:
+
+      * plan changed      -> ensure the new profile exists, re-push the secret onto it, and
+                             kick the live session so the new SPEED takes effect now (a
+                             PPPoE session keeps its old queue until it redials).
+      * router changed    -> MIGRATE: create the secret on the new router first, and only
+                             then remove it from the old one, so a failure can never leave
+                             the customer with no secret anywhere.
+      * suspended client  -> stays on the suspended profile; an edit must never silently
+                             reconnect someone who has not paid.
+
+    Router work happens only when a router-visible field actually changed, and it happens
+    AFTER the DB commit, so a provisioning error can't leave the record half-written. On
+    such an error the DB change stands and the caller is told, rather than pretending.
+    """
+    old_plan_id, old_router = client.plan_id, client.router
+    for field, value in changes.items():
+        setattr(client, field, value)
+
+    with db_transaction.atomic():
+        client.save()
+
+    plan_changed = "plan_id" in changes and changes["plan_id"] != old_plan_id
+    router_changed = "router_id" in changes and changes["router_id"] != old_router.pk
+    if not (plan_changed or router_changed or "static_ip" in changes):
+        audit("pppoe_client_updated", operator=client.operator, actor=actor, target=client,
+              fields=sorted(changes))
+        return client
+
+    client.refresh_from_db()
+    if client.status not in Client.ACTIVE_STATUSES:
+        # Not on any router yet (pending install) — the secret gets written at provision
+        # time with whatever the record says by then. Nothing to reconcile.
+        audit("pppoe_client_updated", operator=client.operator, actor=actor, target=client,
+              fields=sorted(changes))
+        return client
+
+    new_adapter = get_adapter(client.router)
+    new_adapter.ensure_pppoe_profile(client.plan)
+    new_adapter.create_pppoe_user(client)  # idempotent upsert on the (possibly new) router
+    if client.status == Client.Status.SUSPENDED:
+        # create_pppoe_user writes the ACTIVE plan profile; a suspended client must stay
+        # walled off, so put them back on the suspended profile.
+        new_adapter.set_pppoe_enabled(client, False)
+
+    if router_changed:
+        # Only now that the new router holds the secret is it safe to drop the old one —
+        # and a failure there must not fail the edit: the client is already served.
+        try:
+            get_adapter(old_router).remove_pppoe_user(client)
+        except Exception:
+            logger.exception(
+                "Client %s moved to router %s but the secret could not be removed from %s",
+                client.pk, client.router_id, old_router.pk,
+            )
+    elif plan_changed and client.status == Client.Status.ACTIVE:
+        # A live PPPoE session keeps its old queue until it redials, so the customer would
+        # not see their new speed. Bounce it: they reconnect within seconds, at the new rate.
+        # Best-effort — the secret is already correct, so a failed kick only delays the new
+        # speed until their next reconnect; it must not fail the edit.
+        try:
+            new_adapter.kick_pppoe_session(client)
+        except Exception:
+            logger.exception("Could not bounce %s onto its new plan", client.pppoe_username)
+
+    audit("pppoe_client_updated", operator=client.operator, actor=actor, target=client,
+          fields=sorted(changes), plan_changed=plan_changed, router_changed=router_changed)
+    _emit(client.operator, "subscriber.updated", _client_payload(client))
+    return client
+
+
 def reset_pppoe_password(client: Client, *, password: str = "", actor=None) -> str:
     """Set a new PPPoE password — the one supplied, or a freshly generated strong one — and
     push it to the router live. Returns the new password so the ISP can hand it to the

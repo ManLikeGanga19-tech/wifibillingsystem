@@ -73,6 +73,10 @@ class DummyAdapter(ProvisioningAdapter):
         DummyAdapter.calls.append(("pppoe_remove", client.pppoe_username))
         return ProvisionResult(ok=True)
 
+    def kick_pppoe_session(self, client) -> ProvisionResult:
+        DummyAdapter.calls.append(("pppoe_kick", client.pppoe_username))
+        return ProvisionResult(ok=True)
+
     #: Tests set this to drive PPPoE metering:
     #: {pppoe_username: (download_bytes, upload_bytes, ip, uptime, mac)}.
     pppoe_active: dict = {}

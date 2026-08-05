@@ -434,6 +434,20 @@ class MikroTikRestAdapter(ProvisioningAdapter):
                 )
         return secrets
 
+    def kick_pppoe_session(self, client) -> ProvisionResult:
+        """Drop the live session so the CPE redials onto the (changed) profile immediately.
+        Credentials are untouched, so the customer reconnects on their own within seconds."""
+        try:
+            with self._client() as c:
+                aid = self._find_id(c, "/ppp/active", name=client.pppoe_username)
+                if aid:
+                    c.delete(f"/ppp/active/{aid}").raise_for_status()
+            return ProvisionResult(ok=True, message="session kicked")
+        except httpx.HTTPError as exc:
+            raise ProvisioningError(
+                f"kick_pppoe_session failed on {self.router}: {exc}"
+            ) from exc
+
     def get_device_info(self) -> DeviceInfo:
         """Query the router's identity + live health. Stable fields are persisted
         by the caller; live metrics are shown but not stored."""

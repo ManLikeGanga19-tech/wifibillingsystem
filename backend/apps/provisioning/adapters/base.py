@@ -150,6 +150,13 @@ class ProvisioningAdapter(ABC):
         pre-existing users into WIFI.OS. Default empty for adapters that can't read them."""
         return []
 
+    def kick_pppoe_session(self, client) -> ProvisionResult:
+        """Drop a client's LIVE PPPoE session without touching their credentials, so the CPE
+        redials at once and picks up a changed profile (e.g. a new plan's speed). A running
+        session keeps its old queue until it reconnects, so this is what makes a plan change
+        take effect now rather than whenever the customer next reboots."""
+        return ProvisionResult(ok=True, message="noop")
+
     # -- Captive portal ----------------------------------------------------
     def push_portal(self, portal_url: str) -> ProvisionResult:
         """Point this router's captive portal at `portal_url`.
