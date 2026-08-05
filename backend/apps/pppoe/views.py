@@ -1,3 +1,5 @@
+import secrets
+
 from django.conf import settings
 from django.db.models import Count, Q
 from django.utils import timezone
@@ -8,9 +10,11 @@ from rest_framework.decorators import (
     api_view,
     authentication_classes,
     permission_classes,
+    throttle_classes,
 )
 from rest_framework.permissions import AllowAny, IsAdminUser
 from rest_framework.response import Response
+from rest_framework.throttling import AnonRateThrottle
 from rest_framework.views import APIView
 
 from apps.core.permissions import RequireTenant, TenantCanTransact, TenantIsOperational
@@ -313,10 +317,44 @@ class ClientViewSet(TenantModelViewSet):
     @extend_schema(responses=OBJECT_RESPONSE)
     @action(detail=False, methods=["get"])
     def export(self, request):
-        """Download all of this ISP's clients as a CSV backup."""
+        """Download this ISP's clients as CSV — a portable backup, and the way an ISP takes
+        their data WITH them if they leave. Data portability is a promise, not a favour.
+
+        Credentials are opt-in (`?include_credentials=true`) and, when asked for, restricted
+        to the real ISP owner. The plain export stays open to anyone with read access,
+        including platform support troubleshooting on a grant. Two reasons (audit F3):
+
+          * one GET should not quietly hand over every customer's PPPoE password; and
+          * a borrowed identity must never be able to bulk-export secrets — impersonation
+            exists to TROUBLESHOOT. Note this cannot be left to CanManageMoney, which lets
+            safe methods through and so would not stop a GET at all.
+
+        The ISP's own owner can still take everything, whenever they want. It is simply a
+        deliberate, audited act rather than a side effect of clicking Export.
+        """
+        from apps.core.tenancy import is_impersonating
+
         from .porting import clients_csv
 
-        return clients_csv(self.get_operator())
+        operator = self.get_operator()
+        want_credentials = str(
+            request.query_params.get("include_credentials", "")
+        ).lower() in ("1", "true", "yes")
+
+        if want_credentials and is_impersonating(request):
+            return Response(
+                {
+                    "detail": "You are acting as another ISP. Their customers' PPPoE "
+                    "passwords can only be exported by the ISP owner themselves."
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        audit(
+            "pppoe_clients_exported", operator=operator, actor=request.user,
+            include_credentials=want_credentials,
+        )
+        return clients_csv(operator, include_credentials=want_credentials)
 
 
 class InvoiceViewSet(TenantReadOnlyViewSet):
@@ -411,13 +449,33 @@ class SuspendedNoticeView(PublicAPIView):
         return Response(body)
 
 
+class AccountLookupThrottle(AnonRateThrottle):
+    """Tight, per-IP. This endpoint is anonymous and answers questions about a named
+    customer, so it is the natural place to enumerate an ISP's whole base."""
+
+    scope = "account-lookup"
+
+
 @extend_schema(responses=OBJECT_RESPONSE, summary="Public: look up a subscriber account")
 @api_view(["GET"])
 @authentication_classes([])  # anonymous: a suspended subscriber, never staff
 @permission_classes([AllowAny])
+@throttle_classes([AccountLookupThrottle])
 def account_lookup(request):
-    """Public: a suspended client types their account number to see their balance
-    and pay instructions. Scoped by ?router= or subdomain tenant."""
+    """Public: a suspended client types their account number to see their balance and pay
+    instructions. Scoped by ?router= or subdomain tenant.
+
+    TWO THINGS ARE LOAD-BEARING HERE, because this endpoint is anonymous and returns a real
+    person's name and debt (audit F2):
+
+      * The caller must also prove they know the LAST 4 DIGITS OF THE ACCOUNT'S PHONE.
+        Account numbers are short and structured, so on their own they are guessable — the
+        phone digits are the thing only the actual customer (or someone holding their
+        handset) has.
+      * A wrong account and a wrong phone return the SAME 404. Distinguishing them would
+        hand back an oracle — "this account exists, keep going" — which is most of what an
+        enumerator wants.
+    """
     from apps.provisioning.models import Router
 
     operator = getattr(request, "tenant", None)
@@ -426,13 +484,30 @@ def account_lookup(request):
         router = Router.objects.filter(pk=int(router_id), is_active=True).first()
         operator = router.operator if router else None
     account = (request.query_params.get("account") or "").strip().upper()
+    phone_digits = "".join(
+        ch for ch in (request.query_params.get("phone") or "") if ch.isdigit()
+    )[-4:]
+
     client = (
         Client.objects.filter(operator=operator, account_number=account).first()
         if operator and account
         else None
     )
-    if client is None:
-        return Response({"detail": "Account not found."}, status=status.HTTP_404_NOT_FOUND)
+    # One response for every failure mode: unknown account, wrong digits, or a client with
+    # no phone on file (who cannot be verified this way at all, so support must help them).
+    not_found = Response(
+        {
+            "detail": "We couldn't match that account number and phone number. "
+            "Check both, or contact your provider."
+        },
+        status=status.HTTP_404_NOT_FOUND,
+    )
+    if client is None or not phone_digits:
+        return not_found
+    on_file = "".join(ch for ch in (client.phone or "") if ch.isdigit())[-4:]
+    if not on_file or not secrets.compare_digest(on_file, phone_digits):
+        return not_found
+
     return Response(
         {
             "account_number": client.account_number,

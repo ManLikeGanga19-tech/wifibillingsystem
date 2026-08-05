@@ -10,8 +10,7 @@ from rest_framework.views import APIView
 from apps.core.permissions import RequireTenant, TenantIsOperational
 from apps.core.schema import OBJECT_RESPONSE
 from apps.core.services import audit
-from apps.core.tenancy import acting_tenant
-from apps.core.viewsets import TenantModelViewSet
+from apps.core.viewsets import TenantModelViewSet, TenantScopedMixin
 
 from .events import WEBHOOK_EVENTS
 from .models import ApiToken, Webhook, generate_token
@@ -19,23 +18,25 @@ from .serializers import ApiTokenSerializer, WebhookSerializer
 
 
 class ApiTokenViewSet(
+    TenantScopedMixin,
     mixins.ListModelMixin, mixins.CreateModelMixin, mixins.DestroyModelMixin,
     viewsets.GenericViewSet,
 ):
-    """List live tokens, mint one (plaintext shown ONCE), revoke one."""
+    """List live tokens, mint one (plaintext shown ONCE), revoke one.
+
+    Tenant scoping and get_operator() come from TenantScopedMixin rather than being written
+    out here — same rows, but one shared implementation that also fails closed if the tenant
+    is somehow unresolved. A token grants API access to a whole tenant, so this is the last
+    list that should have its own hand-rolled filter.
+    """
 
     serializer_class = ApiTokenSerializer
-    permission_classes = TenantModelViewSet.permission_classes
     queryset = ApiToken.objects.all()
 
-    def get_operator(self):
-        return acting_tenant(self.request)
-
     def get_queryset(self):
+        # super() applies the tenant filter (TenantScopedMixin) — never bypass it.
         # Live tokens only. Revoked rows are kept (for the last-used audit trail) but hidden.
-        return ApiToken.objects.filter(
-            operator=self.get_operator(), revoked_at__isnull=True
-        )
+        return super().get_queryset().filter(revoked_at__isnull=True)
 
     @extend_schema(
         request=ApiTokenSerializer, responses=OBJECT_RESPONSE,

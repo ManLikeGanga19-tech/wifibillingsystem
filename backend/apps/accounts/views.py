@@ -1,13 +1,12 @@
 from django.db.models import Count, Max, Q
 from drf_spectacular.utils import extend_schema
-from rest_framework import viewsets
-from rest_framework.permissions import IsAdminUser, IsAuthenticated
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.core.permissions import RequireTenant, TenantIsOperational
 from apps.core.schema import OBJECT_RESPONSE
 from apps.core.tenancy import acting_tenant
+from apps.core.viewsets import TenantReadOnlyViewSet
 from apps.provisioning.models import Session
 
 from .models import Subscriber
@@ -112,15 +111,21 @@ def _go_live_blockers(op) -> list[dict]:
     ]
 
 
-class SubscriberViewSet(viewsets.ReadOnlyModelViewSet):
-    """ISP customers, always scoped to exactly one tenant."""
+class SubscriberViewSet(TenantReadOnlyViewSet):
+    """ISP customers, always scoped to exactly one tenant.
+
+    Scoping comes from TenantReadOnlyViewSet, NOT from a hand-written filter here. Both
+    produce the same rows today, but the mixin also raises if the tenant is somehow
+    unresolved, and — more to the point — the one bug this system has shipped twice is a
+    queryset that forgot to filter. Every list inheriting the same base is the control.
+    """
 
     serializer_class = SubscriberSerializer
-    permission_classes = [IsAdminUser, RequireTenant, TenantIsOperational]
+    queryset = Subscriber.objects.all()
 
     def get_queryset(self):
-        operator = acting_tenant(self.request)
-        return Subscriber.objects.filter(operator=operator).annotate(
+        # super() applies the tenant filter (TenantScopedMixin) — never bypass it
+        return super().get_queryset().annotate(
             last_session_expires=Max("sessions__expires_at"),
             active_sessions=Count(
                 "sessions", filter=Q(sessions__status=Session.Status.ACTIVE)

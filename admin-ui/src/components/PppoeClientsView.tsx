@@ -202,11 +202,12 @@ export default function PppoeClientsView() {
   const [credsFor, setCredsFor] = useState<PppoeClient | null>(null);
   const [editFor, setEditFor] = useState<PppoeClient | null>(null);
   const [showImport, setShowImport] = useState(false);
+  const [showExport, setShowExport] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  const exportCsv = () => {
+  const exportCsv = (includeCredentials = false) => {
     const a = document.createElement('a');
-    a.href = api.pppoe.clients.exportUrl();
+    a.href = api.pppoe.clients.exportUrl(includeCredentials);
     a.download = '';
     document.body.appendChild(a);
     a.click();
@@ -312,7 +313,7 @@ export default function PppoeClientsView() {
         <Btn variant="outline" onClick={() => setShowImport(true)} title="Adopt existing PPPoE users off a router">
           <Upload className="h-3.5 w-3.5" /> Import
         </Btn>
-        <Btn variant="outline" onClick={exportCsv} title="Download all clients as CSV">
+        <Btn variant="outline" onClick={() => setShowExport(true)} title="Download all clients as CSV">
           <Download className="h-3.5 w-3.5" /> Export
         </Btn>
         <RefreshBtn onClick={reload} spinning={refreshing} />
@@ -478,6 +479,12 @@ export default function PppoeClientsView() {
           onClose={() => setEditFor(null)}
           onSaved={reload}
           onOpenCredentials={(c) => { setEditFor(null); setCredsFor(c); }}
+        />
+      )}
+      {showExport && (
+        <ExportDialog
+          onClose={() => setShowExport(false)}
+          onExport={(withCreds) => { exportCsv(withCreds); setShowExport(false); }}
         />
       )}
       {showImport && (
@@ -679,6 +686,63 @@ function BillingDayPicker({ value, onChange }: { value: number; onChange: (d: nu
       <p className="text-[11px] text-[#141414]/45 mt-1.5">
         Months don&apos;t all have 29–31, so billing days run 1–28.
       </p>
+    </div>
+  );
+}
+
+/**
+ * Export, with the credential decision made deliberately rather than by default.
+ *
+ * PPPoE passwords are plaintext of necessity (CHAP needs a retrievable secret), so putting
+ * them in every export makes one click a bulk credential dump. They stay available — an ISP
+ * must be able to leave with everything, or they'd have to re-provision every customer's
+ * router by hand — it just becomes a choice, and the server records it.
+ */
+function ExportDialog({
+  onClose, onExport,
+}: {
+  onClose: () => void;
+  onExport: (includeCredentials: boolean) => void;
+}) {
+  const [withCreds, setWithCreds] = useState(false);
+  return (
+    <div className="fixed inset-0 z-50 bg-[#141414]/50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white border border-[#141414] w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-4 border-b border-[#141414]">
+          <h3 className="font-bold font-mono uppercase text-sm flex items-center gap-2">
+            <Download className="h-4 w-4" /> Export clients
+          </h3>
+          <button onClick={onClose} className="cursor-pointer"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="p-5 space-y-4 text-sm">
+          <p className="text-[11px] text-[#141414]/55 leading-relaxed">
+            A CSV of every client — names, account numbers, plans, balances and billing days.
+            Yours to keep, and the file you&apos;d take with you if you ever moved off WIFI.OS.
+          </p>
+          <label className="flex items-start gap-2.5 border border-[#141414]/15 p-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={withCreds}
+              onChange={(e) => setWithCreds(e.target.checked)}
+              className="mt-0.5"
+            />
+            <span>
+              <b className="block text-xs">Include PPPoE passwords</b>
+              <span className="block text-[11px] text-[#141414]/55 leading-relaxed mt-0.5">
+                Needed to move your customers to another system without re-configuring every
+                router. Treat the file like a password list — it&apos;s recorded in your audit
+                log, and only you (not platform support) can download it.
+              </span>
+            </span>
+          </label>
+          <div className="flex items-center gap-2">
+            <Btn variant="green" onClick={() => onExport(withCreds)}>
+              <Download className="h-3.5 w-3.5" /> Download CSV
+            </Btn>
+            <Btn variant="outline" onClick={onClose}><X className="h-3.5 w-3.5" /> Cancel</Btn>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

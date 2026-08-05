@@ -529,11 +529,14 @@ class TestTheSuspendedNoticeBug:
         from .factories import RouterFactory
 
         router = RouterFactory(operator=op)
-        client = PppoeClientFactory(operator=op, plan__price=Decimal("1500"))
+        client = PppoeClientFactory(
+            operator=op, plan__price=Decimal("1500"), phone="0722123456"
+        )
 
+        # Phone digits are required — see TestPublicAccountLookupIsNotEnumerable.
         body = APIClient().get(
             f"/api/v1/pppoe/account-lookup/?router={router.id}"
-            f"&account={client.account_number}"
+            f"&account={client.account_number}&phone=3456"
         ).json()
         assert body["paybill"] == "4123456"
 

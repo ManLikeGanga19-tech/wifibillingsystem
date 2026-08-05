@@ -1699,7 +1699,10 @@ export const api = {
           method: 'POST', body: JSON.stringify({ router, items }),
         }),
       // A CSV backup of every client. Cookie-auth GET, so a plain download link works.
-      exportUrl: () => `${BASE}/api/v1/pppoe/clients/export/`,
+      // Credentials are opt-in and owner-only on the server: one click should not
+      // quietly hand over every customer's PPPoE password.
+      exportUrl: (includeCredentials = false) =>
+        `${BASE}/api/v1/pppoe/clients/export/${includeCredentials ? '?include_credentials=true' : ''}`,
     },
     usageSummary: () => request<PppoeUsageSummary>('/pppoe/usage-summary/'),
     invoices: {
