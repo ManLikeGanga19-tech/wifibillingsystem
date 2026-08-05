@@ -86,6 +86,15 @@ def poll_pppoe_usage():
 
 
 @shared_task
+def poll_pppoe_presence():
+    """Every minute: cheap online/offline sweep so a customer who just connected shows live
+    almost at once, without waiting for the heavier 5-minute usage poll."""
+    from .metering import poll_presence_all
+
+    return poll_presence_all()
+
+
+@shared_task
 def suspend_overdue_clients():
     """Daily: suspend active clients with an overdue balance past due date."""
     from .models import Client, Invoice

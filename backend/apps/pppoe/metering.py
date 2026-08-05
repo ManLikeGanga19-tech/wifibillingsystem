@@ -180,3 +180,52 @@ def poll_all() -> int:
     for router in Router.objects.filter(id__in=list(router_ids), is_active=True):
         total += poll_router(router)
     return total
+
+
+def poll_presence_router(router, now=None) -> int:
+    """Cheap presence-only sweep of one router: who is dialed in RIGHT NOW. Refreshes the
+    online flag / WAN IP / uptime WITHOUT the byte-counter accounting poll_router does, so it
+    can run on a short cadence (near-real-time dots) at ~one API call per router. Best-effort:
+    an unreachable router is skipped whole, never marked offline."""
+    from apps.provisioning.adapters import get_adapter
+
+    now = now or timezone.now()
+    try:
+        actives = {a.username: a for a in get_adapter(router).get_active_pppoe()}
+    except Exception:
+        logger.warning("pppoe presence: %s unreachable", router.name)
+        return 0
+
+    online = 0
+    for client in Client.objects.filter(
+        router=router, status=Client.Status.ACTIVE
+    ).iterator():
+        live = actives.get(client.pppoe_username)
+        if live is None:
+            mark_offline(client, now)
+            continue
+        online += 1
+        Client.objects.filter(pk=client.pk).update(
+            is_online=True,
+            last_online_at=now,
+            wan_ip=live.ip_address or None,
+            session_uptime=live.uptime or "",
+        )
+    return online
+
+
+def poll_presence_all() -> int:
+    """Beat body (frequent): refresh online/offline for every router with active clients.
+    The cheap counterpart to poll_all — no usage accounting — so a customer who just dialed
+    in shows online within one short cycle instead of waiting for the 5-minute usage poll."""
+    from apps.provisioning.models import Router
+
+    router_ids = (
+        Client.objects.filter(status=Client.Status.ACTIVE)
+        .values_list("router_id", flat=True)
+        .distinct()
+    )
+    total = 0
+    for router in Router.objects.filter(id__in=list(router_ids), is_active=True):
+        total += poll_presence_router(router)
+    return total

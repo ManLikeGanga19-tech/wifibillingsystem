@@ -240,6 +240,13 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.pppoe.tasks.poll_pppoe_usage",
         "schedule": 300.0,
     },
+    # Cheap online/offline presence sweep, separate from the heavy usage poll above, so a
+    # customer who just dialed in lights up "live" within ~a minute instead of up to five.
+    # One /ppp/active call per router — safe to run this often.
+    "poll-pppoe-presence": {
+        "task": "apps.pppoe.tasks.poll_pppoe_presence",
+        "schedule": 60.0,
+    },
     # Captive-hotspot lifecycle (Settings > Hotspot). Both no-op for an ISP on the defaults.
     "prune-dormant-hotspot": {
         "task": "apps.provisioning.tasks.prune_dormant_hotspot_subscribers",
