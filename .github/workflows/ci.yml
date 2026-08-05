@@ -237,7 +237,11 @@ jobs:
           cd ~/wifios/deploy
           C="docker compose -f docker-compose.prod.yml --env-file .env --profile staging"
           $C build
-          $C up -d
+          # --wait: block until the api's health check passes (migrations applied, DB
+          # reachable) before we call the deploy done — a broken rollout fails here loudly
+          # instead of silently serving 500s. Caddy holds/retries client requests across the
+          # brief api swap (see Caddyfile api_backend), so the rollout is invisible to ISPs.
+          $C up -d --wait
           $C restart caddy
           $C ps --format '{{.Name}} {{.State}}'
           REMOTE

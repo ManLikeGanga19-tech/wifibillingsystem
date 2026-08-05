@@ -131,28 +131,96 @@ export function setOnSessionExpired(cb: (() => void) | null): void {
   onSessionExpired = cb;
 }
 
-async function request<T>(path: string, init?: RequestInit, retried = false): Promise<T> {
-  const resp = await fetch(`${BASE}/api/v1${path}`, {
-    ...withCookies,
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      ...csrfHeader(init?.method),
-      ...init?.headers,
-    },
-  });
-  // Access cookie expired: renew silently and replay once. If the refresh ALSO fails the
-  // session is genuinely over — tell the app (which returns to sign-in) and throw a quiet,
-  // typed error, instead of a generic one every view would read as "the API is down".
-  if (resp.status === 401 && !retried) {
-    if (await tryRefresh()) return request<T>(path, init, true);
-    const expiredBody = await resp.json().catch(() => null);
-    onSessionExpired?.();
-    throw new SessionExpiredError(expiredBody);
+// ---- connection resilience -----------------------------------------------------------
+// A short API blip (a deploy rolling the container, a momentary overload) used to surface
+// as "could not load — is the API running?" in every view, which reads as the backend being
+// broken and forces a manual refresh. Instead: GETs retry briefly, a "Reconnecting…" state
+// is published for a subtle banner, and the moment the API answers again every subscribed
+// view re-fetches on its own — no refresh, no scary error. This matters at tenant scale.
+
+export type ConnState = 'ok' | 'reconnecting';
+let onConnectionChange: ((s: ConnState) => void) | null = null;
+export function setOnConnectionChange(cb: ((s: ConnState) => void) | null): void {
+  onConnectionChange = cb;
+}
+
+const reconnectSubs = new Set<() => void>();
+/** Subscribe to "the API just came back" so a view can silently reload. Returns an unsub. */
+export function onReconnect(cb: () => void): () => void {
+  reconnectSubs.add(cb);
+  return () => reconnectSubs.delete(cb);
+}
+
+const TRANSIENT_STATUS = new Set([502, 503, 504]);
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+let connectionDown = false;
+let probeTimer: number | null = null;
+function markConnection(down: boolean): void {
+  if (down === connectionDown) return;
+  connectionDown = down;
+  onConnectionChange?.(down ? 'reconnecting' : 'ok');
+  if (down) {
+    // Probe a cheap unauthenticated endpoint until the API answers, then recover fast.
+    if (probeTimer === null) {
+      probeTimer = window.setInterval(() => {
+        // Hit an API path (not the static server, which would 200 even when the API is down).
+        fetch(`${BASE}/api/v1/health/`, { ...withCookies })
+          .then((r) => { if (r.ok) markConnection(false); })
+          .catch(() => { /* still down */ });
+      }, 3000);
+    }
+  } else {
+    if (probeTimer !== null) { window.clearInterval(probeTimer); probeTimer = null; }
+    reconnectSubs.forEach((cb) => cb()); // recovered → every subscribed view re-fetches
   }
-  const body = resp.status === 204 ? null : await resp.json().catch(() => null);
-  if (!resp.ok) throw new ApiError(resp.status, body);
-  return body as T;
+}
+
+async function request<T>(path: string, init?: RequestInit, retried = false): Promise<T> {
+  const isGet = !init?.method || init.method.toUpperCase() === 'GET';
+  for (let attempt = 0; ; attempt++) {
+    let resp: Response;
+    try {
+      resp = await fetch(`${BASE}/api/v1${path}`, {
+        ...withCookies,
+        ...init,
+        headers: {
+          'Content-Type': 'application/json',
+          ...csrfHeader(init?.method),
+          ...init?.headers,
+        },
+      });
+    } catch {
+      // Network-level failure — the server is unreachable (mid-deploy, blip). Retry GETs a
+      // few times so a brief outage is invisible; writes fail fast so we never double-submit.
+      if (isGet && attempt < 4) {
+        markConnection(true);
+        await sleep(400 * 2 ** attempt); // 0.4s, 0.8s, 1.6s, 3.2s
+        continue;
+      }
+      markConnection(true);
+      throw new ApiError(0, { detail: 'Could not reach the server. Reconnecting…' });
+    }
+    // A gateway error means "not ready yet" (e.g. a container just restarting) — retry GETs.
+    if (isGet && TRANSIENT_STATUS.has(resp.status) && attempt < 4) {
+      markConnection(true);
+      await sleep(400 * 2 ** attempt);
+      continue;
+    }
+    markConnection(false); // we reached the server
+    // Access cookie expired: renew silently and replay once. If the refresh ALSO fails the
+    // session is genuinely over — tell the app (which returns to sign-in) and throw a quiet,
+    // typed error, instead of a generic one every view would read as "the API is down".
+    if (resp.status === 401 && !retried) {
+      if (await tryRefresh()) return request<T>(path, init, true);
+      const expiredBody = await resp.json().catch(() => null);
+      onSessionExpired?.();
+      throw new SessionExpiredError(expiredBody);
+    }
+    const body = resp.status === 204 ? null : await resp.json().catch(() => null);
+    if (!resp.ok) throw new ApiError(resp.status, body);
+    return body as T;
+  }
 }
 
 // ---- types (mirroring the DRF serializers) ------------------------------

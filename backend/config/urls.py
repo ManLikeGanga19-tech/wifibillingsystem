@@ -1,8 +1,24 @@
 from django.contrib import admin
+from django.http import JsonResponse
 from django.urls import include, path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
+
+def health(_request):
+    """Readiness probe — unauthenticated, cheap. 200 only if the app is up AND the DB is
+    reachable, so a load balancer / container health check routes only to replicas that can
+    actually serve, and the console's reconnect probe knows when the API is truly back."""
+    from django.db import connection
+
+    try:
+        connection.ensure_connection()
+    except Exception:
+        return JsonResponse({"status": "db-unavailable"}, status=503)
+    return JsonResponse({"status": "ok"})
+
+
 api_v1 = [
+    path("health/", health, name="health"),
     path("", include("apps.core.urls")),
     path("", include("apps.accounts.urls")),
     path("", include("apps.plans.urls")),

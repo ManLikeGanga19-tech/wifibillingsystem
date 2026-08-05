@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { Loader2, AlertTriangle, RefreshCw, CheckCircle2, XCircle, Info } from 'lucide-react';
-import { SessionExpiredError } from '../api/client';
+import { SessionExpiredError, onReconnect } from '../api/client';
 
 // ---- toast ------------------------------------------------------------
 
@@ -72,6 +72,9 @@ export function useList<T>(fetcher: () => Promise<{ results: T[]; count: number 
   useEffect(() => {
     setRows(null);
     load();
+    // The API just came back after a blip/deploy → silently reload, so the user never has
+    // to hit refresh to clear a stale "could not load" error.
+    return onReconnect(load);
   }, [load]);
   return { rows, count, error, reload: load };
 }

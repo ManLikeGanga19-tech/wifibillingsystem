@@ -78,6 +78,21 @@
 	header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'"
 }
 
+# The Django upstream, everywhere it's proxied. Retry + active health so a rolling deploy
+# (the api container restarting) never returns a hard error: Caddy HOLDS the request and
+# retries for up to lb_try_duration until the api is serving again, and the health check
+# keeps it from routing to an api that isn't ready yet (still migrating on boot). Combined
+# with the console's own retry layer, a deploy is invisible to a logged-in ISP.
+(api_backend) {
+	reverse_proxy api:8000 {
+		lb_try_duration 30s
+		lb_try_interval 300ms
+		health_uri /api/v1/health/
+		health_interval 3s
+		health_timeout 4s
+	}
+}
+
 # ---------------------------------------------------------------------------
 # The marketing site
 # ---------------------------------------------------------------------------
@@ -95,7 +110,7 @@ wifios.co.ke, www.wifios.co.ke {
 	# The signup wizard talks to the API from this origin. Same-origin, so the draft
 	# cookie rides along without CORS.
 	handle /api/* {
-		reverse_proxy api:8000
+		import api_backend
 	}
 
 	handle {
@@ -112,7 +127,7 @@ wifios.co.ke, www.wifios.co.ke {
 # ---------------------------------------------------------------------------
 api.wifios.co.ke {
 	import security_headers
-	reverse_proxy api:8000
+	import api_backend
 	encode zstd gzip
 }
 
@@ -125,7 +140,7 @@ admin.wifios.co.ke {
 	import csp_spa
 
 	handle /api/* {
-		reverse_proxy api:8000
+		import api_backend
 	}
 	handle {
 		reverse_proxy super-admin:80
@@ -148,15 +163,15 @@ admin.wifios.co.ke {
 
 	# Same-origin API: the cookie just works.
 	handle /api/* {
-		reverse_proxy api:8000
+		import api_backend
 	}
 
 	# Django's own surfaces (schema, admin) stay reachable per-tenant for support.
 	handle /admin/* {
-		reverse_proxy api:8000
+		import api_backend
 	}
 	handle /static/* {
-		reverse_proxy api:8000
+		import api_backend
 	}
 
 	# The captive portal: what an ISP's CUSTOMERS see when they connect to the wifi.

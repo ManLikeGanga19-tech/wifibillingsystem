@@ -22,6 +22,9 @@ x-django: &django
   env_file: .env
   environment:
     DJANGO_SETTINGS_MODULE: config.settings.prod
+    # The root FS is read-only; point HOME at the writable tmpfs so gunicorn's control
+    # files (~/.gunicorn) don't hit "Read-only file system" on boot.
+    HOME: /tmp
   depends_on:
     db:
       condition: service_healthy
@@ -72,6 +75,15 @@ services:
       sh -c "python manage.py migrate --noinput &&
       python manage.py collectstatic --noinput &&
       gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers ${GUNICORN_WORKERS:-3} --timeout 30 --access-logfile - --error-logfile -"
+    # Readiness for zero-downtime rollouts: the deploy waits for this to pass, and Caddy's
+    # active health check (see Caddyfile) only routes to the api once it's serving + DB-ready.
+    # start_period covers migrate + collectstatic on boot.
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/v1/health/', timeout=4).status==200 else 1)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 45s
 
   worker:
     <<: *django
