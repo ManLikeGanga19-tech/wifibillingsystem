@@ -1566,6 +1566,13 @@ export const api = {
         request<{ detail: string }>(`/pppoe/clients/${id}/restore/`, { method: 'POST' }),
       liveStatus: (id: number) =>
         request<{ online: boolean }>(`/pppoe/clients/${id}/live_status/`),
+      // Hybrid reset: pass a password to set it, or omit to have the server generate one.
+      // Returns the new credentials so the ISP can read them back to the installer.
+      resetPassword: (id: number, password?: string) =>
+        request<{ pppoe_username: string; pppoe_password: string }>(
+          `/pppoe/clients/${id}/reset_password/`,
+          { method: 'POST', body: JSON.stringify(password ? { password } : {}) },
+        ),
     },
     usageSummary: () => request<PppoeUsageSummary>('/pppoe/usage-summary/'),
     invoices: {

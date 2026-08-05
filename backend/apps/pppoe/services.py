@@ -133,6 +133,39 @@ def restore_client(client: Client) -> None:
     _emit(client.operator, "subscriber.resumed", _client_payload(client))
 
 
+def reset_pppoe_password(client: Client, *, password: str = "", actor=None) -> str:
+    """Set a new PPPoE password — the one supplied, or a freshly generated strong one — and
+    push it to the router live. Returns the new password so the ISP can hand it to the
+    installer. Only touches the router if the secret should already exist there; a client
+    that isn't installed yet just gets the new password stored, to be written at provision.
+    """
+    new_password = password or _pppoe_password()
+    client.pppoe_password = new_password
+    client.save(update_fields=["pppoe_password", "updated_at"])
+    if client.status in Client.ACTIVE_STATUSES:  # ACTIVE or SUSPENDED — secret is on the box
+        adapter = get_adapter(client.router)
+        adapter.create_pppoe_user(client)  # idempotent: patches the secret's password
+        # create_pppoe_user rewrites the ACTIVE plan profile; a suspended client must stay
+        # on the suspended profile, so re-apply it.
+        if client.status == Client.Status.SUSPENDED:
+            adapter.set_pppoe_enabled(client, False)
+    audit("pppoe_password_reset", operator=client.operator, actor=actor, target=client)
+    return new_password
+
+
+def delete_client(client: Client, *, actor=None) -> None:
+    """Remove the client's secret (and kick any live session) from the router, THEN delete
+    the record — so no orphaned /ppp/secret is left behind. If the router can't be reached
+    the removal raises and the record is kept, so a secret is never orphaned silently."""
+    get_adapter(client.router).remove_pppoe_user(client)
+    audit(
+        "pppoe_client_deleted", operator=client.operator, actor=actor, target=client,
+        account_number=client.account_number, pppoe_username=client.pppoe_username,
+    )
+    _emit(client.operator, "subscriber.deleted", _client_payload(client))
+    client.delete()
+
+
 # ---- invoicing (anniversary) ----------------------------------------------
 
 
