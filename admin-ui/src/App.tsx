@@ -26,7 +26,7 @@ import {
 } from 'lucide-react';
 
 import { BandwidthProfile, Subscriber, OutboundCampaign } from './types';
-import { api, ApiPlan, ApiTenant, keepSessionFresh, logout, Me, NavCounts, setOnSessionExpired } from './api/client';
+import { api, ApiPlan, ApiTenant, keepSessionFresh, logout, Me, NavCounts, setOnSessionExpired, setOnConnectionChange } from './api/client';
 import { planToProfile, profileToPlan, campaignToUi, subscriberToUi } from './api/mappers';
 import { useHashRoute } from './utils/useHashRoute';
 import { toast, ToastHost } from './components/ui';
@@ -243,6 +243,14 @@ export default function App() {
       })
     );
     return () => setOnSessionExpired(null);
+  }, []);
+
+  // A brief API blip (a deploy, an overload) shows a subtle "Reconnecting…" chip instead of
+  // a scary "API is down". The client layer retries and auto-recovers; this is just the hint.
+  const [reconnecting, setReconnecting] = useState(false);
+  useEffect(() => {
+    setOnConnectionChange((s) => setReconnecting(s === 'reconnecting'));
+    return () => setOnConnectionChange(null);
   }, []);
 
   /** Leave an ISP we were granted access to. The server ends the grant AND clears
@@ -614,11 +622,23 @@ export default function App() {
         </div>
 
         <footer className="h-8 border-t border-[#141414] bg-white flex items-center justify-between px-4 sm:px-6 font-mono text-[10px] text-[#141414]/70 shrink-0 select-none">
-          <p className="truncate">WIFI.OS Billing • Connected to live API</p>
+          <p className="truncate">
+            {reconnecting ? (
+              <span className="text-[#B26B00]">Reconnecting to the API…</span>
+            ) : (
+              'WIFI.OS Billing • Connected to live API'
+            )}
+          </p>
           <div className="hidden sm:flex items-center gap-4">
             <span>{navCounts ? `${navCounts.mikrotik} router${navCounts.mikrotik !== 1 ? 's' : ''}` : ''}</span>
           </div>
         </footer>
+        {reconnecting && (
+          <div className="fixed bottom-12 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-[#141414] text-[#E4E3E0] px-3 py-1.5 text-[11px] font-mono shadow-lg">
+            <span className="h-2 w-2 rounded-full bg-[#E4A11B] animate-pulse" />
+            Reconnecting… your work is safe
+          </div>
+        )}
       </main>
       <AssistantWidget />
       <ToastHost />
