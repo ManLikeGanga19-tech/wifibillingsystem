@@ -26,7 +26,7 @@ import {
 } from 'lucide-react';
 
 import { BandwidthProfile, Subscriber, OutboundCampaign } from './types';
-import { api, ApiPlan, ApiTenant, keepSessionFresh, logout, Me, NavCounts } from './api/client';
+import { api, ApiPlan, ApiTenant, keepSessionFresh, logout, Me, NavCounts, setOnSessionExpired } from './api/client';
 import { planToProfile, profileToPlan, campaignToUi, subscriberToUi } from './api/mappers';
 import { useHashRoute } from './utils/useHashRoute';
 import { toast, ToastHost } from './components/ui';
@@ -230,6 +230,20 @@ export default function App() {
   // Keep the session renewed on tab-focus + a heartbeat, so returning after
   // inactivity never lands on an expired token and forces a re-login.
   useEffect(() => keepSessionFresh(), []);
+
+  // When a session dies mid-use and can't be renewed, return to the sign-in screen
+  // CENTRALLY — instead of every data call showing "could not load — is the API running?",
+  // which wrongly blames the backend. Only nudge if we were actually signed in (so a plain
+  // "not signed in" on first load stays silent and just shows the login gate).
+  useEffect(() => {
+    setOnSessionExpired(() =>
+      setMe((prev) => {
+        if (prev) toast('info', 'Your session ended — please sign in again.');
+        return null;
+      })
+    );
+    return () => setOnSessionExpired(null);
+  }, []);
 
   /** Leave an ISP we were granted access to. The server ends the grant AND clears
    * the acting-tenant cookie, so we simply re-ask who we are. */

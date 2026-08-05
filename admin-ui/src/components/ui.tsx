@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { Loader2, AlertTriangle, RefreshCw, CheckCircle2, XCircle, Info } from 'lucide-react';
+import { SessionExpiredError } from '../api/client';
 
 // ---- toast ------------------------------------------------------------
 
@@ -60,7 +61,10 @@ export function useList<T>(fetcher: () => Promise<{ results: T[]; count: number 
       setRows(r.results);
       setCount(r.count);
       setError('');
-    } catch {
+    } catch (e) {
+      // A dead session is handled centrally (the app returns to sign-in); don't also flash
+      // a "check the API connection" message that wrongly blames the backend.
+      if (e instanceof SessionExpiredError) return;
       setError('Could not load data — check the API connection.');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -11,7 +11,7 @@ import {
   Eye,
   EyeOff,
 } from 'lucide-react';
-import { api, DashboardStats } from '../api/client';
+import { api, DashboardStats, SessionExpiredError } from '../api/client';
 
 /* Chart palette (validated with the dataviz color checks):
  * single-series marks: #228B22 (green) · categorical pair: M-Pesa #228B22 / Voucher #2563EB
@@ -37,8 +37,11 @@ export default function LiveDashboard({ onNavigate }: { onNavigate: (tab: string
     try {
       setStats(await api.stats());
       setError('');
-    } catch {
-      setError('Could not load dashboard data. Is the API running?');
+    } catch (e) {
+      // A dead session is handled centrally (the app returns to sign-in); don't blame the API.
+      if (!(e instanceof SessionExpiredError)) {
+        setError('Could not load dashboard data. Is the API running?');
+      }
     } finally {
       setRefreshing(false);
     }
