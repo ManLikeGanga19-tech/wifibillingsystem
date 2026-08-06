@@ -257,10 +257,14 @@ class TestSuspendedNotice:
         Operator.objects.filter(pk=op.pk).update(status="active")
         router = RouterFactory(operator=op)
         client = PppoeClientFactory(
-            operator=op, router=router, status=Client.Status.SUSPENDED, plan__price=Decimal("2000")
+            operator=op, router=router, status=Client.Status.SUSPENDED,
+            plan__price=Decimal("2000"), phone="0722998877",
         )
+        # An account number typed into the URL now needs the customer's phone digits too —
+        # otherwise anyone could enumerate the ISP's base (pen-test F7).
         resp = APIClient().get(
-            f"/api/v1/pppoe/suspended-notice/?router={router.id}&account={client.account_number}"
+            f"/api/v1/pppoe/suspended-notice/?router={router.id}"
+            f"&account={client.account_number}&phone=8877"
         )
         assert resp.status_code == 200
         body = resp.json()

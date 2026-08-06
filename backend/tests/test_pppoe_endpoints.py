@@ -692,6 +692,32 @@ class TestPublicAccountLookupIsNotEnumerable:
         qs = urlencode({"router": router.id, **params})
         return APIClient().get(f"/api/v1/pppoe/account-lookup/?{qs}")
 
+    def _notice(self, router, **params):
+        from urllib.parse import urlencode
+        qs = urlencode({"router": router.id, **params})
+        return APIClient().get(f"/api/v1/pppoe/suspended-notice/?{qs}")
+
+    def test_suspended_notice_by_account_needs_the_phone_too(self):
+        """Pen-test F7: the suspended-notice page is the TWIN of account-lookup — it returns
+        the same name and balance keyed on the same account number, and it shipped WITHOUT
+        the phone gate. An account number alone must not reveal the customer."""
+        op = OperatorFactory()
+        client, router = self._client_on(op, phone="0722123456", full_name="Jane Ngure")
+
+        # account only -> generic pay page, NO customer block
+        leaked = self._notice(router, account=client.account_number).json()
+        assert "client" not in leaked
+        assert leaked["provider"]  # the page still renders, just without the name/balance
+
+        # wrong phone -> still no customer block
+        assert "client" not in self._notice(
+            router, account=client.account_number, phone="0000"
+        ).json()
+
+        # correct last-4 -> the real customer sees their details
+        ok = self._notice(router, account=client.account_number, phone="3456").json()
+        assert ok["client"]["full_name"] == "Jane Ngure"
+
     def test_the_right_account_and_phone_digits_succeed(self):
         op = OperatorFactory()
         client, router = self._client_on(op, phone="0722123456", full_name="Jane Ngure")
