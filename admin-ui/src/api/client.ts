@@ -1254,6 +1254,19 @@ export interface DashboardStats {
     unused_vouchers: number;
     vouchers_redeemed_7d: number;
   };
+  /** Fixed-line (PPPoE) KPI row — a recurring-revenue business, so its own metric family. */
+  pppoe: {
+    mrr: number | string;
+    outstanding: number | string;
+    collected_month: number | string;
+    renewals_due_7d: number;
+    renewals_due_7d_value: number | string;
+    active_subscribers: number;
+    new_this_month: number;
+    churn_rate: number | null;
+    churned_this_month: number;
+    suspended: number;
+  };
   revenue_daily: { day: string; revenue: string; transactions: number }[];
   tx_by_hour: { hour: number; count: number }[];
   plan_breakdown: { plan__name: string; count: number; revenue: string }[];

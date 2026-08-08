@@ -9,11 +9,13 @@ restore / cancel. All queries are operator-scoped by the caller passing the acti
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
+from decimal import Decimal
 
+from django.db.models import Sum
 from django.utils import timezone
 
-from .models import Client, ClientLifecycleEvent
+from .models import Client, ClientLifecycleEvent, Invoice
 
 # A client counts toward the customer base while it is being served — active, or suspended
 # (overdue but not yet given up on). Cancelled/pending are not part of the base.
@@ -123,4 +125,56 @@ def churn_summary(operator, *, months: int = 6) -> dict:
         "as_of": now.isoformat(),
         "standing": standing,
         "months": [asdict(m) for m in series],
+    }
+
+
+def pppoe_dashboard_kpis(operator) -> dict:
+    """The Fixed-line (PPPoE) KPI row for the operator dashboard: recurring revenue, the
+    subscriber base and its movement, collections, and the week's expected renewals. PPPoE is
+    a recurring business, so these are MRR/retention/cashflow metrics — a different family
+    from the prepaid hotspot tiles. All operator-scoped."""
+    today = timezone.localdate()
+    month_start = today.replace(day=1)
+    horizon = today + timedelta(days=7)
+
+    active = Client.objects.filter(operator=operator, status=Client.Status.ACTIVE)
+
+    # Recurring revenue = the monthly price of everyone currently being served.
+    mrr = active.aggregate(v=Sum("plan__price"))["v"] or Decimal("0")
+
+    # Cash owed right now (every open invoice), and cash actually settled this month.
+    outstanding = (
+        Invoice.objects.filter(operator=operator, status__in=Invoice.OPEN_STATUSES)
+        .aggregate(v=Sum("amount"))["v"]
+        or Decimal("0")
+    )
+    collected_month = (
+        Invoice.objects.filter(
+            operator=operator,
+            status=Invoice.Status.PAID,
+            paid_at__date__gte=month_start,
+        ).aggregate(v=Sum("amount"))["v"]
+        or Decimal("0")
+    )
+
+    # This week's expected inflow: active lines whose next bill falls in the next 7 days.
+    due = active.filter(next_due_date__gte=today, next_due_date__lte=horizon)
+    renewals_value = due.aggregate(v=Sum("plan__price"))["v"] or Decimal("0")
+
+    # Movement (reuse the tested churn analytics for the current month).
+    this_month = churn_summary(operator, months=1)["months"][-1]
+
+    return {
+        "mrr": mrr,
+        "outstanding": outstanding,
+        "collected_month": collected_month,
+        "renewals_due_7d": due.count(),
+        "renewals_due_7d_value": renewals_value,
+        "active_subscribers": active.count(),
+        "new_this_month": this_month["new"],
+        "churn_rate": this_month["churn_rate"],
+        "churned_this_month": this_month["churned"],
+        "suspended": Client.objects.filter(
+            operator=operator, status=Client.Status.SUSPENDED
+        ).count(),
     }
