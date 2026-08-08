@@ -54,6 +54,34 @@ def prune_dormant_clients() -> int:
     return pruned
 
 
+def cancel_stale_suspended_clients() -> int:
+    """Mark long-overdue accounts as CANCELLED (churned) once they have been suspended past
+    the ISP's threshold without paying.
+
+    Opt-in and conservative: only operators who set churn_after_suspended_days are touched,
+    and only accounts that are STILL suspended (a client who paid was restored and moved on
+    their own). This is what turns "suspended forever" into a real, dated churn signal —
+    every cancel writes a ClientLifecycleEvent, so the numbers can be counted per month.
+    """
+    from .services import cancel_client
+
+    cancelled = 0
+    configured = PppoeSettings.objects.filter(churn_after_suspended_days__isnull=False)
+    for cfg in configured.select_related("operator"):
+        cutoff = timezone.now() - timezone.timedelta(days=cfg.churn_after_suspended_days)
+        stale = Client.objects.filter(
+            operator=cfg.operator,
+            status=Client.Status.SUSPENDED,
+            status_changed_at__lt=cutoff,
+        ).select_related("router", "operator")
+        for client in stale.iterator():
+            cancel_client(client, reason=f"auto: suspended >{cfg.churn_after_suspended_days}d")
+            cancelled += 1
+    if cancelled:
+        logger.info("Auto-cancelled %d churned PPPoE clients", cancelled)
+    return cancelled
+
+
 def remind_expiring_clients() -> int:
     """SMS subscribers ahead of their renewal, per the ISP's chosen lead times.
 

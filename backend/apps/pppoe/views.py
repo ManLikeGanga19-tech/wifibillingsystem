@@ -3,7 +3,7 @@ import secrets
 from django.conf import settings
 from django.db.models import Count, Q
 from django.utils import timezone
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import status
 from rest_framework.decorators import (
     action,
@@ -658,3 +658,29 @@ class PppoeUsageSummaryView(APIView):
                 ),
             }
         )
+
+
+class PppoeChurnView(APIView):
+    """Subscriber movement & churn: per-month new / lapsed / recovered / churned and the
+    churn rate, plus the current standing. Answers "who didn't renew" and "what's my churn"
+    — questions a status column can't, because they are about change over time."""
+
+    permission_classes = [IsAdminUser, RequireTenant, TenantIsOperational]
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                "months", int, description="How many months back to include (1-24, default 6)."
+            )
+        ],
+        responses=OBJECT_RESPONSE,
+        summary="PPPoE churn & retention summary",
+    )
+    def get(self, request):
+        from .analytics import churn_summary
+
+        try:
+            months = int(request.query_params.get("months", 6))
+        except (TypeError, ValueError):
+            months = 6
+        return Response(churn_summary(acting_tenant(request), months=months))

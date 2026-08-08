@@ -1,6 +1,13 @@
 from django.contrib import admin
 
-from .models import AccessPoint, Client, Invoice, ServicePlan, Tower
+from .models import (
+    AccessPoint,
+    Client,
+    ClientLifecycleEvent,
+    Invoice,
+    ServicePlan,
+    Tower,
+)
 
 
 @admin.register(ServicePlan)
@@ -35,6 +42,16 @@ class ClientAdmin(admin.ModelAdmin):
     list_filter = ("operator", "status", "delivery_method")
     search_fields = ("account_number", "full_name", "phone", "pppoe_username")
     readonly_fields = ("account_number", "created_at", "updated_at")
+
+
+@admin.register(ClientLifecycleEvent)
+class ClientLifecycleEventAdmin(admin.ModelAdmin):
+    list_display = ("account_number", "operator", "event", "from_status", "to_status",
+                    "occurred_at")
+    list_filter = ("operator", "event")
+    search_fields = ("account_number", "full_name")
+    date_hierarchy = "occurred_at"
+    readonly_fields = ("occurred_at", "created_at", "updated_at")
 
 
 @admin.register(Invoice)
