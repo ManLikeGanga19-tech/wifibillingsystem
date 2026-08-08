@@ -950,11 +950,14 @@ export interface DomainRouter {
  *  UI be honest that FUP thresholds are stored but not yet firing. */
 export interface PppoeSettings {
   inactive_prune_days: number | null;
+  /** Auto-mark a suspended (overdue) account as cancelled/churned after this many days.
+   *  null = never (the ISP decides who has truly left). */
+  churn_after_suspended_days: number | null;
   pre_expiry_reminder_hours: number[];
   fup_alert_percents: number[];
   auto_generate_invoices: boolean;
   invoice_prefix: string;
-  choices: { prune_days: number[]; reminder_hours: number[]; fup_percents: number[] };
+  choices: { prune_days: number[]; churn_days: number[]; reminder_hours: number[]; fup_percents: number[] };
   fup_metering_ready: boolean;
 }
 export type PppoeSettingsUpdate = Omit<PppoeSettings, 'choices' | 'fup_metering_ready'>;
@@ -1028,7 +1031,7 @@ export interface PppoeClient {
   delivery_method: 'fibre' | 'ethernet' | 'wireless_ptp' | 'wireless_ptmp';
   access_point: number | null;
   cpe_equipment: number | null;
-  status: 'pending_install' | 'active' | 'suspended' | 'disabled';
+  status: 'pending_install' | 'active' | 'suspended' | 'cancelled' | 'disabled';
   billing_day: number;
   balance: string;
   next_due_date: string | null;
@@ -1068,6 +1071,24 @@ export interface PppoeUsageSummary {
     percent_used: number | null;
   }[];
   synced_at: string | null;
+}
+
+/** Subscriber movement over time — the churn/retention picture a status column can't give. */
+export interface PppoeChurnMonth {
+  month: string; // "YYYY-MM"
+  active_start: number;
+  new: number;
+  reactivated: number;
+  suspended: number;
+  restored: number;
+  churned: number;
+  net: number;
+  churn_rate: number | null; // churned / active_start, or null when the base was empty
+}
+export interface PppoeChurnSummary {
+  as_of: string;
+  standing: Record<'pending_install' | 'active' | 'suspended' | 'cancelled' | 'disabled', number>;
+  months: PppoeChurnMonth[];
 }
 
 export interface PppoeCsvRow {
@@ -1739,6 +1760,8 @@ export const api = {
         `${BASE}/api/v1/pppoe/clients/export/${includeCredentials ? '?include_credentials=true' : ''}`,
     },
     usageSummary: () => request<PppoeUsageSummary>('/pppoe/usage-summary/'),
+    churnSummary: (months = 6) =>
+      request<PppoeChurnSummary>(`/pppoe/churn-summary/?months=${months}`),
     invoices: {
       list: (query = '') => request<Paginated<PppoeInvoice>>(`/pppoe/invoices/${query}`),
     },
