@@ -105,3 +105,17 @@ class TestEndpoints:
         SessionFactory(operator=op)
         _online_pppoe(op)
         assert staff(op).get("/api/v1/nav/").json()["active_users"] == 2
+
+    def test_per_router_active_count_includes_pppoe(self):
+        """The dashboard's per-router 'active' column must not read zero for a PPPoE-only
+        router that has lines online."""
+        from .factories import RouterFactory
+
+        op = OperatorFactory()
+        pppoe_router = RouterFactory(operator=op, name="PPPoE edge")
+        _online_pppoe(op, router=pppoe_router)
+        _online_pppoe(op, router=pppoe_router)
+
+        routers = staff(op).get("/api/v1/stats/").json()["routers"]
+        row = next(r for r in routers if r["name"] == "PPPoE edge")
+        assert row["active_sessions"] == 2
