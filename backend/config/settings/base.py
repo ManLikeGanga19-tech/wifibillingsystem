@@ -240,10 +240,14 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.pppoe.tasks.suspend_overdue_clients",
         "schedule": crontab(minute=30, hour=6),
     },
-    # Fixed-line lifecycle (Settings > PPPoE). Both no-op for an ISP on the defaults.
+    # Fixed-line lifecycle (Settings > PPPoE). All no-op for an ISP on the defaults.
     "prune-dormant-pppoe": {
         "task": "apps.pppoe.tasks.prune_dormant_pppoe_clients",
         "schedule": crontab(minute=45, hour=3),
+    },
+    "cancel-stale-suspended-pppoe": {
+        "task": "apps.pppoe.tasks.cancel_stale_suspended_pppoe_clients",
+        "schedule": crontab(minute=50, hour=6),  # after the suspend sweep
     },
     "remind-pppoe-expiry": {
         "task": "apps.pppoe.tasks.remind_pppoe_expiry",

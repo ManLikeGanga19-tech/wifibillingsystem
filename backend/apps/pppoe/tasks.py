@@ -70,6 +70,14 @@ def prune_dormant_pppoe_clients():
 
 
 @shared_task
+def cancel_stale_suspended_pppoe_clients():
+    """Daily: churn (CANCELLED) accounts suspended past each ISP's threshold (see lifecycle)."""
+    from .lifecycle import cancel_stale_suspended_clients
+
+    return cancel_stale_suspended_clients()
+
+
+@shared_task
 def remind_pppoe_expiry():
     """Hourly: SMS subscribers ahead of renewal, per each ISP's chosen lead times."""
     from .lifecycle import remind_expiring_clients

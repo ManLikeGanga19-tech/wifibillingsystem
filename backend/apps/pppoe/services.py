@@ -12,13 +12,52 @@ from django.utils import timezone
 from apps.core.services import audit
 from apps.provisioning.adapters import get_adapter
 
-from .models import Client, Invoice, ServicePlan, generate_account_number, month_period
+from .models import (
+    Client,
+    ClientLifecycleEvent,
+    Invoice,
+    ServicePlan,
+    generate_account_number,
+    month_period,
+)
 
 logger = logging.getLogger(__name__)
 
 
 def _pppoe_password() -> str:
     return secrets.token_urlsafe(9)
+
+
+def _record_transition(
+    client: Client,
+    *,
+    event: str,
+    to_status: str,
+    reason: str = "",
+    actor=None,
+    extra_fields: tuple[str, ...] = (),
+) -> None:
+    """The single chokepoint for a status change: move the client, stamp when it happened,
+    and write an immutable ClientLifecycleEvent so churn analytics has a dated trail.
+
+    Every real transition (activate / suspend / restore / cancel) goes through here, so the
+    log can never silently miss one. Callers set any side fields (e.g. installed_at) on the
+    instance first and name them in extra_fields; they are persisted in the same save."""
+    from_status = client.status
+    client.status = to_status
+    client.status_changed_at = timezone.now()
+    client.save(update_fields=["status", "status_changed_at", "updated_at", *extra_fields])
+    ClientLifecycleEvent.objects.create(
+        operator=client.operator,
+        client=client,
+        account_number=client.account_number,
+        full_name=client.full_name,
+        event=event,
+        from_status=from_status,
+        to_status=to_status,
+        reason=reason,
+        actor=actor,
+    )
 
 
 def _emit(operator, event: str, data: dict) -> None:
@@ -96,12 +135,23 @@ def provision_client(client: Client) -> None:
         logger.exception("Could not ensure the MSS clamp on router %s", client.router_id)
     adapter.ensure_pppoe_profile(client.plan)
     adapter.create_pppoe_user(client)
+    # PENDING_INSTALL -> ACTIVE is a first activation; CANCELLED -> ACTIVE is a win-back of a
+    # churned customer (re-provisioning revives them). Both are counted, with distinct events.
     first_activation = client.status == Client.Status.PENDING_INSTALL
-    if first_activation:
-        client.status = Client.Status.ACTIVE
+    reviving = client.status in (Client.Status.PENDING_INSTALL, Client.Status.CANCELLED)
+    if reviving:
         if not client.installed_at:
             client.installed_at = timezone.localdate()
-        client.save(update_fields=["status", "installed_at", "updated_at"])
+        _record_transition(
+            client,
+            event=(
+                ClientLifecycleEvent.Event.ACTIVATED
+                if first_activation
+                else ClientLifecycleEvent.Event.REACTIVATED
+            ),
+            to_status=Client.Status.ACTIVE,
+            extra_fields=("installed_at",),
+        )
     audit("pppoe_client_provisioned", operator=client.operator, target=client)
     # Welcome + login details on FIRST activation only. Best-effort — a failed SMS must
     # never fail a provisioning the ISP just did.
@@ -118,8 +168,12 @@ def suspend_client(client: Client, *, reason: str = "overdue") -> None:
     if client.status not in Client.ACTIVE_STATUSES:
         return
     get_adapter(client.router).set_pppoe_enabled(client, False)
-    client.status = Client.Status.SUSPENDED
-    client.save(update_fields=["status", "updated_at"])
+    _record_transition(
+        client,
+        event=ClientLifecycleEvent.Event.SUSPENDED,
+        to_status=Client.Status.SUSPENDED,
+        reason=reason,
+    )
     audit("pppoe_client_suspended", operator=client.operator, target=client, reason=reason)
     _emit(client.operator, "subscriber.paused", {**_client_payload(client), "reason": reason})
     # "Your package has expired — pay to reconnect." Best-effort.
@@ -135,10 +189,37 @@ def restore_client(client: Client) -> None:
     if client.status != Client.Status.SUSPENDED:
         return
     get_adapter(client.router).set_pppoe_enabled(client, True)
-    client.status = Client.Status.ACTIVE
-    client.save(update_fields=["status", "updated_at"])
+    _record_transition(
+        client,
+        event=ClientLifecycleEvent.Event.RESTORED,
+        to_status=Client.Status.ACTIVE,
+    )
     audit("pppoe_client_restored", operator=client.operator, target=client)
     _emit(client.operator, "subscriber.resumed", _client_payload(client))
+
+
+def cancel_client(client: Client, *, reason: str = "churned", actor=None) -> None:
+    """Mark an overdue account as churned: pull its secret off the router and stop billing
+    it. Only a SUSPENDED account can be cancelled — a live customer is never churned, and a
+    cancel is the terminal admission that a suspended one is not coming back. Removing the
+    secret is best-effort: a cancelled client must leave the books even if their router is
+    unreachable at that moment."""
+    if client.status != Client.Status.SUSPENDED:
+        return
+    try:
+        get_adapter(client.router).remove_pppoe_user(client)
+    except Exception:
+        logger.exception("Could not remove the secret for churned client %s", client.pk)
+    _record_transition(
+        client,
+        event=ClientLifecycleEvent.Event.CANCELLED,
+        to_status=Client.Status.CANCELLED,
+        reason=reason,
+        actor=actor,
+    )
+    audit("pppoe_client_cancelled", operator=client.operator, actor=actor,
+          target=client, reason=reason)
+    _emit(client.operator, "subscriber.cancelled", _client_payload(client))
 
 
 #: Fields an edit may change that the ROUTER also needs to know about. Everything else

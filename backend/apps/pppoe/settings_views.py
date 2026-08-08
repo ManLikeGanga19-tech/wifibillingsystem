@@ -45,6 +45,7 @@ class _ChoiceList(serializers.ListField):
 
 class PppoeSettingsSerializer(serializers.Serializer):
     inactive_prune_days = serializers.IntegerField(required=False, allow_null=True)
+    churn_after_suspended_days = serializers.IntegerField(required=False, allow_null=True)
     pre_expiry_reminder_hours = _ChoiceList(
         allowed=PppoeSettings.REMINDER_HOUR_CHOICES, required=False
     )
@@ -67,10 +68,20 @@ class PppoeSettingsSerializer(serializers.Serializer):
             )
         return value
 
+    def validate_churn_after_suspended_days(self, value):
+        if value is None:
+            return None  # "Never" — the ISP decides who has churned
+        if value not in PppoeSettings.CHURN_CHOICES:
+            raise serializers.ValidationError(
+                f"Choose one of {list(PppoeSettings.CHURN_CHOICES)}, or Never."
+            )
+        return value
+
 
 def _as_dict(row: PppoeSettings) -> dict:
     return {
         "inactive_prune_days": row.inactive_prune_days,
+        "churn_after_suspended_days": row.churn_after_suspended_days,
         "pre_expiry_reminder_hours": row.pre_expiry_reminder_hours,
         "fup_alert_percents": row.fup_alert_percents,
         "auto_generate_invoices": row.auto_generate_invoices,
@@ -78,6 +89,7 @@ def _as_dict(row: PppoeSettings) -> dict:
         # The console renders chips from these, so the allow-lists live in one place.
         "choices": {
             "prune_days": list(PppoeSettings.PRUNE_CHOICES),
+            "churn_days": list(PppoeSettings.CHURN_CHOICES),
             "reminder_hours": list(PppoeSettings.REMINDER_HOUR_CHOICES),
             "fup_percents": list(PppoeSettings.FUP_PERCENT_CHOICES),
         },

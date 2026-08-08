@@ -118,6 +118,10 @@ class Client(OperatorOwnedModel):
         PENDING_INSTALL = "pending_install", "Pending installation"
         ACTIVE = "active", "Active"
         SUSPENDED = "suspended", "Suspended (overdue)"
+        # Churned: an overdue account the ISP (or the auto-ageing rule) has given up on.
+        # Terminal for billing/capacity — the secret is pulled and it is no longer invoiced.
+        # Distinct from DISABLED, which is a manual, reversible off-switch (reserved).
+        CANCELLED = "cancelled", "Cancelled (churned)"
         DISABLED = "disabled", "Disabled"
 
     class Delivery(models.TextChoices):
@@ -162,6 +166,11 @@ class Client(OperatorOwnedModel):
     status = models.CharField(
         max_length=15, choices=Status.choices, default=Status.PENDING_INSTALL, db_index=True
     )
+    # When status last changed. Powers "suspended 14 days ago" in the console and the
+    # churn-ageing rule (suspend → cancel after the ISP's threshold). Denormalised from the
+    # ClientLifecycleEvent log so the common "how long in this state" question is one column,
+    # not a subquery.
+    status_changed_at = models.DateTimeField(null=True, blank=True, db_index=True)
     billing_day = models.PositiveSmallIntegerField(default=1, help_text="Day of month, 1-28")
     balance = models.DecimalField(
         max_digits=12,
@@ -217,6 +226,50 @@ class Client(OperatorOwnedModel):
     def is_billable(self) -> bool:
         """Counts toward the platform per-user fee: only a live, served client."""
         return self.status in self.BILLABLE_STATUSES
+
+
+class ClientLifecycleEvent(OperatorOwnedModel):
+    """Append-only record of every status change a client goes through.
+
+    This is the source of truth for churn analytics — point-in-time status can't answer
+    "how many left in July" or "what's my churn rate", because a status field only knows
+    NOW. Each row snapshots account_number/full_name so the history SURVIVES the client
+    being deleted (on_delete=SET_NULL): a churned customer the ISP later hard-deletes still
+    counts in the month they left, instead of silently vanishing from the numbers.
+    """
+
+    class Event(models.TextChoices):
+        ACTIVATED = "activated", "Activated"  # first time it went live
+        SUSPENDED = "suspended", "Suspended (overdue)"
+        RESTORED = "restored", "Restored (paid up)"
+        CANCELLED = "cancelled", "Cancelled (churned)"
+        REACTIVATED = "reactivated", "Reactivated (won back)"
+
+    # Kept even if the client row is deleted, so churn history is never destroyed.
+    client = models.ForeignKey(
+        Client, null=True, blank=True, on_delete=models.SET_NULL, related_name="lifecycle_events"
+    )
+    account_number = models.CharField(max_length=20, db_index=True)
+    full_name = models.CharField(max_length=120, blank=True)
+
+    event = models.CharField(max_length=15, choices=Event.choices, db_index=True)
+    from_status = models.CharField(max_length=15, blank=True)
+    to_status = models.CharField(max_length=15, blank=True)
+    reason = models.CharField(max_length=120, blank=True)
+    occurred_at = models.DateTimeField(default=timezone.now, db_index=True)
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL
+    )
+
+    class Meta:
+        ordering = ["-occurred_at"]
+        indexes = [
+            # the churn queries: this operator's events of a kind within a date window
+            models.Index(fields=["operator", "event", "occurred_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.account_number} {self.event} @ {self.occurred_at:%Y-%m-%d}"
 
 
 class Invoice(OperatorOwnedModel):
@@ -306,6 +359,7 @@ class PppoeSettings(models.Model):
     PRUNE_CHOICES = (7, 14, 30, 60, 90, 180, 365)
     REMINDER_HOUR_CHOICES = (2, 4, 12, 24, 48, 72)
     FUP_PERCENT_CHOICES = (50, 80, 95, 100)
+    CHURN_CHOICES = (30, 45, 60, 90, 120, 180)
 
     operator = models.OneToOneField(
         "core.Operator", on_delete=models.CASCADE, related_name="pppoe_settings"
@@ -315,6 +369,10 @@ class PppoeSettings(models.Model):
     #: Delete DISABLED accounts dormant this many days. NULL = never prune (the default —
     #: deletion is destructive, so an ISP opts in).
     inactive_prune_days = models.PositiveSmallIntegerField(null=True, blank=True)
+    #: Auto-mark a SUSPENDED (overdue) account as CANCELLED/churned once it has been
+    #: suspended this many days without paying. NULL = never auto-cancel (the default — the
+    #: ISP decides who has truly left). The count is what powers the churn numbers.
+    churn_after_suspended_days = models.PositiveSmallIntegerField(null=True, blank=True)
 
     # --- Reminders & alerts ----------------------------------------------------------
     #: SMS a subscriber this many hours before their renewal falls due. A list, because an
