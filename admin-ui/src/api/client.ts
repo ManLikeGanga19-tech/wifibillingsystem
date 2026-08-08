@@ -327,6 +327,32 @@ export interface ApiSession {
   device_allowance: { general: number; tv: number };
 }
 
+/** A live connection normalised across service types (hotspot, PPPoE, later static/Ruijie),
+ *  as shown on the Active Users page. Hotspot rows carry devices/expiry; PPPoE rows carry
+ *  uptime — the shared core is always present. */
+export type LiveServiceType = 'hotspot' | 'pppoe';
+export interface LiveConnection {
+  service_type: LiveServiceType;
+  id: number;
+  identifier: string; // hotspot_username or PPPoE account_number
+  name: string; // subscriber phone or client full name
+  plan_name: string;
+  router_name: string;
+  status: string;
+  since: string | null;
+  uptime: string; // router-reported (PPPoE); '' for hotspot
+  ip: string | null;
+  mac_address: string;
+  expires_at: string | null;
+  provision_error: string;
+  devices: ApiSessionDevice[];
+  device_allowance: { general: number; tv: number } | null;
+}
+export interface LiveConnectionsResponse {
+  counts: Record<string, number>;
+  results: LiveConnection[];
+}
+
 export interface ApiVoucher {
   id: number;
   code: string;
@@ -1217,7 +1243,10 @@ export interface DashboardStats {
     transactions_today: number;
     failed_today: number;
     success_rate_7d: number | null;
+    /** Everyone online now across ALL service types (hotspot + PPPoE + future). */
     active_sessions: number;
+    /** Per-service breakdown of active_sessions, e.g. { hotspot: 90, pppoe: 52 }. */
+    active_by_service: Record<string, number>;
     sessions_expiring_1h: number;
     total_subscribers: number;
     new_subscribers_7d: number;
@@ -1665,6 +1694,10 @@ export const api = {
     list: (query = '') => request<Paginated<ApiSession>>(`/sessions/${query}`),
     suspend: (id: number) => request<{ detail: string }>(`/sessions/${id}/suspend/`, { method: 'POST' }),
   },
+
+  // Everyone online now across ALL service types — powers the Active Users page.
+  liveConnections: (type: 'all' | LiveServiceType = 'all') =>
+    request<LiveConnectionsResponse>(`/live-connections/?type=${type}`),
 
   vouchers: {
     list: (query = '') => request<Paginated<ApiVoucher>>(`/vouchers/${query}`),

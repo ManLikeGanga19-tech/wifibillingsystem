@@ -1,42 +1,49 @@
 import { Fragment, useState } from 'react';
 import { Activity, Ban, ChevronDown, Laptop, Smartphone, Tv, Monitor } from 'lucide-react';
-import { api, ApiSession, ApiSessionDevice } from '../api/client';
+import { api, LiveConnection, ApiSessionDevice } from '../api/client';
 import { Badge, Btn, FilterChips, RefreshBtn, TableShell, tdCls, toast, useList, ViewHeader, fmtDateTime } from './ui';
 
-const FILTERS = ['active', 'all', 'expired', 'suspended', 'failed'] as const;
-const STATUS_COLOR: Record<ApiSession['status'], 'green' | 'gray' | 'red' | 'amber' | 'blue'> = {
-  active: 'green',
-  pending: 'gray',
-  expired: 'gray',
-  suspended: 'amber',
-  failed: 'red',
+// The Active Users page shows everyone ONLINE NOW, across every service type — hotspot and
+// PPPoE today, static/dynamic/Ruijie as they land. One table, filtered by service.
+const FILTERS = ['all', 'hotspot', 'pppoe'] as const;
+const SERVICE_COLOR: Record<LiveConnection['service_type'], 'blue' | 'amber'> = {
+  hotspot: 'blue',
+  pppoe: 'amber',
 };
 
 export default function ActiveUsersView() {
-  const [filter, setFilter] = useState<(typeof FILTERS)[number]>('active');
-  const [expanded, setExpanded] = useState<number | null>(null);
-  const { rows, count, error, refreshing, reload } = useList(
-    () => api.sessions.list(filter === 'all' ? '' : `?status=${filter}`),
-    [filter]
-  );
+  const [filter, setFilter] = useState<(typeof FILTERS)[number]>('all');
+  const [counts, setCounts] = useState<Record<string, number>>({});
+  const [expanded, setExpanded] = useState<string | null>(null);
 
-  const suspend = async (session: ApiSession) => {
-    if (!confirm(`Disconnect ${session.hotspot_username} from ${session.router_name}?`)) return;
+  const { rows, count, error, refreshing, reload } = useList<LiveConnection>(async () => {
+    const r = await api.liveConnections(filter);
+    setCounts(r.counts);
+    return { results: r.results, count: r.results.length };
+  }, [filter]);
+
+  const suspend = async (row: LiveConnection) => {
+    // Only hotspot sessions can be disconnected from here. A PPPoE line is a billing
+    // relationship — suspending it is done deliberately on the Clients page, not by a
+    // stray click on the live list.
+    if (!confirm(`Disconnect ${row.identifier} from ${row.router_name}?`)) return;
     try {
-      await api.sessions.suspend(session.id);
-      toast('success', `Suspension queued for ${session.hotspot_username}.`);
+      await api.sessions.suspend(row.id);
+      toast('success', `Suspension queued for ${row.identifier}.`);
       window.setTimeout(reload, 1200);
     } catch (e) {
       toast('error', e instanceof Error ? e.message : 'Failed to suspend session.');
     }
   };
 
+  const total = (counts.hotspot ?? 0) + (counts.pppoe ?? 0);
+
   return (
     <div className="space-y-5 text-[#141414]">
       <ViewHeader
         icon={<Activity className="h-4.5 w-4.5" />}
         title="Active Users"
-        subtitle="Live hotspot sessions on your routers. Suspend cuts the user off immediately."
+        subtitle="Everyone online right now across every service. Suspend disconnects a hotspot session immediately."
       >
         <RefreshBtn onClick={reload} spinning={refreshing} />
       </ViewHeader>
@@ -45,49 +52,63 @@ export default function ActiveUsersView() {
         options={FILTERS}
         value={filter}
         onChange={setFilter}
-        right={<span className="text-[11px] font-mono text-[#141414]/50">{count} sessions</span>}
+        right={
+          <span className="text-[11px] font-mono text-[#141414]/50">
+            {total} online · H {counts.hotspot ?? 0} · P {counts.pppoe ?? 0}
+          </span>
+        }
       />
 
       <TableShell
-        headers={['User', 'Plan', 'Router', 'Status', 'Devices', 'Started', 'Expires', 'MAC', '']}
+        headers={['Service', 'User', 'Name', 'Plan', 'Router', 'Status', 'Online', 'IP', 'Devices', '']}
         loading={rows === null}
         error={error}
-        empty="No sessions match this filter."
+        empty="Nobody is online in this view right now."
       >
         {(rows ?? []).map((s) => {
-          const total = s.device_allowance ? s.device_allowance.general + s.device_allowance.tv : 1;
+          const key = `${s.service_type}-${s.id}`;
+          const allow = s.device_allowance;
+          const totalDevices = allow ? allow.general + allow.tv : 1;
           const on = s.devices?.length ?? 0;
-          // Only worth expanding when the plan is multi-device (or devices are attached).
-          const canExpand = total > 1 || on > 1;
-          const isOpen = expanded === s.id;
+          const canExpand = s.service_type === 'hotspot' && (totalDevices > 1 || on > 1);
+          const isOpen = expanded === key;
           return (
-            <Fragment key={s.id}>
+            <Fragment key={key}>
               <tr className="hover:bg-[#f0efec]/40 transition">
-                <td className={`${tdCls} font-mono font-bold`}>{s.hotspot_username}</td>
+                <td className={tdCls}>
+                  <Badge color={SERVICE_COLOR[s.service_type]}>{s.service_type}</Badge>
+                </td>
+                <td className={`${tdCls} font-mono font-bold`}>{s.identifier}</td>
+                <td className={tdCls}>{s.name || '—'}</td>
                 <td className={tdCls}>{s.plan_name}</td>
                 <td className={tdCls}>{s.router_name}</td>
                 <td className={tdCls}>
-                  <Badge color={STATUS_COLOR[s.status]}>{s.status}</Badge>
+                  <Badge color="green">{s.status}</Badge>
                   {s.provision_error && (
                     <span className="block text-[10px] text-[#B22222] font-mono mt-0.5 max-w-[12rem] truncate" title={s.provision_error}>
                       {s.provision_error}
                     </span>
                   )}
                 </td>
-                <td className={tdCls}>
-                  <DeviceCell
-                    session={s}
-                    total={total}
-                    canExpand={canExpand}
-                    isOpen={isOpen}
-                    onToggle={() => setExpanded(isOpen ? null : s.id)}
-                  />
+                <td className={`${tdCls} font-mono whitespace-nowrap`} title={s.since ? fmtDateTime(s.since) : ''}>
+                  {s.uptime || (s.since ? fmtDateTime(s.since) : '—')}
                 </td>
-                <td className={`${tdCls} font-mono whitespace-nowrap`}>{fmtDateTime(s.starts_at)}</td>
-                <td className={`${tdCls} font-mono whitespace-nowrap`}>{fmtDateTime(s.expires_at)}</td>
-                <td className={`${tdCls} font-mono`}>{s.mac_address || '—'}</td>
+                <td className={`${tdCls} font-mono`}>{s.ip || '—'}</td>
                 <td className={tdCls}>
-                  {s.status === 'active' && (
+                  {s.service_type === 'hotspot' ? (
+                    <DeviceCell
+                      row={s}
+                      total={totalDevices}
+                      canExpand={canExpand}
+                      isOpen={isOpen}
+                      onToggle={() => setExpanded(isOpen ? null : key)}
+                    />
+                  ) : (
+                    <span className="text-[#141414]/30">—</span>
+                  )}
+                </td>
+                <td className={tdCls}>
+                  {s.service_type === 'hotspot' && (
                     <Btn variant="danger" onClick={() => suspend(s)} title="Disconnect this user">
                       <Ban className="h-3.5 w-3.5" />
                       Suspend
@@ -97,8 +118,8 @@ export default function ActiveUsersView() {
               </tr>
               {isOpen && (
                 <tr className="bg-[#faf9f7]">
-                  <td colSpan={9} className="px-3 py-2.5 border-t border-[#141414]/10">
-                    <DeviceList devices={s.devices ?? []} allowance={s.device_allowance} />
+                  <td colSpan={10} className="px-3 py-2.5 border-t border-[#141414]/10">
+                    <DeviceList devices={s.devices ?? []} allowance={allow ?? undefined} />
                   </td>
                 </tr>
               )}
@@ -111,24 +132,23 @@ export default function ActiveUsersView() {
 }
 
 function DeviceCell({
-  session,
+  row,
   total,
   canExpand,
   isOpen,
   onToggle,
 }: {
-  session: ApiSession;
+  row: LiveConnection;
   total: number;
   canExpand: boolean;
   isOpen: boolean;
   onToggle: () => void;
 }) {
-  const on = session.devices?.length ?? 0;
+  const on = row.devices?.length ?? 0;
   if (!canExpand) {
-    // Single-device plan — just show 1 quietly, nothing to expand.
     return <span className="font-mono text-[11px] text-[#141414]/50">{on || 1}</span>;
   }
-  const tvOn = (session.devices ?? []).filter((d) => d.kind === 'tv').length;
+  const tvOn = (row.devices ?? []).filter((d) => d.kind === 'tv').length;
   return (
     <button
       onClick={onToggle}
@@ -136,7 +156,7 @@ function DeviceCell({
       title="Show devices on this session"
     >
       {on}/{total}
-      {session.device_allowance?.tv ? ` · ${tvOn}/${session.device_allowance.tv} TV` : ''}
+      {row.device_allowance?.tv ? ` · ${tvOn}/${row.device_allowance.tv} TV` : ''}
       <ChevronDown className={`h-3.5 w-3.5 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
     </button>
   );
