@@ -1,6 +1,6 @@
 from datetime import timedelta
 
-from django.db.models import Count, Q, Sum
+from django.db.models import Count, Sum
 from django.db.models.functions import ExtractHour, TruncDate
 from django.utils import timezone
 from drf_spectacular.utils import OpenApiParameter, extend_schema
@@ -14,6 +14,7 @@ from apps.core.live import (
     live_connection_counts,
     live_connections,
     live_connections_total,
+    live_counts_by_router,
 )
 from apps.core.permissions import RequireTenant, TenantIsOperational
 from apps.core.schema import OBJECT_RESPONSE
@@ -202,13 +203,19 @@ class DashboardStatsView(APIView):
             .order_by("day")
         )
 
-        routers = list(
-            _scoped(Router.objects.filter(is_active=True), op).annotate(
-                active_sessions=Count(
-                    "sessions", filter=Q(sessions__status=Session.Status.ACTIVE)
-                )
-            ).values("id", "name", "status", "last_seen_at", "active_sessions")
-        )
+        # "active" per router spans ALL service types (hotspot sessions + online PPPoE
+        # lines), so a PPPoE-only router no longer reads a misleading zero.
+        by_router = live_counts_by_router(op)
+        routers = [
+            {
+                "id": r.id,
+                "name": r.name,
+                "status": r.status,
+                "last_seen_at": r.last_seen_at,
+                "active_sessions": by_router.get(r.id, 0),
+            }
+            for r in _scoped(Router.objects.filter(is_active=True), op)
+        ]
 
         return Response(
             {

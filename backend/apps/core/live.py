@@ -33,6 +33,33 @@ def live_connections_total(operator) -> int:
     return sum(live_connection_counts(operator).values())
 
 
+def live_counts_by_router(operator) -> dict[int, int]:
+    """Live connections per router id, across service types — for the dashboard's per-router
+    "active" column. Two grouped queries (no cross-join), summed by router, so a PPPoE-only
+    router shows its online lines instead of a misleading zero."""
+    from django.db.models import Count
+
+    from apps.pppoe.models import Client
+    from apps.provisioning.models import Session
+
+    counts: dict[int, int] = {}
+    hotspot = (
+        Session.objects.filter(operator=operator, status=Session.Status.ACTIVE)
+        .values("router")
+        .annotate(n=Count("id"))
+    )
+    pppoe = (
+        Client.objects.filter(
+            operator=operator, status=Client.Status.ACTIVE, is_online=True
+        )
+        .values("router")
+        .annotate(n=Count("id"))
+    )
+    for row in (*hotspot, *pppoe):
+        counts[row["router"]] = counts.get(row["router"], 0) + row["n"]
+    return counts
+
+
 # A defensive cap: this feeds a live table, and an ISP with thousands online should still get
 # a fast response. The counts (above) remain exact; only the row listing is bounded.
 MAX_ROWS = 1000
