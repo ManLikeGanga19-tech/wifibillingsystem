@@ -75,7 +75,9 @@ export default function LiveDashboard({ onNavigate }: { onNavigate: (tab: string
       </div>
     );
 
-  const { kpis } = stats!;
+  const { kpis, pppoe } = stats!;
+  const hasPppoe = pppoe.active_subscribers + pppoe.suspended > 0;
+  const churnPct = pppoe.churn_rate === null ? '—' : `${(pppoe.churn_rate * 100).toFixed(1)}%`;
   const monthDelta =
     Number(kpis.revenue_prev_month) > 0
       ? Math.round(
@@ -162,6 +164,35 @@ export default function LiveDashboard({ onNavigate }: { onNavigate: (tab: string
         <Tile label="Payments Today" value={String(kpis.transactions_today)} hidden={isPrivate} />
         <Tile label="Vouchers In Stock" value={kpis.unused_vouchers.toLocaleString()} sub={`${kpis.vouchers_redeemed_7d} redeemed (7d)`} />
       </div>
+
+      {/* Fixed-line (PPPoE): a recurring-revenue business, so its own KPI family —
+          MRR / collections / renewals / retention — kept separate from the prepaid row. */}
+      {hasPppoe && (
+        <div className="space-y-2">
+          <p className="text-[11px] font-mono uppercase tracking-wider text-[#141414]/50">
+            Fixed-line (PPPoE)
+          </p>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <Tile label="MRR" value={ksh(pppoe.mrr)} sub="recurring / month" accent hidden={isPrivate} />
+            <Tile label="Collected This Month" value={ksh(pppoe.collected_month)} accent hidden={isPrivate} />
+            <Tile label="Outstanding" value={ksh(pppoe.outstanding)} sub="owed now" hidden={isPrivate} />
+            <Tile
+              label="Renewals Due (7d)"
+              value={ksh(pppoe.renewals_due_7d_value)}
+              sub={`${pppoe.renewals_due_7d} account${pppoe.renewals_due_7d === 1 ? '' : 's'}`}
+              hidden={isPrivate}
+            />
+            <Tile
+              label="Active Subscribers"
+              value={pppoe.active_subscribers.toLocaleString()}
+              sub="PPPoE lines"
+            />
+            <Tile label="New This Month" value={String(pppoe.new_this_month)} sub="activations" />
+            <Tile label="Churn Rate" value={churnPct} sub={`${pppoe.churned_this_month} churned`} />
+            <Tile label="Suspended" value={String(pppoe.suspended)} sub="overdue" />
+          </div>
+        </div>
+      )}
 
       {/* Charts row 1 */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">

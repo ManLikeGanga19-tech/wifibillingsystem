@@ -23,6 +23,7 @@ from apps.notifications.models import Campaign
 from apps.ops.models import Equipment, Lead, Ticket
 from apps.payments.models import Transaction
 from apps.plans.models import Plan
+from apps.pppoe.analytics import pppoe_dashboard_kpis
 from apps.provisioning.models import Router, Session
 from apps.vouchers.models import Voucher
 
@@ -220,6 +221,9 @@ class DashboardStatsView(APIView):
         return Response(
             {
                 "kpis": kpis,
+                # Fixed-line (PPPoE) is a recurring business — its own KPI family
+                # (MRR / retention / cashflow), rendered as a separate dashboard section.
+                "pppoe": pppoe_dashboard_kpis(op),
                 "revenue_daily": revenue_daily,
                 "tx_by_hour": tx_by_hour,
                 "plan_breakdown": plan_breakdown,
