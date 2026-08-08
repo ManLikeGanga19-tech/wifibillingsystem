@@ -41,6 +41,7 @@ export default function PppoePanel() {
     try {
       const saved = await api.pppoeSettings.update({
         inactive_prune_days: s.inactive_prune_days,
+        churn_after_suspended_days: s.churn_after_suspended_days,
         pre_expiry_reminder_hours: s.pre_expiry_reminder_hours,
         fup_alert_percents: s.fup_alert_percents,
         auto_generate_invoices: s.auto_generate_invoices,
@@ -65,8 +66,20 @@ export default function PppoePanel() {
       {/* --- Lifecycle ------------------------------------------------------------ */}
       <Panel title="Lifecycle">
         <p className="mb-3 text-xs text-[#141414]/55">
-          Pruning of dormant fixed-line accounts.
+          When overdue accounts are counted as churned, and when dormant ones are pruned.
         </p>
+        <Field label="Churn suspended accounts" className="mb-4">
+          <p className="mb-2 text-[11px] leading-relaxed text-[#141414]/50">
+            Mark a <b>suspended</b> (overdue) account as <b>cancelled</b> once it has gone
+            this many days without paying — it stops being billed and its churn is counted.
+            Anyone who pays before then is restored automatically. Pick Never to decide by hand.
+          </p>
+          <ChipRow
+            options={[{ label: 'Never', value: null }, ...s.choices.churn_days.map((d) => ({ label: `${d} days`, value: d }))]}
+            selected={[s.churn_after_suspended_days]}
+            onPick={(v) => set({ churn_after_suspended_days: v as number | null })}
+          />
+        </Field>
         <Field label="Inactive prune">
           <p className="mb-2 text-[11px] leading-relaxed text-[#141414]/50">
             Auto-delete <b>disabled</b> accounts untouched for this many days. Accounts with

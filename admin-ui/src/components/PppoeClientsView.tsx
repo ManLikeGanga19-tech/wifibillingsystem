@@ -1,6 +1,6 @@
 import React, { useEffect, useState, type FormEvent } from 'react';
 import { Users, Plus, Ban, RotateCcw, Zap, Printer, X, Loader2, Wifi, WifiOff, AlertTriangle, Key, Copy, Eye, EyeOff, Trash2, RefreshCw, Upload, Download, Pencil, Save, Search, MoreHorizontal, ArrowRight } from 'lucide-react';
-import { api, ApiError, PppoeClient, PppoePlan, ApiRouter, AccessPoint, PppoeUsageSummary, CapacityWarning, PppoeImportRow, PppoeImportItem, PppoeCsvPreview, PppoeImportResult } from '../api/client';
+import { api, ApiError, PppoeClient, PppoePlan, ApiRouter, AccessPoint, PppoeUsageSummary, PppoeChurnSummary, CapacityWarning, PppoeImportRow, PppoeImportItem, PppoeCsvPreview, PppoeImportResult } from '../api/client';
 import {
   Badge, Btn, Field, FilterChips, inputCls, Panel, RefreshBtn, TableShell, tdCls, toast, useList, ViewHeader, fmtDateTime, fmtKsh,
 } from './ui';
@@ -65,6 +65,47 @@ function UsageSummaryTile() {
         <Stat label="Data this cycle" value={`${s.data_gb_this_cycle} GB`} />
         <Stat label="Over FUP" value={String(s.over_fup)} alert={s.over_fup > 0} />
         <Stat label="Clients" value={String(s.clients_total)} />
+      </div>
+    </Panel>
+  );
+}
+
+/** Subscriber movement: this month's churn at a glance, plus a compact net-change trend.
+ *  Answers "who didn't renew" and "what's my churn" — the questions a status column can't. */
+function ChurnSummaryTile() {
+  const [s, setS] = useState<PppoeChurnSummary | null>(null);
+  useEffect(() => {
+    api.pppoe.churnSummary(6).then(setS).catch(() => {});
+  }, []);
+  if (!s || s.months.length === 0) return null;
+  const served = s.standing.active + s.standing.suspended + s.standing.cancelled;
+  if (served === 0) return null; // nothing to say yet on a brand-new base
+
+  const now = s.months[s.months.length - 1];
+  const rate = now.churn_rate === null ? '—' : `${(now.churn_rate * 100).toFixed(1)}%`;
+  const net = now.net >= 0 ? `+${now.net}` : String(now.net);
+
+  return (
+    <Panel title="Fixed-line — churn (this month)">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <Stat label="Churn rate" value={rate} alert={now.churn_rate !== null && now.churn_rate >= 0.1} />
+        <Stat label="New" value={String(now.new + now.reactivated)} />
+        <Stat label="Churned" value={String(now.churned)} alert={now.churned > 0} />
+        <Stat label="Net" value={net} />
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[#141414]/50">
+        <span className="uppercase tracking-wide text-[#141414]/40">Net / month</span>
+        {s.months.map((m) => (
+          <span key={m.month} className="font-mono">
+            {m.month.slice(5)}{' '}
+            <b className={m.net < 0 ? 'text-[#B22222]' : m.net > 0 ? 'text-[#228B22]' : ''}>
+              {m.net >= 0 ? `+${m.net}` : m.net}
+            </b>
+          </span>
+        ))}
+        {s.standing.cancelled > 0 && (
+          <span className="ml-auto">{s.standing.cancelled} cancelled total</span>
+        )}
       </div>
     </Panel>
   );
@@ -163,11 +204,12 @@ function Stat({ label, value, alert = false }: { label: string; value: string; a
   );
 }
 
-const FILTERS = ['all', 'active', 'pending_install', 'suspended', 'disabled'] as const;
+const FILTERS = ['all', 'active', 'pending_install', 'suspended', 'cancelled', 'disabled'] as const;
 const STATUS_COLOR: Record<PppoeClient['status'], 'green' | 'amber' | 'red' | 'gray' | 'blue'> = {
   active: 'green',
   pending_install: 'blue',
   suspended: 'red',
+  cancelled: 'gray',
   disabled: 'gray',
 };
 const DELIVERY = [
@@ -320,6 +362,7 @@ export default function PppoeClientsView() {
       </ViewHeader>
 
       <UsageSummaryTile />
+      <ChurnSummaryTile />
 
       {showForm && (
         <Panel title="Set up a new client">
