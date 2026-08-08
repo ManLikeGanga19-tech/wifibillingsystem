@@ -512,11 +512,14 @@ class TestTheSuspendedNoticeBug:
         from .factories import RouterFactory
 
         router = RouterFactory(operator=op)
-        client = PppoeClientFactory(operator=op, plan__price=Decimal("2000"))
+        client = PppoeClientFactory(
+            operator=op, plan__price=Decimal("2000"), phone="0722998877"
+        )
 
+        # The account-number path now requires the customer's phone digits (pen-test F7).
         body = APIClient().get(
             f"/api/v1/pppoe/suspended-notice/?router={router.id}"
-            f"&account={client.account_number}"
+            f"&account={client.account_number}&phone=8877"
         ).json()
 
         assert body["paybill"] == "4123456"  # OURS, never the ISP's

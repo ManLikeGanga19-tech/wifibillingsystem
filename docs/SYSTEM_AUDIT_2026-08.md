@@ -64,6 +64,7 @@ Worth stating plainly, because the rest of the report depends on it.
 | F4 — hand-rolled tenant scoping | ✅ **Fixed** — `SubscriberViewSet` and `ApiTokenViewSet` now inherit the scoping mixin |
 | F5 — prod-only config untested | ✅ **Fixed** — `tests/test_prod_settings.py` asserts throttling, cookies, HSTS, proxy header, redirect-exemption and fail-loud secrets against the REAL prod module |
 | F6 — import preview username | ⚪ Won't fix — informational; the global check is required for correctness |
+| F7 — suspended-notice enumerable by account number | ✅ **Fixed** — the anonymous suspended-notice page (twin of F2) leaked customer name/plan/balance from an account number alone. Now gated by the same last-4-phone-digits check via a shared `_phone_last4_matches()` helper; pinned by `TestPublicAccountLookupIsNotEnumerable::test_suspended_notice_by_account_needs_the_phone_too`. **Found live during penetration testing — the code audit missed it.** |
 
 The findings below are the original write-up, kept as the record of what was found and why.
 

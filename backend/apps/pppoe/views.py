@@ -456,7 +456,18 @@ class SuspendedNoticeView(PublicAPIView):
         client = None
         account = (request.query_params.get("account") or "").strip().upper()
         if account:
-            client = Client.objects.filter(operator=operator, account_number=account).first()
+            candidate = Client.objects.filter(
+                operator=operator, account_number=account
+            ).first()
+            # SAME GATE AS account_lookup (pen-test F7): an account number TYPED by anyone is
+            # not enough to reveal a customer's name and balance — it must be paired with
+            # their phone digits. Without a match we fall through to the generic pay page.
+            # (The source-IP path below needs no such gate: the customer is physically on the
+            # cut-off connection, which is self-authenticating.)
+            if candidate and _phone_last4_matches(
+                candidate, request.query_params.get("phone", "")
+            ):
+                client = candidate
         # Fall back: identify by the client's current PPPoE IP on the router
         if client is None and router is not None:
             src_ip = request.META.get("HTTP_X_FORWARDED_FOR", "").split(",")[0].strip()
@@ -506,6 +517,19 @@ class SuspendedNoticeView(PublicAPIView):
         return Response(body)
 
 
+def _phone_last4_matches(client, raw_phone: str) -> bool:
+    """True only if the supplied phone's last 4 digits match the client's on file.
+
+    EVERY public path that reveals a customer's name/balance BY ACCOUNT NUMBER must gate on
+    this. The account number is short and structured, so on its own it lets anyone enumerate
+    an ISP's base; the phone digits are the thing only the real customer has. Shared between
+    account_lookup and SuspendedNoticeView so the two can never drift apart again — which is
+    exactly how the second one shipped ungated (pen-test F7)."""
+    supplied = "".join(ch for ch in (raw_phone or "") if ch.isdigit())[-4:]
+    on_file = "".join(ch for ch in (client.phone or "") if ch.isdigit())[-4:]
+    return bool(supplied) and bool(on_file) and secrets.compare_digest(on_file, supplied)
+
+
 class AccountLookupThrottle(AnonRateThrottle):
     """Tight, per-IP. This endpoint is anonymous and answers questions about a named
     customer, so it is the natural place to enumerate an ISP's whole base."""
@@ -541,10 +565,6 @@ def account_lookup(request):
         router = Router.objects.filter(pk=int(router_id), is_active=True).first()
         operator = router.operator if router else None
     account = (request.query_params.get("account") or "").strip().upper()
-    phone_digits = "".join(
-        ch for ch in (request.query_params.get("phone") or "") if ch.isdigit()
-    )[-4:]
-
     client = (
         Client.objects.filter(operator=operator, account_number=account).first()
         if operator and account
@@ -559,10 +579,7 @@ def account_lookup(request):
         },
         status=status.HTTP_404_NOT_FOUND,
     )
-    if client is None or not phone_digits:
-        return not_found
-    on_file = "".join(ch for ch in (client.phone or "") if ch.isdigit())[-4:]
-    if not on_file or not secrets.compare_digest(on_file, phone_digits):
+    if client is None or not _phone_last4_matches(client, request.query_params.get("phone", "")):
         return not_found
 
     return Response(
