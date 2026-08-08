@@ -31,7 +31,7 @@ from .tenant_views import (
     ResetTenantMfaView,
     TenantSignupView,
 )
-from .views import DashboardStatsView, NavCountsView
+from .views import DashboardStatsView, LiveConnectionsView, NavCountsView
 
 router = SimpleRouter()
 router.register("platform/tenants", PlatformTenantViewSet, basename="platform-tenant")
@@ -44,6 +44,7 @@ urlpatterns = [
     # Tenant-scoped (require an acting ISP)
     path("stats/", DashboardStatsView.as_view(), name="dashboard-stats"),
     path("nav/", NavCountsView.as_view(), name="nav-counts"),
+    path("live-connections/", LiveConnectionsView.as_view(), name="live-connections"),
     path("operator/settings/", OperatorSettingsView.as_view(), name="operator-settings"),
     # Branding: how the ISP's business looks to its customers.
     path("operator/branding/", BrandingView.as_view(), name="operator-branding"),

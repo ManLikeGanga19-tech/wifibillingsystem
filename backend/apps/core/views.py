@@ -3,12 +3,18 @@ from datetime import timedelta
 from django.db.models import Count, Q, Sum
 from django.db.models.functions import ExtractHour, TruncDate
 from django.utils import timezone
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.models import Subscriber
+from apps.core.live import (
+    SERVICE_TYPES,
+    live_connection_counts,
+    live_connections,
+    live_connections_total,
+)
 from apps.core.permissions import RequireTenant, TenantIsOperational
 from apps.core.schema import OBJECT_RESPONSE
 from apps.core.tenancy import acting_tenant
@@ -35,9 +41,9 @@ class NavCountsView(APIView):
         op = acting_tenant(request)
         return Response(
             {
-                "active_users": _scoped(
-                    Session.objects.filter(status=Session.Status.ACTIVE), op
-                ).count(),
+                # Everyone online now, across ALL service types (hotspot + PPPoE + future
+                # static/dynamic/Ruijie), not just hotspot sessions.
+                "active_users": live_connections_total(op),
                 "users": _scoped(Subscriber.objects.all(), op).count(),
                 "tickets": _scoped(
                     Ticket.objects.filter(status__in=Ticket.OPEN_STATUSES), op
@@ -99,6 +105,7 @@ class DashboardStatsView(APIView):
         paying_users_month = (
             paid_month.exclude(subscriber=None).values("subscriber").distinct().count()
         )
+        live_by_service = live_connection_counts(op)
 
         kpis = {
             "revenue_today": paid.filter(callback_received_at__gte=today).aggregate(
@@ -124,9 +131,10 @@ class DashboardStatsView(APIView):
                 if finished_7d_count
                 else None
             ),
-            "active_sessions": _scoped(
-                Session.objects.filter(status=Session.Status.ACTIVE), op
-            ).count(),
+            # Online now across ALL service types, with a per-service breakdown so the tile
+            # can show "142 online (H 90 · P 52)". Extends automatically as types are added.
+            "active_sessions": sum(live_by_service.values()),
+            "active_by_service": live_by_service,
             "sessions_expiring_1h": _scoped(
                 Session.objects.filter(
                     status=Session.Status.ACTIVE, expires_at__lte=now + timedelta(hours=1)
@@ -212,5 +220,36 @@ class DashboardStatsView(APIView):
                 "sessions_daily": sessions_daily,
                 "routers": routers,
                 "generated_at": now.isoformat(),
+            }
+        )
+
+
+class LiveConnectionsView(APIView):
+    """Everyone online right now, across every service type — the Active Users page.
+
+    One normalised list so hotspot and PPPoE (and later static/dynamic/Ruijie) sit in the
+    same table. `?type=hotspot|pppoe|all` narrows it; the per-service counts come along so
+    the UI can label the filter chips without a second call."""
+
+    permission_classes = [IsAdminUser, RequireTenant, TenantIsOperational]
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                "type", str, description="Service type filter: all (default), hotspot, pppoe."
+            )
+        ],
+        responses=OBJECT_RESPONSE,
+        summary="Live connections across all service types (Active Users)",
+    )
+    def get(self, request):
+        op = acting_tenant(request)
+        service_type = request.query_params.get("type", "all")
+        if service_type not in ("all", *SERVICE_TYPES):
+            service_type = "all"
+        return Response(
+            {
+                "counts": live_connection_counts(op),
+                "results": live_connections(op, service_type=service_type),
             }
         )

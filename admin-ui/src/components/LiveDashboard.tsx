@@ -132,7 +132,16 @@ export default function LiveDashboard({ onNavigate }: { onNavigate: (tab: string
           accent
           hidden={isPrivate}
         />
-        <Tile label="Active Sessions" value={String(kpis.active_sessions)} sub={`${kpis.sessions_expiring_1h} expiring < 1h`} />
+        <Tile
+          label="Online Now"
+          value={String(kpis.active_sessions)}
+          sub={
+            Object.entries<number>(kpis.active_by_service ?? {})
+              .filter(([, v]) => v > 0)
+              .map(([k, v]) => `${v} ${k}`)
+              .join(' · ') || `${kpis.sessions_expiring_1h} expiring < 1h`
+          }
+        />
         <Tile
           label="Success Rate (7d)"
           value={kpis.success_rate_7d !== null ? `${kpis.success_rate_7d}%` : '—'}
