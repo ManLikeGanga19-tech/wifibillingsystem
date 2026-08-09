@@ -52,13 +52,18 @@ def has_live_grant(user, operator) -> bool:
     ).exists()
 
 
+# "demo" is a RESERVED slug (nobody may register it at signup) but it IS a real tenant —
+# the read-only showcase — so, unlike api/admin/docs, it must still resolve from its host.
+_HOST_RESERVED = Operator.RESERVED_SLUGS - {"demo"}
+
+
 def _slug_from_host(host: str) -> str | None:
     host = host.split(":")[0].lower()
     labels = host.split(".")
     if len(labels) < 2:
         return None
     candidate = labels[0]
-    if candidate in Operator.RESERVED_SLUGS or candidate in ("localhost", "127"):
+    if candidate in _HOST_RESERVED or candidate in ("localhost", "127"):
         return None
     return candidate
 
@@ -99,6 +104,15 @@ def acting_tenant(request) -> Operator | None:
     Callers that serve ISP data MUST treat None as a hard error (see
     TenantScopedMixin / RequireTenant), never as 'unfiltered'.
     """
+    # The demo host is ALWAYS the demo tenant, whoever is (or isn't) logged in. Auth cookies
+    # are scoped to .wifios.co.ke, so your own session rides along to demo.wifios.co.ke —
+    # without this pin you'd see YOUR ISP on the demo subdomain. The demo is read-only, so
+    # showing it to an authenticated real user is harmless; they act as themselves again the
+    # moment they leave the demo host.
+    host_tenant = getattr(request, "tenant", None)
+    if host_tenant is not None and host_tenant.is_demo:
+        return host_tenant
+
     user = getattr(request, "user", None)
 
     if user is not None and user.is_authenticated:

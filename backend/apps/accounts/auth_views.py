@@ -168,6 +168,40 @@ class CookieLoginView(APIView):
         )
 
 
+@extend_schema(request=None, responses={200: DetailSerializer, 404: DetailSerializer},
+               summary="One-click entry to the read-only demo tenant")
+class DemoLoginView(APIView):
+    """Public front door to the DEMO tenant.
+
+    Only works on a demo host (request.tenant.is_demo) — the console calls it when a visitor
+    arrives with no session, so a first-timer lands straight in the demo with nothing to
+    type. Everything the session can do is read-only, so it's safe to hand out freely. On
+    any non-demo host it 404s, and the normal login screen is shown instead."""
+
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def post(self, request):
+        from .models import User
+
+        tenant = getattr(request, "tenant", None)
+        if tenant is None or not tenant.is_demo:
+            return Response({"detail": "No demo here."}, status=status.HTTP_404_NOT_FOUND)
+        user = (
+            User.objects.filter(operator=tenant, is_staff=True, is_active=True)
+            .order_by("id")
+            .first()
+        )
+        if user is None:
+            return Response(
+                {"detail": "Demo is not seeded yet."}, status=status.HTTP_404_NOT_FOUND
+            )
+        refresh = RefreshToken.for_user(user)
+        csrf_token = get_token(request)
+        resp = Response({"detail": "Welcome to the demo.", "csrf_token": csrf_token})
+        return set_auth_cookies(resp, access=str(refresh.access_token), refresh=str(refresh))
+
+
 @extend_schema(request=None, responses={200: DetailSerializer, 401: DetailSerializer},
                summary="Silently renew the access cookie")
 class CookieRefreshView(APIView):
