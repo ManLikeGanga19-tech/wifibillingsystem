@@ -42,9 +42,21 @@ class RequireTenant(BasePermission):
         "No ISP selected. Platform staff must choose a tenant "
         "(X-Act-As-Tenant header) to view ISP data."
     )
+    #: Shown when a read-only demo tenant attempts a write. The console renders this as a
+    #: gentle notice, not an error.
+    DEMO_MESSAGE = "This is a read-only demo of WIFI.OS — changes are disabled here."
 
     def has_permission(self, request, view):
-        return acting_tenant(request) is not None
+        tenant = acting_tenant(request)
+        if tenant is None:
+            return False
+        # The demo tenant is a fully-seeded showcase: everyone may LOOK, nobody may write.
+        # This is the single chokepoint every ISP write already passes through, so one guard
+        # here covers CRUD, money actions, imports — everything — without per-view changes.
+        if getattr(tenant, "is_demo", False) and request.method not in SAFE_METHODS:
+            self.message = self.DEMO_MESSAGE
+            return False
+        return True
 
 
 class TenantIsOperational(BasePermission):

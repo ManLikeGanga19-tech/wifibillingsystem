@@ -521,6 +521,8 @@ export interface MeOperator {
   slug: string;
   status: 'pending' | 'active' | 'suspended';
   is_platform_owned: boolean;
+  /** Read-only showcase tenant: the console shows a demo banner and the API refuses writes. */
+  is_demo: boolean;
   /** THE MONEY GATE. False => this ISP cannot collect, provision or withdraw. */
   can_transact: boolean;
   /** Why not, and what to do about it. Empty when they're live. */

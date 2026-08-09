@@ -34,6 +34,9 @@ class MeView(APIView):
                 "slug": op.slug,
                 "status": op.status,
                 "is_platform_owned": op.is_platform_owned,
+                # Read-only showcase tenant: the console shows a banner and softens write
+                # affordances; the API refuses writes regardless (see RequireTenant).
+                "is_demo": op.is_demo,
                 # THE MONEY GATE, surfaced. The console uses this to explain itself:
                 # a pending ISP can build everything but cannot take a shilling, and
                 # they must be told exactly why and what to do about it — otherwise
