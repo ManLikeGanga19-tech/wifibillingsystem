@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { Fragment, useEffect, useState, type FormEvent } from 'react';
 import { Radio, Plus, RadioTower } from 'lucide-react';
 import { api, Tower, AccessPoint, ApiRouter } from '../api/client';
 import { Badge, Btn, Field, inputCls, Panel, RefreshBtn, TableShell, tdCls, toast, useList, ViewHeader } from './ui';
@@ -99,30 +99,57 @@ export default function NetworkView() {
 
       <TableShell
         headers={['Tower / Sector', 'Mode', 'Band', 'Clients', 'Capacity', 'Utilisation', 'Status']}
-        loading={aps.rows === null}
-        error={aps.error}
-        empty="No access points yet — add a tower then its sectors."
+        loading={towers.rows === null || aps.rows === null}
+        error={towers.error || aps.error}
+        empty="No towers yet — add one to get started, then its sectors."
       >
-        {(aps.rows ?? []).map((a: AccessPoint) => (
-          <tr key={a.id} className="hover:bg-[#f0efec]/40 transition">
-            <td className={`${tdCls} font-bold`}>
-              {a.tower_name} <span className="text-[#141414]/50">/</span> {a.name}
-            </td>
-            <td className={tdCls}><Badge color="blue">{a.mode}</Badge></td>
-            <td className={`${tdCls} font-mono`}>{a.band || '—'}</td>
-            <td className={`${tdCls} font-mono text-center`}>{a.client_count}</td>
-            <td className={`${tdCls} font-mono text-center`}>{a.capacity || '—'}</td>
-            <td className={tdCls}>
-              {a.utilization === null ? <span className="text-[#141414]/40">—</span> : (
-                <span className="flex items-center gap-2">
-                  <span className="w-16 h-2 bg-[#141414]/10"><span className="block h-full" style={{ width: `${Math.min(100, a.utilization)}%`, background: a.utilization >= 90 ? '#B22222' : a.utilization >= 70 ? '#B26B00' : '#228B22' }} /></span>
-                  <span className="font-mono text-[11px]">{a.utilization}%</span>
-                </span>
+        {/* Grouped by tower, so a tower with no sectors still shows up the moment you add
+            it — the table is driven by towers, not only access points. */}
+        {(towers.rows ?? []).map((t: Tower) => {
+          const sectors = (aps.rows ?? []).filter((a: AccessPoint) => a.tower === t.id);
+          return (
+            <Fragment key={`tower-${t.id}`}>
+              <tr className="bg-[#f0efec]/60">
+                <td className={`${tdCls} font-bold`} colSpan={7}>
+                  <span className="inline-flex items-center gap-2">
+                    <RadioTower className="h-3.5 w-3.5" /> {t.name}
+                    <span className="font-mono text-[11px] text-[#141414]/50">
+                      {sectors.length} sector{sectors.length === 1 ? '' : 's'}
+                    </span>
+                    {t.notes && <span className="text-[11px] text-[#141414]/45">— {t.notes}</span>}
+                  </span>
+                </td>
+              </tr>
+              {sectors.length === 0 && (
+                <tr>
+                  <td className={`${tdCls} italic text-[#141414]/40`} colSpan={7}>
+                    No sectors yet — add an access point to this tower.
+                  </td>
+                </tr>
               )}
-            </td>
-            <td className={tdCls}><Badge color={a.utilization !== null && a.utilization >= 90 ? 'red' : 'green'}>{a.utilization !== null && a.utilization >= 90 ? 'full' : 'ok'}</Badge></td>
-          </tr>
-        ))}
+              {sectors.map((a: AccessPoint) => (
+                <tr key={a.id} className="hover:bg-[#f0efec]/40 transition">
+                  <td className={tdCls}>
+                    <span className="pl-5 text-[#141414]/50">/</span> {a.name}
+                  </td>
+                  <td className={tdCls}><Badge color="blue">{a.mode}</Badge></td>
+                  <td className={`${tdCls} font-mono`}>{a.band || '—'}</td>
+                  <td className={`${tdCls} font-mono text-center`}>{a.client_count}</td>
+                  <td className={`${tdCls} font-mono text-center`}>{a.capacity || '—'}</td>
+                  <td className={tdCls}>
+                    {a.utilization === null ? <span className="text-[#141414]/40">—</span> : (
+                      <span className="flex items-center gap-2">
+                        <span className="w-16 h-2 bg-[#141414]/10"><span className="block h-full" style={{ width: `${Math.min(100, a.utilization)}%`, background: a.utilization >= 90 ? '#B22222' : a.utilization >= 70 ? '#B26B00' : '#228B22' }} /></span>
+                        <span className="font-mono text-[11px]">{a.utilization}%</span>
+                      </span>
+                    )}
+                  </td>
+                  <td className={tdCls}><Badge color={a.utilization !== null && a.utilization >= 90 ? 'red' : 'green'}>{a.utilization !== null && a.utilization >= 90 ? 'full' : 'ok'}</Badge></td>
+                </tr>
+              ))}
+            </Fragment>
+          );
+        })}
       </TableShell>
       <p className="text-[11px] font-mono text-[#141414]/50">{(towers.rows ?? []).length} towers · {(aps.rows ?? []).length} access points</p>
     </div>
