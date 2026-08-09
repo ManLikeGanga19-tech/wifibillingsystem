@@ -100,6 +100,11 @@ class Operator(TimeStampedModel):
         default=False,
         help_text="Platform's own ISP: exempt from all commission and platform fees.",
     )
+    is_demo = models.BooleanField(
+        default=False,
+        help_text="Read-only showcase tenant: fully seeded, but the API refuses every "
+        "write so anyone can explore WIFI.OS without changing data.",
+    )
 
     # ---- SETTLEMENT: where WE pay THEM ---------------------------------------
     # This is an OUTBOX, not a collection account. It is also our KYC bar: to hold a

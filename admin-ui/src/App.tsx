@@ -559,6 +559,17 @@ export default function App() {
           </div>
         )}
 
+        {/* Read-only demo: every screen is real seeded data, but the API refuses writes.
+            Say so up front so a refused action reads as "it's a demo", not "it's broken". */}
+        {acting?.is_demo && (
+          <div className="bg-[#228B22] text-white px-4 py-1.5 text-[11px] font-mono flex items-center gap-2 shrink-0">
+            <Eye className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">
+              You're exploring a live <b>WIFI.OS demo</b> — browse everything; changes are disabled.
+            </span>
+          </div>
+        )}
+
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 min-h-0">
           <div className="max-w-7xl mx-auto space-y-6">
             {/* Pinned until they can take payments. Without it, every blocked
