@@ -150,6 +150,22 @@ admin.wifios.co.ke {
 }
 
 # ---------------------------------------------------------------------------
+# The usage documentation — docs.wifios.co.ke. A static Astro/Starlight build with no
+# API and no backend. This EXPLICIT host must sit above the *.wifios.co.ke wildcard so
+# "docs" is served here, not treated as an ISP slug ("docs" is a reserved slug anyway).
+# Starlight hydrates a theme toggle + search via small inline scripts, so script-src
+# needs 'unsafe-inline'; the site renders no user content, so there is no injection point.
+# ---------------------------------------------------------------------------
+docs.wifios.co.ke {
+	import security_headers
+	header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'"
+	handle {
+		reverse_proxy docs:80
+	}
+	encode zstd gzip
+}
+
+# ---------------------------------------------------------------------------
 # Every ISP: <slug>.wifios.co.ke
 #
 # Django resolves the tenant from the Host header (core.tenancy._slug_from_host), so

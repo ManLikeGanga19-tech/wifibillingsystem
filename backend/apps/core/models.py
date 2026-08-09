@@ -210,8 +210,8 @@ class Operator(TimeStampedModel):
 
     RESERVED_SLUGS = {
         "www", "api", "admin", "portal", "app", "mail", "platform", "billing",
-        "status", "docs", "static", "media", "signup", "signin", "help", "support",
-        "blog", "pricing", "about",
+        "status", "docs", "demo", "static", "media", "signup", "signin", "help",
+        "support", "blog", "pricing", "about",
     }
 
     class Meta:
