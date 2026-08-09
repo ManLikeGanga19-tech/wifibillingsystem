@@ -100,7 +100,7 @@ jobs:
       # One broken frontend must not hide a second broken frontend.
       fail-fast: false
       matrix:
-        app: [admin-ui, super-admin, portal, marketing]
+        app: [admin-ui, super-admin, portal, marketing, docs-site]
     defaults:
       run:
         working-directory: ${{ matrix.app }}
@@ -151,7 +151,7 @@ jobs:
       - name: JS dependencies (npm audit)
         continue-on-error: true
         run: |
-          for app in admin-ui super-admin portal marketing; do
+          for app in admin-ui super-admin portal marketing docs-site; do
             echo "--- $app"
             (cd "$app" && npm audit --audit-level=high --omit=dev) || true
           done
@@ -178,7 +178,7 @@ jobs:
 
       - name: Build the frontend images
         run: |
-          for app in admin-ui super-admin portal marketing; do
+          for app in admin-ui super-admin portal marketing docs-site; do
             docker build -f deploy/Dockerfile.static -t "wifios/$app:ci" "$app"
           done
 
@@ -224,7 +224,7 @@ jobs:
           rsync -az -e "ssh -i ~/.ssh/deploy_key" \
             --exclude node_modules --exclude .git --exclude dist \
             --exclude __pycache__ --exclude '*.pyc' --exclude .pytest_cache \
-            backend admin-ui super-admin portal marketing deploy \
+            backend admin-ui super-admin portal marketing docs-site deploy \
             "deploy@${{ secrets.VPS_HOST }}:~/wifios/"
 
       # Rebuild, run migrations (the api container migrates on boot), and roll. Caddy is

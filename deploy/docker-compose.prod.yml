@@ -62,7 +62,7 @@ services:
     environment:
       ACME_EMAIL: ${ACME_EMAIL}
       CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN}
-    depends_on: [api, admin-ui, super-admin, portal, marketing]
+    depends_on: [api, admin-ui, super-admin, portal, marketing, docs]
     security_opt:
       - no-new-privileges:true
 
@@ -164,6 +164,14 @@ services:
     image: ${IMAGE_MARKETING:-wifios/marketing:latest}
     build:
       context: ../marketing
+      dockerfile: ../deploy/Dockerfile.static
+    restart: unless-stopped
+    security_opt: [no-new-privileges:true]
+
+  docs:
+    image: ${IMAGE_DOCS:-wifios/docs:latest}
+    build:
+      context: ../docs-site
       dockerfile: ../deploy/Dockerfile.static
     restart: unless-stopped
     security_opt: [no-new-privileges:true]

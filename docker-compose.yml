@@ -156,9 +156,22 @@ services:
       - "4900:4900"
     depends_on: [api]
 
+  # The usage documentation site (docs.wifios.co.ke). Static Astro/Starlight — no API,
+  # no backend dependency.
+  docs:
+    image: node:22-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm run dev -- --host"
+    volumes:
+      - ./docs-site:/app
+      - docs_modules:/app/node_modules
+    ports:
+      - "4700:4700"
+
 volumes:
   pgdata:
   admin_ui_modules:
   portal_modules:
   super_admin_modules:
   marketing_modules:
+  docs_modules:
