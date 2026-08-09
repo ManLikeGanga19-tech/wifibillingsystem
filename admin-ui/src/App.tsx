@@ -26,7 +26,7 @@ import {
 } from 'lucide-react';
 
 import { BandwidthProfile, Subscriber, OutboundCampaign } from './types';
-import { api, ApiPlan, ApiTenant, keepSessionFresh, logout, Me, NavCounts, setOnSessionExpired, setOnConnectionChange } from './api/client';
+import { api, ApiPlan, ApiTenant, demoLogin, keepSessionFresh, logout, Me, NavCounts, setOnSessionExpired, setOnConnectionChange } from './api/client';
 import { planToProfile, profileToPlan, campaignToUi, subscriberToUi } from './api/mappers';
 import { useHashRoute } from './utils/useHashRoute';
 import { toast, ToastHost } from './components/ui';
@@ -223,7 +223,16 @@ export default function App() {
   useEffect(() => {
     setChecking(true);
     loadMe()
-      .catch(() => setMe(null)) // not signed in -> the login gate
+      .catch(async () => {
+        // No session. On a demo host the server hands out a read-only demo session, so a
+        // first-time visitor lands straight in the showcase instead of a login wall. On any
+        // normal host demoLogin() is refused and we fall through to the login gate.
+        if (await demoLogin()) {
+          await loadMe().catch(() => setMe(null));
+        } else {
+          setMe(null);
+        }
+      })
       .finally(() => setChecking(false));
   }, [loadMe]);
 

@@ -10,7 +10,7 @@ from apps.accounts.models import Role
 from apps.core.models import Operator
 from apps.pppoe.models import Client
 
-from .factories import OperatorFactory, UserFactory
+from .factories import OperatorFactory, ServicePlanFactory, UserFactory
 
 pytestmark = pytest.mark.django_db
 
@@ -56,6 +56,60 @@ class TestDemoIsReadOnly:
             format="json",
         )
         assert resp.status_code == 201
+
+
+class TestDemoHostPinsTheDemoTenant:
+    """Auth cookies are scoped to .wifios.co.ke, so a real user's session rides along to
+    demo.wifios.co.ke. The demo host must show the DEMO tenant regardless of who's logged
+    in — otherwise you'd see your own ISP on the demo subdomain."""
+
+    def test_other_users_session_still_sees_the_demo_on_the_demo_host(self):
+        demo = OperatorFactory(slug="demo", is_demo=True)
+        ServicePlanFactory(operator=demo, name="Demo Bronze")
+        mine = OperatorFactory(slug="homelink", is_demo=False)
+        ServicePlanFactory(operator=mine, name="My Secret Plan")
+
+        c = APIClient()
+        c.force_authenticate(
+            user=UserFactory(operator=mine, is_staff=True, role=Role.TENANT_OWNER)
+        )
+        # Same authenticated user, but the request arrives on the demo host.
+        resp = c.get("/api/v1/pppoe/plans/", HTTP_HOST="demo.wifios.co.ke")
+        names = [p["name"] for p in resp.json()["results"]]
+        assert "Demo Bronze" in names
+        assert "My Secret Plan" not in names
+
+    def test_demo_host_is_read_only_even_for_a_real_user(self):
+        OperatorFactory(slug="demo", is_demo=True)
+        mine = OperatorFactory(slug="homelink", is_demo=False)
+        c = APIClient()
+        c.force_authenticate(
+            user=UserFactory(operator=mine, is_staff=True, role=Role.TENANT_OWNER)
+        )
+        resp = c.post(
+            "/api/v1/pppoe/plans/",
+            {"name": "X", "price": "1000.00", "download_kbps": 8192,
+             "upload_kbps": 4096, "mikrotik_profile": "x"},
+            format="json", HTTP_HOST="demo.wifios.co.ke",
+        )
+        assert resp.status_code == 403
+
+
+class TestDemoLogin:
+    def test_demo_login_signs_you_in_on_the_demo_host(self):
+        demo = OperatorFactory(slug="demo", is_demo=True)
+        UserFactory(operator=demo, is_staff=True, role=Role.TENANT_OWNER)
+        c = APIClient()
+        resp = c.post("/api/v1/auth/demo/", HTTP_HOST="demo.wifios.co.ke")
+        assert resp.status_code == 200
+        # the session cookie is set, so a follow-up /me works with no credentials
+        assert "wifios_access" in resp.cookies
+
+    def test_demo_login_is_refused_on_a_normal_host(self):
+        OperatorFactory(slug="homelink", is_demo=False)
+        c = APIClient()
+        resp = c.post("/api/v1/auth/demo/", HTTP_HOST="homelink.wifios.co.ke")
+        assert resp.status_code == 404
 
 
 class TestSeedDemo:

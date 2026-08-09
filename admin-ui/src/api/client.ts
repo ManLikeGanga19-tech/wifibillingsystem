@@ -59,6 +59,20 @@ export async function logout(): Promise<void> {
   await fetch(`${BASE}/api/v1/auth/logout/`, { ...withCookies, method: 'POST' }).catch(() => {});
 }
 
+/**
+ * One-click entry to the read-only demo. Succeeds ONLY on a demo host — the server decides,
+ * so we can try it unconditionally when there's no session and fall back to the login screen
+ * on any normal host. Returns true if a demo session was established.
+ */
+export async function demoLogin(): Promise<boolean> {
+  try {
+    const resp = await fetch(`${BASE}/api/v1/auth/demo/`, { ...withCookies, method: 'POST' });
+    return resp.ok;
+  } catch {
+    return false;
+  }
+}
+
 // Single-flight: when the access cookie expires, a dashboard fires several requests
 // at once and they ALL get 401. Without this, each one would POST its own refresh —
 // a thundering herd, and with a rotating refresh token, a race that logs you out.
