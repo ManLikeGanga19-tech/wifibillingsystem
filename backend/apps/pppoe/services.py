@@ -90,10 +90,17 @@ ACCOUNT_NUMBER_ATTEMPTS = 5
 
 
 def create_client(*, operator, plan: ServicePlan, router, created_by=None, **fields) -> Client:
-    """Create a broadband client with a globally-unique account number and PPPoE
-    credentials. Provisioning to the router happens separately (provision_client)."""
-    username = fields.pop("pppoe_username", "") or f"{operator.slug}-{secrets.token_hex(3)}"
-    password = fields.pop("pppoe_password", "") or _pppoe_password()
+    """Create a broadband client with a globally-unique account number. PPPoE clients get a
+    login; static clients get none (their CPE holds the IP). Provisioning to the router
+    happens separately (provision_client)."""
+    supplied_user = fields.pop("pppoe_username", "")
+    supplied_pass = fields.pop("pppoe_password", "")
+    if fields.get("connection_type") == Client.Connection.STATIC:
+        # No login for a static line — NULL username so it never collides on the unique index.
+        username, password = None, ""
+    else:
+        username = supplied_user or f"{operator.slug}-{secrets.token_hex(3)}"
+        password = supplied_pass or _pppoe_password()
 
     for attempt in range(ACCOUNT_NUMBER_ATTEMPTS):
         try:
@@ -110,9 +117,10 @@ def create_client(*, operator, plan: ServicePlan, router, created_by=None, **fie
                 )
             break
         except IntegrityError:
-            # Lost the race for that number. Any OTHER integrity error (a duplicate PPPoE
-            # username, say) is a real fault and must not be retried into oblivion.
-            if not Client.objects.filter(pppoe_username=username).exists():
+            # Lost the race for the account number. Any OTHER integrity error (a duplicate
+            # PPPoE username, say) is a real fault and must not be retried into oblivion. A
+            # static client has no username, so only the account number can collide.
+            if username is None or not Client.objects.filter(pppoe_username=username).exists():
                 if attempt == ACCOUNT_NUMBER_ATTEMPTS - 1:
                     raise
                 continue
@@ -122,19 +130,49 @@ def create_client(*, operator, plan: ServicePlan, router, created_by=None, **fie
     return client
 
 
-def provision_client(client: Client) -> None:
-    """Push the plan profile + client secret to the router. Called after install."""
+# The service layer is connection-agnostic: PPPoE and static-IP clients share ALL the billing
+# (invoices, suspend sweep, churn) and differ ONLY in the router verbs. These three helpers
+# are the single place that dispatch — everything else in this module is identical for both.
+def _push_service(adapter, client: Client) -> None:
+    """Put the client's SERVICE on the router: a queue for static, a profile+secret for PPPoE."""
+    if client.is_static:
+        adapter.ensure_static_queue(client)
+        adapter.set_static_enabled(client, True)
+    else:
+        adapter.ensure_pppoe_profile(client.plan)
+        adapter.create_pppoe_user(client)
+
+
+def _set_service_enabled(client: Client, enabled: bool) -> None:
     adapter = get_adapter(client.router)
-    # Router-wide TCP-MSS clamp: a PPPoE link's MTU (~1480) is below Ethernet's 1500, and the
-    # many sites that break Path-MTU Discovery then hang or half-load for the customer. One
-    # idempotent rule per router fixes it for every client on it — for EVERY tenant's routers,
-    # not just ours. Best-effort: never fail a provisioning the ISP just asked for.
-    try:
-        adapter.ensure_pppoe_mss_clamp()
-    except Exception:
-        logger.exception("Could not ensure the MSS clamp on router %s", client.router_id)
-    adapter.ensure_pppoe_profile(client.plan)
-    adapter.create_pppoe_user(client)
+    if client.is_static:
+        adapter.set_static_enabled(client, enabled)
+    else:
+        adapter.set_pppoe_enabled(client, enabled)
+
+
+def _remove_service(client: Client) -> None:
+    adapter = get_adapter(client.router)
+    if client.is_static:
+        adapter.remove_static_queue(client)
+    else:
+        adapter.remove_pppoe_user(client)
+
+
+def provision_client(client: Client) -> None:
+    """Push the service to the router (queue for static, profile+secret for PPPoE). Called
+    after install."""
+    adapter = get_adapter(client.router)
+    if not client.is_static:
+        # Router-wide TCP-MSS clamp: a PPPoE link's MTU (~1480) is below Ethernet's 1500, and
+        # the many sites that break Path-MTU Discovery then hang or half-load. One idempotent
+        # rule per router fixes it for every PPPoE client on it. Static lines run at full MTU,
+        # so they don't need it. Best-effort: never fail a provisioning the ISP just asked for.
+        try:
+            adapter.ensure_pppoe_mss_clamp()
+        except Exception:
+            logger.exception("Could not ensure the MSS clamp on router %s", client.router_id)
+    _push_service(adapter, client)
     # PENDING_INSTALL -> ACTIVE is a first activation; CANCELLED -> ACTIVE is a win-back of a
     # churned customer (re-provisioning revives them). Both are counted, with distinct events.
     first_activation = client.status == Client.Status.PENDING_INSTALL
@@ -167,7 +205,7 @@ def provision_client(client: Client) -> None:
 def suspend_client(client: Client, *, reason: str = "overdue") -> None:
     if client.status not in Client.ACTIVE_STATUSES:
         return
-    get_adapter(client.router).set_pppoe_enabled(client, False)
+    _set_service_enabled(client, False)
     _record_transition(
         client,
         event=ClientLifecycleEvent.Event.SUSPENDED,
@@ -188,7 +226,7 @@ def suspend_client(client: Client, *, reason: str = "overdue") -> None:
 def restore_client(client: Client) -> None:
     if client.status != Client.Status.SUSPENDED:
         return
-    get_adapter(client.router).set_pppoe_enabled(client, True)
+    _set_service_enabled(client, True)
     _record_transition(
         client,
         event=ClientLifecycleEvent.Event.RESTORED,
@@ -207,9 +245,9 @@ def cancel_client(client: Client, *, reason: str = "churned", actor=None) -> Non
     if client.status != Client.Status.SUSPENDED:
         return
     try:
-        get_adapter(client.router).remove_pppoe_user(client)
+        _remove_service(client)
     except Exception:
-        logger.exception("Could not remove the secret for churned client %s", client.pk)
+        logger.exception("Could not remove the service for churned client %s", client.pk)
     _record_transition(
         client,
         event=ClientLifecycleEvent.Event.CANCELLED,
@@ -270,28 +308,30 @@ def update_client(client: Client, *, changes: dict, actor=None) -> Client:
         return client
 
     new_adapter = get_adapter(client.router)
-    new_adapter.ensure_pppoe_profile(client.plan)
-    new_adapter.create_pppoe_user(client)  # idempotent upsert on the (possibly new) router
+    # Re-push the service onto the (possibly new) router. _push_service upserts idempotently
+    # — a queue for static, a profile+secret for PPPoE.
+    _push_service(new_adapter, client)
     if client.status == Client.Status.SUSPENDED:
-        # create_pppoe_user writes the ACTIVE plan profile; a suspended client must stay
-        # walled off, so put them back on the suspended profile.
-        new_adapter.set_pppoe_enabled(client, False)
+        # _push_service enables the ACTIVE service; a suspended client must stay walled off.
+        _set_service_enabled(client, False)
 
     if router_changed:
-        # Only now that the new router holds the secret is it safe to drop the old one —
+        # Only now that the NEW router holds the service is it safe to drop the old one —
         # and a failure there must not fail the edit: the client is already served.
         try:
-            get_adapter(old_router).remove_pppoe_user(client)
+            if client.is_static:
+                get_adapter(old_router).remove_static_queue(client)
+            else:
+                get_adapter(old_router).remove_pppoe_user(client)
         except Exception:
             logger.exception(
-                "Client %s moved to router %s but the secret could not be removed from %s",
+                "Client %s moved to router %s but the old service could not be removed from %s",
                 client.pk, client.router_id, old_router.pk,
             )
-    elif plan_changed and client.status == Client.Status.ACTIVE:
+    elif plan_changed and client.status == Client.Status.ACTIVE and not client.is_static:
         # A live PPPoE session keeps its old queue until it redials, so the customer would
         # not see their new speed. Bounce it: they reconnect within seconds, at the new rate.
-        # Best-effort — the secret is already correct, so a failed kick only delays the new
-        # speed until their next reconnect; it must not fail the edit.
+        # (A static /queue/simple applies the new limit immediately — nothing to bounce.)
         try:
             new_adapter.kick_pppoe_session(client)
         except Exception:

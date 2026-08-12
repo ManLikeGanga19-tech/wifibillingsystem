@@ -163,6 +163,25 @@ class ProvisioningAdapter(ABC):
         that break Path-MTU Discovery. Router-wide and idempotent; default no-op."""
         return ProvisionResult(ok=True, message="noop")
 
+    # -- Static IP (broadband, no login) -----------------------------------
+    # A static client's CPE is configured with a fixed IP; WIFI.OS only enforces the plan.
+    # These mirror the PPPoE verbs: ensure_static_queue == the profile, set_static_enabled ==
+    # suspend/restore, remove_static_queue == removing the secret. Default no-ops.
+    def ensure_static_queue(self, client) -> ProvisionResult:
+        """Create/update the /queue/simple that enforces this static client's plan rate on
+        their fixed IP — the static equivalent of a PPPoE profile."""
+        return ProvisionResult(ok=True, message="noop")
+
+    def set_static_enabled(self, client, enabled: bool) -> ProvisionResult:
+        """Restore (enabled) or suspend (disabled) a static client by moving their IP in or
+        out of the allowed firewall address-list — a suspended IP lands on the walled-garden
+        pay page, exactly like a suspended PPPoE line."""
+        return ProvisionResult(ok=True, message="noop")
+
+    def remove_static_queue(self, client) -> ProvisionResult:
+        """Remove the queue + address-list entry for a cancelled static client."""
+        return ProvisionResult(ok=True, message="noop")
+
     # -- Captive portal ----------------------------------------------------
     def push_portal(self, portal_url: str) -> ProvisionResult:
         """Point this router's captive portal at `portal_url`.

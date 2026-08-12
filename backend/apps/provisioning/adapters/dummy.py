@@ -101,6 +101,20 @@ class DummyAdapter(ProvisioningAdapter):
         DummyAdapter.calls.append(("mss_clamp", self.router.pk))
         return ProvisionResult(ok=True, message="mss clamp ensured")
 
+    # -- Static IP (records calls for test assertions) --------------------
+    def ensure_static_queue(self, client) -> ProvisionResult:
+        DummyAdapter.calls.append(("static_queue", client.static_ip))
+        return ProvisionResult(ok=True)
+
+    def set_static_enabled(self, client, enabled: bool) -> ProvisionResult:
+        action = "static_enable" if enabled else "static_suspend"
+        DummyAdapter.calls.append((action, client.static_ip))
+        return ProvisionResult(ok=True)
+
+    def remove_static_queue(self, client) -> ProvisionResult:
+        DummyAdapter.calls.append(("static_remove", client.static_ip))
+        return ProvisionResult(ok=True)
+
     #: Tests set this to drive PPPoE import: a list of PppoeSecret (or dicts).
     pppoe_secrets: list = []
 
