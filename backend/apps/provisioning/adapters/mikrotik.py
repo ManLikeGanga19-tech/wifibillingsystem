@@ -33,6 +33,11 @@ def _safe_json(resp) -> dict:
 # this profile firewalled to a walled garden that redirects http to a pay page.
 SUSPENDED_PROFILE = "wifios-suspended"
 
+# Static clients have no login, so suspension works by IP: their address goes into this
+# firewall address-list, which the ISP firewalls to the same walled-garden pay page (a
+# one-time setup, exactly like the suspended PPPoE profile). Membership is all WIFI.OS touches.
+SUSPENDED_ADDRESS_LIST = "wifios-suspended"
+
 #: Marks our MSS-clamp rule so ensure_pppoe_mss_clamp is idempotent (never double-adds it).
 MSS_CLAMP_COMMENT = "wifi.os: pppoe mss clamp"
 
@@ -354,6 +359,77 @@ class MikroTikRestAdapter(ProvisioningAdapter):
             return ProvisionResult(ok=True, message="removed")
         except httpx.HTTPError as exc:
             raise ProvisioningError(f"remove_pppoe_user failed on {self.router}: {exc}") from exc
+
+    # -- Static IP -----------------------------------------------------------
+    def _static_queue_name(self, client) -> str:
+        return f"wifios-{client.account_number}"
+
+    def ensure_static_queue(self, client) -> ProvisionResult:
+        """The /queue/simple that enforces this static client's plan speed on their fixed IP.
+        Idempotent: patched if it exists, created if not."""
+        name = self._static_queue_name(client)
+        payload = {
+            "name": name,
+            "target": f"{client.static_ip}/32",
+            "max-limit": f"{client.plan.upload_kbps}k/{client.plan.download_kbps}k",
+            "comment": f"wifi.os {client.account_number}",
+        }
+        try:
+            with self._client() as c:
+                existing = self._find_id(c, "/queue/simple", name=name)
+                if existing:
+                    c.patch(f"/queue/simple/{existing}", json=payload).raise_for_status()
+                else:
+                    c.put("/queue/simple", json=payload).raise_for_status()
+            return ProvisionResult(ok=True, message="static queue ensured")
+        except httpx.HTTPError as exc:
+            raise ProvisioningError(
+                f"ensure_static_queue failed on {self.router}: {exc}"
+            ) from exc
+
+    def set_static_enabled(self, client, enabled: bool) -> ProvisionResult:
+        """Suspend = put the IP in the suspended address-list (walled garden). Restore =
+        take it out. The queue is left in place either way."""
+        try:
+            with self._client() as c:
+                existing = self._find_id(
+                    c, "/ip/firewall/address-list",
+                    list=SUSPENDED_ADDRESS_LIST, address=client.static_ip,
+                )
+                if enabled and existing:
+                    c.delete(f"/ip/firewall/address-list/{existing}").raise_for_status()
+                elif not enabled and not existing:
+                    c.put(
+                        "/ip/firewall/address-list",
+                        json={
+                            "list": SUSPENDED_ADDRESS_LIST,
+                            "address": client.static_ip,
+                            "comment": f"wifi.os {client.account_number}",
+                        },
+                    ).raise_for_status()
+            return ProvisionResult(ok=True, message="enabled" if enabled else "suspended")
+        except httpx.HTTPError as exc:
+            raise ProvisioningError(
+                f"set_static_enabled failed on {self.router}: {exc}"
+            ) from exc
+
+    def remove_static_queue(self, client) -> ProvisionResult:
+        try:
+            with self._client() as c:
+                qid = self._find_id(c, "/queue/simple", name=self._static_queue_name(client))
+                if qid:
+                    c.delete(f"/queue/simple/{qid}").raise_for_status()
+                aid = self._find_id(
+                    c, "/ip/firewall/address-list",
+                    list=SUSPENDED_ADDRESS_LIST, address=client.static_ip,
+                )
+                if aid:
+                    c.delete(f"/ip/firewall/address-list/{aid}").raise_for_status()
+            return ProvisionResult(ok=True, message="removed")
+        except httpx.HTTPError as exc:
+            raise ProvisioningError(
+                f"remove_static_queue failed on {self.router}: {exc}"
+            ) from exc
 
     def get_active_pppoe(self) -> list[ActiveSession]:
         """Who is online, and how much they have moved THIS SESSION.

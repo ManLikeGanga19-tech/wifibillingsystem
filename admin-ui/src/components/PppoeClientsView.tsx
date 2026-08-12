@@ -258,6 +258,7 @@ export default function PppoeClientsView() {
   const blank = {
     full_name: '', phone: '', email: '', physical_address: '',
     plan: '', router: '', delivery_method: 'fibre', access_point: '', billing_day: '1',
+    connection_type: 'pppoe', static_ip: '',
     pppoe_username: '', pppoe_password: '',
   };
   const [form, setForm] = useState(blank);
@@ -277,6 +278,7 @@ export default function PppoeClientsView() {
   }, [reload]);
 
   const isWireless = form.delivery_method.startsWith('wireless');
+  const isStatic = form.connection_type === 'static';
 
   // When the chosen sector is full the server answers 409 with a warning; we surface it as
   // a card and let the ISP over-subscribe on purpose (force=true), which the server audits.
@@ -296,9 +298,11 @@ export default function PppoeClientsView() {
         delivery_method: form.delivery_method as PppoeClient['delivery_method'],
         access_point: isWireless && form.access_point ? Number(form.access_point) : null,
         billing_day: Number(form.billing_day),
-        // Blank = auto-generate (the server generates a strong one).
-        pppoe_username: form.pppoe_username.trim(),
-        pppoe_password: form.pppoe_password,
+        connection_type: form.connection_type as PppoeClient['connection_type'],
+        // Static clients enforce by IP (no login); PPPoE clients get a secret (blank = auto).
+        static_ip: isStatic ? form.static_ip.trim() : null,
+        pppoe_username: isStatic ? '' : form.pppoe_username.trim(),
+        pppoe_password: isStatic ? '' : form.pppoe_password,
         ...(force ? { force: true } : {}),
       });
       setCapWarn(null);
@@ -390,6 +394,17 @@ export default function PppoeClientsView() {
                 {DELIVERY.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
               </select>
             </Field>
+            <Field label="Connection type">
+              <select value={form.connection_type} onChange={(e) => setForm({ ...form, connection_type: e.target.value })} className={inputCls}>
+                <option value="pppoe">PPPoE (login)</option>
+                <option value="static">Static IP</option>
+              </select>
+            </Field>
+            {isStatic && (
+              <Field label="Static IP">
+                <input required value={form.static_ip} onChange={(e) => setForm({ ...form, static_ip: e.target.value })} className={inputCls} placeholder="e.g. 10.20.0.5" />
+              </Field>
+            )}
             {isWireless && (
               <Field label="Access point (sector)">
                 <select value={form.access_point} onChange={(e) => setForm({ ...form, access_point: e.target.value })} className={inputCls}>
@@ -404,12 +419,16 @@ export default function PppoeClientsView() {
             <Field label="Address" className="md:col-span-2">
               <input value={form.physical_address} onChange={(e) => setForm({ ...form, physical_address: e.target.value })} className={inputCls} />
             </Field>
-            <Field label="PPPoE username (optional)">
-              <input value={form.pppoe_username} onChange={(e) => setForm({ ...form, pppoe_username: e.target.value })} className={inputCls} placeholder="Auto-generated if blank" />
-            </Field>
-            <Field label="PPPoE password (optional)">
-              <input value={form.pppoe_password} onChange={(e) => setForm({ ...form, pppoe_password: e.target.value })} className={inputCls} placeholder="Auto-generated if blank" />
-            </Field>
+            {!isStatic && (
+              <>
+                <Field label="PPPoE username (optional)">
+                  <input value={form.pppoe_username} onChange={(e) => setForm({ ...form, pppoe_username: e.target.value })} className={inputCls} placeholder="Auto-generated if blank" />
+                </Field>
+                <Field label="PPPoE password (optional)">
+                  <input value={form.pppoe_password} onChange={(e) => setForm({ ...form, pppoe_password: e.target.value })} className={inputCls} placeholder="Auto-generated if blank" />
+                </Field>
+              </>
+            )}
             <Btn type="submit" variant="green" disabled={busy}>
               {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
               Create & provision
@@ -458,7 +477,9 @@ export default function PppoeClientsView() {
               >
                 {c.full_name}
               </button>
-              <span className="block text-[11px] font-mono text-[#141414]/50">{c.pppoe_username}</span>
+              <span className="block text-[11px] font-mono text-[#141414]/50">
+                {c.connection_type === 'static' ? `Static · ${c.static_ip ?? '—'}` : c.pppoe_username}
+              </span>
             </td>
             <td className={tdCls}>{c.plan_name}</td>
             <td className={tdCls}><LiveDot client={c} /></td>

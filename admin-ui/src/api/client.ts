@@ -1070,6 +1070,7 @@ export interface PppoeClient {
   pppoe_username: string;
   pppoe_password: string;
   static_ip: string | null;
+  connection_type: 'pppoe' | 'static';
   delivery_method: 'fibre' | 'ethernet' | 'wireless_ptp' | 'wireless_ptmp';
   access_point: number | null;
   cpe_equipment: number | null;

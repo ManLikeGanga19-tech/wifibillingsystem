@@ -112,11 +112,28 @@ class ClientSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Use 6+ characters and no spaces.")
         return value
 
+    def validate(self, attrs):
+        current = self.instance.connection_type if self.instance else Client.Connection.PPPOE
+        conn = attrs.get("connection_type", current)
+        # A client's connection type is fixed at creation — switching would strand the old
+        # service (a secret or a queue) on the router. Delete and recreate to change it.
+        if self.instance and conn != current:
+            raise serializers.ValidationError(
+                {"connection_type": "A client's connection type can't be changed."}
+            )
+        if conn == Client.Connection.STATIC:
+            ip = attrs.get("static_ip", self.instance.static_ip if self.instance else None)
+            if not ip:
+                raise serializers.ValidationError(
+                    {"static_ip": "A static-IP client needs an IP address."}
+                )
+        return attrs
+
     class Meta:
         model = Client
         fields = [
             "id", "account_number", "full_name", "phone", "email", "physical_address",
-            "gps_lat", "gps_lng", "plan", "plan_name", "router",
+            "gps_lat", "gps_lng", "plan", "plan_name", "router", "connection_type",
             "pppoe_username", "pppoe_password", "static_ip",
             "delivery_method", "access_point", "cpe_equipment",
             "status", "billing_day", "balance", "next_due_date",

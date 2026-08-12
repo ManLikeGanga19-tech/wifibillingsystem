@@ -130,6 +130,13 @@ class Client(OperatorOwnedModel):
         WIRELESS_PTP = "wireless_ptp", "Wireless PTP"
         WIRELESS_PTMP = "wireless_ptmp", "Wireless PTMP"
 
+    class Connection(models.TextChoices):
+        # How the line authenticates + is enforced on the router. PPPoE = a /ppp/secret;
+        # STATIC = a fixed IP the CPE is configured with, enforced by a /queue/simple + a
+        # firewall address-list (no login). Billing/invoicing/churn are identical for both.
+        PPPOE = "pppoe", "PPPoE"
+        STATIC = "static", "Static IP"
+
     # account_number is GLOBALLY unique: it is the C2B BillRefNumber on Danamo's
     # shared paybill, the only key that routes a payment to the right ISP+client.
     account_number = models.CharField(max_length=20, unique=True, db_index=True)
@@ -145,8 +152,15 @@ class Client(OperatorOwnedModel):
         "provisioning.Router", on_delete=models.PROTECT, related_name="pppoe_clients"
     )
 
-    pppoe_username = models.CharField(max_length=60, unique=True)
-    pppoe_password = models.CharField(max_length=60)
+    # How the line connects. PPPoE clients have a username/password secret; static clients
+    # have a fixed IP and no login. Billing is identical either way.
+    connection_type = models.CharField(
+        max_length=10, choices=Connection.choices, default=Connection.PPPOE, db_index=True
+    )
+    # Nullable so static clients (no login) don't collide on the unique index — Postgres
+    # treats NULLs as distinct, so any number of static clients can have no username.
+    pppoe_username = models.CharField(max_length=60, unique=True, null=True, blank=True)
+    pppoe_password = models.CharField(max_length=60, blank=True)
     static_ip = models.GenericIPAddressField(null=True, blank=True)
 
     delivery_method = models.CharField(
@@ -226,6 +240,10 @@ class Client(OperatorOwnedModel):
     def is_billable(self) -> bool:
         """Counts toward the platform per-user fee: only a live, served client."""
         return self.status in self.BILLABLE_STATUSES
+
+    @property
+    def is_static(self) -> bool:
+        return self.connection_type == self.Connection.STATIC
 
 
 class ClientLifecycleEvent(OperatorOwnedModel):
