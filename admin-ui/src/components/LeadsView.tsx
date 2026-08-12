@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
-import { UserPlus, Plus } from 'lucide-react';
-import { api, ApiLead } from '../api/client';
+import { Pencil, Plus, Trash2, UserPlus } from 'lucide-react';
+import { api, ApiError, ApiLead } from '../api/client';
 import {
   Badge, Btn, Field, FilterChips, inputCls, Panel, RefreshBtn, TableShell, tdCls, toast, useList, ViewHeader, fmtDateTime,
 } from './ui';
@@ -20,25 +20,39 @@ const NEXT: Partial<Record<ApiLead['status'], { to: ApiLead['status']; label: st
   ],
 };
 
+const BLANK = { name: '', phone: '', location: '', source: '' };
+
 export default function LeadsView() {
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>('new');
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ name: '', phone: '', location: '', source: '' });
+  const [editing, setEditing] = useState<ApiLead | null>(null);
+  const [form, setForm] = useState({ ...BLANK });
   const { rows, count, error, refreshing, reload } = useList(
     () => api.leads.list(filter === 'all' ? '' : `?status=${filter}`),
     [filter]
   );
 
-  const create = async (e: FormEvent) => {
+  const openNew = () => { setEditing(null); setForm({ ...BLANK }); setShowForm(true); };
+  const openEdit = (l: ApiLead) => {
+    setEditing(l);
+    setForm({ name: l.name, phone: l.phone, location: l.location, source: l.source });
+    setShowForm(true);
+  };
+
+  const submit = async (e: FormEvent) => {
     e.preventDefault();
     try {
-      await api.leads.create(form);
-      toast('success', `Lead "${form.name}" saved.`);
-      setForm({ name: '', phone: '', location: '', source: '' });
-      setShowForm(false);
+      if (editing) {
+        await api.leads.update(editing.id, form);
+        toast('success', 'Lead updated.');
+      } else {
+        await api.leads.create(form);
+        toast('success', `Lead "${form.name}" saved.`);
+      }
+      setForm({ ...BLANK }); setEditing(null); setShowForm(false);
       reload();
-    } catch {
-      toast('error', 'Failed to save lead.');
+    } catch (err) {
+      toast('error', err instanceof ApiError ? err.message : 'Failed to save the lead.');
     }
   };
 
@@ -51,6 +65,17 @@ export default function LeadsView() {
     }
   };
 
+  const remove = async (l: ApiLead) => {
+    if (!confirm(`Delete lead "${l.name}"?`)) return;
+    try {
+      await api.leads.remove(l.id);
+      toast('success', 'Lead deleted.');
+      reload();
+    } catch (err) {
+      toast('error', err instanceof ApiError ? err.message : 'Could not delete the lead.');
+    }
+  };
+
   return (
     <div className="space-y-5 text-[#141414]">
       <ViewHeader
@@ -58,15 +83,15 @@ export default function LeadsView() {
         title="Leads"
         subtitle="People interested in your WiFi — track them from first contact to paying client."
       >
-        <Btn onClick={() => setShowForm(!showForm)}>
+        <Btn onClick={openNew}>
           <Plus className="h-3.5 w-3.5" /> New Lead
         </Btn>
         <RefreshBtn onClick={reload} spinning={refreshing} />
       </ViewHeader>
 
       {showForm && (
-        <Panel title="New lead">
-          <form onSubmit={create} className="grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
+        <Panel title={editing ? `Edit ${editing.name}` : 'New lead'}>
+          <form onSubmit={submit} className="grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
             <Field label="Name">
               <input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className={inputCls} />
             </Field>
@@ -79,7 +104,10 @@ export default function LeadsView() {
             <Field label="Source">
               <input value={form.source} onChange={(e) => setForm({ ...form, source: e.target.value })} className={inputCls} placeholder="referral, flyer…" />
             </Field>
-            <Btn type="submit" variant="green">Save</Btn>
+            <div className="flex gap-2">
+              <Btn type="submit" variant="green">Save</Btn>
+              {editing && <Btn type="button" variant="outline" onClick={() => { setShowForm(false); setEditing(null); }}>Cancel</Btn>}
+            </div>
           </form>
         </Panel>
       )}
@@ -100,14 +128,18 @@ export default function LeadsView() {
             <td className={tdCls}>{l.source || '—'}</td>
             <td className={tdCls}><Badge color={STATUS_COLOR[l.status]}>{l.status}</Badge></td>
             <td className={`${tdCls} font-mono whitespace-nowrap`}>{fmtDateTime(l.created_at)}</td>
-            <td className={`${tdCls} space-x-1.5 whitespace-nowrap`}>
-              {(NEXT[l.status] ?? []).map((n) => (
-                <span key={n.to} className="inline-block">
-                  <Btn variant={n.to === 'lost' ? 'danger' : 'outline'} onClick={() => move(l, n.to)}>
-                    {n.label}
-                  </Btn>
-                </span>
-              ))}
+            <td className={`${tdCls} whitespace-nowrap`}>
+              <div className="flex items-center gap-1.5">
+                {(NEXT[l.status] ?? []).map((n) => (
+                  <span key={n.to} className="inline-block">
+                    <Btn variant={n.to === 'lost' ? 'danger' : 'outline'} onClick={() => move(l, n.to)}>
+                      {n.label}
+                    </Btn>
+                  </span>
+                ))}
+                <Btn variant="outline" onClick={() => openEdit(l)} title="Edit lead"><Pencil className="h-3.5 w-3.5" /></Btn>
+                <Btn variant="danger" onClick={() => remove(l)} title="Delete lead"><Trash2 className="h-3.5 w-3.5" /></Btn>
+              </div>
             </td>
           </tr>
         ))}

@@ -1,7 +1,10 @@
 import { Fragment, useEffect, useState, type FormEvent } from 'react';
-import { Radio, Plus, RadioTower } from 'lucide-react';
-import { api, Tower, AccessPoint, ApiRouter } from '../api/client';
+import { Pencil, Plus, RadioTower, Trash2 } from 'lucide-react';
+import { api, ApiError, Tower, AccessPoint, ApiRouter } from '../api/client';
 import { Badge, Btn, Field, inputCls, Panel, RefreshBtn, TableShell, tdCls, toast, useList, ViewHeader } from './ui';
+
+const BLANK_TOWER = { name: '', notes: '' };
+const BLANK_AP = { tower: '', name: '', mode: 'ap', capacity: '', band: '', router: '' };
 
 export default function NetworkView() {
   const towers = useList(() => api.pppoe.towers.list());
@@ -9,47 +12,84 @@ export default function NetworkView() {
   const [routers, setRouters] = useState<ApiRouter[]>([]);
   const [showTower, setShowTower] = useState(false);
   const [showAp, setShowAp] = useState(false);
-  const [tower, setTower] = useState({ name: '', notes: '' });
-  const [ap, setAp] = useState({ tower: '', name: '', mode: 'ap', capacity: '', band: '', router: '' });
+  const [editingTower, setEditingTower] = useState<Tower | null>(null);
+  const [editingAp, setEditingAp] = useState<AccessPoint | null>(null);
+  const [tower, setTower] = useState({ ...BLANK_TOWER });
+  const [ap, setAp] = useState({ ...BLANK_AP });
 
   useEffect(() => {
     api.routers.list().then((r) => setRouters(r.results)).catch(() => {});
   }, []);
 
-  const createTower = async (e: FormEvent) => {
+  const newTower = () => { setEditingTower(null); setTower({ ...BLANK_TOWER }); setShowTower(true); };
+  const editTower = (t: Tower) => {
+    setEditingTower(t);
+    setTower({ name: t.name, notes: t.notes });
+    setShowTower(true);
+  };
+  const newAp = () => { setEditingAp(null); setAp({ ...BLANK_AP }); setShowAp(true); };
+  const editAp = (a: AccessPoint) => {
+    setEditingAp(a);
+    setAp({
+      tower: String(a.tower), name: a.name, mode: a.mode,
+      capacity: a.capacity ? String(a.capacity) : '', band: a.band,
+      router: a.router ? String(a.router) : '',
+    });
+    setShowAp(true);
+  };
+
+  const submitTower = async (e: FormEvent) => {
     e.preventDefault();
     try {
-      await api.pppoe.towers.create(tower);
-      toast('success', 'Tower added.');
-      setTower({ name: '', notes: '' });
-      setShowTower(false);
+      if (editingTower) await api.pppoe.towers.update(editingTower.id, tower);
+      else await api.pppoe.towers.create(tower);
+      toast('success', editingTower ? 'Tower updated.' : 'Tower added.');
+      setShowTower(false); setEditingTower(null); setTower({ ...BLANK_TOWER });
       towers.reload();
-    } catch {
-      toast('error', 'Failed to add tower.');
+    } catch (err) {
+      toast('error', err instanceof ApiError ? err.message : 'Failed to save the tower.');
     }
   };
 
-  const createAp = async (e: FormEvent) => {
+  const submitAp = async (e: FormEvent) => {
     e.preventDefault();
+    const body = {
+      tower: Number(ap.tower), name: ap.name, mode: ap.mode as AccessPoint['mode'],
+      capacity: Number(ap.capacity) || 0, band: ap.band,
+      router: ap.router ? Number(ap.router) : null,
+    };
     try {
-      await api.pppoe.accessPoints.create({
-        tower: Number(ap.tower),
-        name: ap.name,
-        mode: ap.mode as AccessPoint['mode'],
-        capacity: Number(ap.capacity) || 0,
-        band: ap.band,
-        router: ap.router ? Number(ap.router) : null,
-      });
-      toast('success', 'Access point added.');
-      setAp({ tower: '', name: '', mode: 'ap', capacity: '', band: '', router: '' });
-      setShowAp(false);
+      if (editingAp) await api.pppoe.accessPoints.update(editingAp.id, body);
+      else await api.pppoe.accessPoints.create(body);
+      toast('success', editingAp ? 'Access point updated.' : 'Access point added.');
+      setShowAp(false); setEditingAp(null); setAp({ ...BLANK_AP });
       aps.reload();
-    } catch {
-      toast('error', 'Failed to add access point.');
+    } catch (err) {
+      toast('error', err instanceof ApiError ? err.message : 'Failed to save the access point.');
     }
   };
 
-  const utilColor = (u: number | null) => (u === null ? 'gray' : u >= 90 ? 'red' : u >= 70 ? 'amber' : 'green');
+  const deleteTower = async (t: Tower) => {
+    if (!confirm(`Delete tower "${t.name}" and its sectors? Sectors with clients must be cleared first.`)) return;
+    try {
+      await api.pppoe.towers.remove(t.id);
+      toast('success', 'Tower deleted.');
+      towers.reload(); aps.reload();
+    } catch (err) {
+      toast('error', err instanceof ApiError ? err.message : 'Could not delete the tower.');
+    }
+  };
+
+  const deleteAp = async (a: AccessPoint) => {
+    if (!confirm(`Delete sector "${a.name}"? Clients on it must be moved first.`)) return;
+    try {
+      await api.pppoe.accessPoints.remove(a.id);
+      toast('success', 'Access point deleted.');
+      aps.reload();
+    } catch (err) {
+      toast('error', err instanceof ApiError ? err.message : 'Could not delete the access point.');
+    }
+  };
 
   return (
     <div className="space-y-6 text-[#141414]">
@@ -58,24 +98,27 @@ export default function NetworkView() {
         title="Network"
         subtitle="Towers and access points (sectors) for your wireless PTP/PTMP clients. Track capacity so you don't oversubscribe a sector."
       >
-        <Btn onClick={() => setShowTower(!showTower)}><Plus className="h-3.5 w-3.5" /> Tower</Btn>
-        <Btn onClick={() => setShowAp(!showAp)}><Plus className="h-3.5 w-3.5" /> Access Point</Btn>
+        <Btn onClick={newTower}><Plus className="h-3.5 w-3.5" /> Tower</Btn>
+        <Btn onClick={newAp}><Plus className="h-3.5 w-3.5" /> Access Point</Btn>
         <RefreshBtn onClick={() => { towers.reload(); aps.reload(); }} spinning={towers.refreshing || aps.refreshing} />
       </ViewHeader>
 
       {showTower && (
-        <Panel title="Add tower / site">
-          <form onSubmit={createTower} className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+        <Panel title={editingTower ? `Edit ${editingTower.name}` : 'Add tower / site'}>
+          <form onSubmit={submitTower} className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
             <Field label="Name"><input required value={tower.name} onChange={(e) => setTower({ ...tower, name: e.target.value })} className={inputCls} placeholder="e.g. Kibera Mast" /></Field>
             <Field label="Notes" className="md:col-span-2"><input value={tower.notes} onChange={(e) => setTower({ ...tower, notes: e.target.value })} className={inputCls} /></Field>
-            <Btn type="submit" variant="green">Add</Btn>
+            <div className="flex gap-2">
+              <Btn type="submit" variant="green">{editingTower ? 'Save' : 'Add'}</Btn>
+              {editingTower && <Btn type="button" variant="outline" onClick={() => { setShowTower(false); setEditingTower(null); }}>Cancel</Btn>}
+            </div>
           </form>
         </Panel>
       )}
 
       {showAp && (
-        <Panel title="Add access point / sector">
-          <form onSubmit={createAp} className="grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
+        <Panel title={editingAp ? `Edit ${editingAp.name}` : 'Add access point / sector'}>
+          <form onSubmit={submitAp} className="grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
             <Field label="Tower">
               <select required value={ap.tower} onChange={(e) => setAp({ ...ap, tower: e.target.value })} className={inputCls}>
                 <option value="">Select…</option>
@@ -92,13 +135,16 @@ export default function NetworkView() {
             </Field>
             <Field label="Capacity"><input type="number" value={ap.capacity} onChange={(e) => setAp({ ...ap, capacity: e.target.value })} className={inputCls} placeholder="max clients" /></Field>
             <Field label="Band"><input value={ap.band} onChange={(e) => setAp({ ...ap, band: e.target.value })} className={inputCls} placeholder="5GHz" /></Field>
-            <Btn type="submit" variant="green">Add</Btn>
+            <div className="flex gap-2">
+              <Btn type="submit" variant="green">{editingAp ? 'Save' : 'Add'}</Btn>
+              {editingAp && <Btn type="button" variant="outline" onClick={() => { setShowAp(false); setEditingAp(null); }}>Cancel</Btn>}
+            </div>
           </form>
         </Panel>
       )}
 
       <TableShell
-        headers={['Tower / Sector', 'Mode', 'Band', 'Clients', 'Capacity', 'Utilisation', 'Status']}
+        headers={['Tower / Sector', 'Mode', 'Band', 'Clients', 'Capacity', 'Utilisation', 'Status', '']}
         loading={towers.rows === null || aps.rows === null}
         error={towers.error || aps.error}
         empty="No towers yet — add one to get started, then its sectors."
@@ -110,19 +156,25 @@ export default function NetworkView() {
           return (
             <Fragment key={`tower-${t.id}`}>
               <tr className="bg-[#f0efec]/60">
-                <td className={`${tdCls} font-bold`} colSpan={7}>
-                  <span className="inline-flex items-center gap-2">
-                    <RadioTower className="h-3.5 w-3.5" /> {t.name}
-                    <span className="font-mono text-[11px] text-[#141414]/50">
-                      {sectors.length} sector{sectors.length === 1 ? '' : 's'}
+                <td className={`${tdCls} font-bold`} colSpan={8}>
+                  <span className="flex items-center justify-between gap-2">
+                    <span className="inline-flex items-center gap-2">
+                      <RadioTower className="h-3.5 w-3.5" /> {t.name}
+                      <span className="font-mono text-[11px] text-[#141414]/50">
+                        {sectors.length} sector{sectors.length === 1 ? '' : 's'}
+                      </span>
+                      {t.notes && <span className="text-[11px] text-[#141414]/45">— {t.notes}</span>}
                     </span>
-                    {t.notes && <span className="text-[11px] text-[#141414]/45">— {t.notes}</span>}
+                    <span className="flex gap-1.5">
+                      <Btn variant="outline" onClick={() => editTower(t)} title="Edit tower"><Pencil className="h-3.5 w-3.5" /></Btn>
+                      <Btn variant="danger" onClick={() => deleteTower(t)} title="Delete tower"><Trash2 className="h-3.5 w-3.5" /></Btn>
+                    </span>
                   </span>
                 </td>
               </tr>
               {sectors.length === 0 && (
                 <tr>
-                  <td className={`${tdCls} italic text-[#141414]/40`} colSpan={7}>
+                  <td className={`${tdCls} italic text-[#141414]/40`} colSpan={8}>
                     No sectors yet — add an access point to this tower.
                   </td>
                 </tr>
@@ -145,6 +197,12 @@ export default function NetworkView() {
                     )}
                   </td>
                   <td className={tdCls}><Badge color={a.utilization !== null && a.utilization >= 90 ? 'red' : 'green'}>{a.utilization !== null && a.utilization >= 90 ? 'full' : 'ok'}</Badge></td>
+                  <td className={tdCls}>
+                    <div className="flex gap-1.5">
+                      <Btn variant="outline" onClick={() => editAp(a)} title="Edit sector"><Pencil className="h-3.5 w-3.5" /></Btn>
+                      <Btn variant="danger" onClick={() => deleteAp(a)} title="Delete sector"><Trash2 className="h-3.5 w-3.5" /></Btn>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </Fragment>
