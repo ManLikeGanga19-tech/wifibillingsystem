@@ -276,6 +276,24 @@ class PlatformTimeseriesView(APIView):
         return Response({"scope": "all_isps", "days": days, "series": series})
 
 
+@extend_schema(responses=OBJECT_RESPONSE, summary="Platform MRR movement + tenant churn")
+class PlatformMrrMovementView(APIView):
+    """The growth waterfall: new / expansion / contraction / churned MRR month-over-month,
+    plus tenant churn (ISPs that stopped contributing revenue). Answers 'is the platform
+    growing?', which a single MRR number can't."""
+
+    permission_classes = [IsPlatformStaff]
+
+    def get(self, request):
+        from .growth import mrr_movement
+
+        try:
+            months = int(request.query_params.get("months", 6))
+        except (TypeError, ValueError):
+            months = 6
+        return Response(mrr_movement(months=months))
+
+
 @extend_schema(responses=OBJECT_RESPONSE, summary="Per-ISP profit and loss")
 class TenantPnlView(APIView):
     """Per-ISP profitability: what each tenant EARNS us versus what it COSTS us.

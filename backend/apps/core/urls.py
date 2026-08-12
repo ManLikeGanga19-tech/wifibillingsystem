@@ -3,6 +3,7 @@ from rest_framework.routers import SimpleRouter
 
 from .analytics_views import (
     PlatformKpisView,
+    PlatformMrrMovementView,
     PlatformSearchView,
     PlatformTimeseriesView,
     TenantPnlView,
@@ -90,6 +91,7 @@ urlpatterns = [
         name="platform-timeseries",
     ),
     path("platform/tenant-pnl/", TenantPnlView.as_view(), name="platform-tenant-pnl"),
+    path("platform/mrr-movement/", PlatformMrrMovementView.as_view(), name="platform-mrr-movement"),
     path("platform/search/", PlatformSearchView.as_view(), name="platform-search"),
     path("platform/health/", PlatformHealthView.as_view(), name="platform-health"),
     # Impersonation is a recorded act, not a header flip — these are the only doors

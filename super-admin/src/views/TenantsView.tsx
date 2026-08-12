@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ArrowLeft, Ban, Check, Copy, Eye, Plus, Receipt, Sparkles, SmartphoneNfc } from 'lucide-react';
+import { ArrowLeft, Ban, Check, Copy, Eye, Plus, Receipt, Sparkles, SmartphoneNfc, Wallet } from 'lucide-react';
 import { api, dt, ksh, num, type ProvisionResult, type Tenant } from '../api/client';
 import {
   Badge,
@@ -428,6 +428,7 @@ const rateSummary = (t: Tenant) =>
 function TenantDetail({ id, onBack }: { id: number; onBack: () => void }) {
   const { data, error, reload } = useLoad(() => api.tenants.detail(id), [id]);
   const [impersonating, setImpersonating] = useState(false);
+  const [adjusting, setAdjusting] = useState(false);
 
   if (error) return <ErrorBox message={error} onRetry={reload} />;
   if (!data) return <Spinner />;
@@ -460,6 +461,9 @@ function TenantDetail({ id, onBack }: { id: number; onBack: () => void }) {
           {data.in_trial && <Badge tone="blue">trial ends {t.trial_ends_at}</Badge>}
         </div>
         <div className="flex gap-2">
+          <Btn onClick={() => setAdjusting(true)} title="Credit or debit this ISP's wallet (audited)">
+            <Wallet className="h-3.5 w-3.5" /> Adjust wallet
+          </Btn>
           <Btn onClick={chargeSetup} title="Only for ISPs who opted into assisted onboarding">
             <Receipt className="h-3.5 w-3.5" /> Bill setup fee
           </Btn>
@@ -549,6 +553,94 @@ function TenantDetail({ id, onBack }: { id: number; onBack: () => void }) {
           }}
         />
       )}
+
+      {adjusting && (
+        <AdjustWalletDialog
+          tenant={t}
+          onClose={() => setAdjusting(false)}
+          onDone={() => { setAdjusting(false); reload(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Credit (+) or debit (−) an ISP's wallet with a recorded reason. Not a cash movement — it
+ * moves the ledger balance (what we owe them, what they can withdraw), so a reason is
+ * mandatory and it's audited against your name. Owner-only on the server.
+ */
+function AdjustWalletDialog({
+  tenant,
+  onClose,
+  onDone,
+}: {
+  tenant: Tenant;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [dir, setDir] = useState<'credit' | 'debit'>('credit');
+  const [amount, setAmount] = useState('');
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    const n = Number(amount);
+    if (busy || !n || reason.trim().length < 3) return;
+    setBusy(true);
+    try {
+      const signed = dir === 'debit' ? -Math.abs(n) : Math.abs(n);
+      const r = await api.tenants.adjust(tenant.id, String(signed), reason.trim());
+      toast('green', r.detail);
+      onDone();
+    } catch {
+      toast('red', 'Could not adjust the wallet.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="w-full max-w-md border p-5" style={{ background: 'var(--surface-1)', borderColor: 'var(--hairline-strong)' }}>
+        <p className="text-sm font-bold">Adjust {tenant.name}&apos;s wallet</p>
+        <p className="mt-1 text-xs leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+          A credit gives them money (goodwill, a fee waiver); a debit takes it (an error fix).
+          This changes what we owe them. Recorded against your name.
+        </p>
+
+        <div className="mt-4 flex gap-1.5">
+          {(['credit', 'debit'] as const).map((d) => (
+            <button
+              key={d}
+              onClick={() => setDir(d)}
+              className={`flex-1 py-1.5 text-xs font-bold font-mono uppercase border cursor-pointer ${
+                dir === d ? 'bg-[#141414] text-white border-[#141414]' : 'border-[#141414]/40'
+              }`}
+            >
+              {d}
+            </button>
+          ))}
+        </div>
+
+        <label className="mt-3 block">
+          <span className="text-[11px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Amount (KSh)</span>
+          <input type="number" min="0" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)}
+                 className="mt-1 w-full tnum" placeholder="0.00" autoFocus />
+        </label>
+        <label className="mt-3 block">
+          <span className="text-[11px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Reason (audited)</span>
+          <input value={reason} onChange={(e) => setReason(e.target.value)}
+                 className="mt-1 w-full" placeholder="e.g. goodwill credit — outage on 12 Aug" />
+        </label>
+
+        <div className="mt-4 flex justify-end gap-2">
+          <Btn onClick={onClose}>Cancel</Btn>
+          <Btn variant="dark" onClick={submit} disabled={busy || !Number(amount) || reason.trim().length < 3}>
+            {busy ? 'Saving…' : dir === 'credit' ? 'Credit wallet' : 'Debit wallet'}
+          </Btn>
+        </div>
+      </div>
     </div>
   );
 }
