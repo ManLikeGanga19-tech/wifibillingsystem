@@ -322,18 +322,30 @@ class Command(BaseCommand):
             name = self._name()
             activated_at = now - timedelta(days=self.rng.randint(20, 150))
             billing_day = self.rng.randint(1, 28)
+            online = status == Client.Status.ACTIVE and self.rng.random() < 0.7
+            # Roughly a quarter of the base is static-IP (no login, enforced by queue + IP) so
+            # the demo shows both connection types side by side.
+            is_static = i % 4 == 0
+            static_ip = f"10.20.{i}.{self.rng.randint(2, 250)}" if is_static else None
             client = Client.objects.create(
                 operator=op, account_number=f"DEMO{i + 1:05d}", full_name=name,
                 phone=self._phone(), plan=plan, router=self.rng.choice(routers),
                 access_point=self.rng.choice(aps),
-                pppoe_username=f"demo-{i + 1:03d}", pppoe_password=uuid.uuid4().hex[:10],
+                connection_type=(
+                    Client.Connection.STATIC if is_static else Client.Connection.PPPOE
+                ),
+                static_ip=static_ip,
+                pppoe_username=None if is_static else f"demo-{i + 1:03d}",
+                pppoe_password="" if is_static else uuid.uuid4().hex[:10],
                 status=status, billing_day=billing_day,
                 next_due_date=today + timedelta(days=self.rng.randint(-5, 20)),
                 installed_at=activated_at.date(),
                 status_changed_at=activated_at,
-                is_online=(status == Client.Status.ACTIVE and self.rng.random() < 0.7),
+                is_online=online,
                 last_online_at=now - timedelta(minutes=self.rng.randint(1, 240)),
-                wan_ip=f"41.90.{self.rng.randint(1, 254)}.{self.rng.randint(1, 254)}",
+                wan_ip=static_ip if is_static else (
+                    f"41.90.{self.rng.randint(1, 254)}.{self.rng.randint(1, 254)}"
+                ),
                 session_uptime=f"{self.rng.randint(1, 20)}d{self.rng.randint(0, 23)}h",
             )
             # Lifecycle trail so churn analytics + the PPPoE KPI tiles read real trends.
