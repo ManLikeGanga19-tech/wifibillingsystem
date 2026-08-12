@@ -104,6 +104,8 @@ CSRF_TRUSTED_ORIGINS = [
 ]
 
 REST_FRAMEWORK = {
+    # Turn a delete-blocked-by-references (ProtectedError) into a clean 409 instead of a 500.
+    "EXCEPTION_HANDLER": "apps.core.exceptions.drf_exception_handler",
     # Cookie-first: the browser sends an httpOnly JWT cookie, so the frontends
     # store NOTHING (no localStorage anywhere — see apps/accounts/cookie_auth.py).
     # The header fallback keeps scripts, tests and the CLI working.

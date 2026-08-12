@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
-import { Router as RouterIcon, Plus, Plug, RefreshCw, Copy, Check, Loader2, X, Cpu } from 'lucide-react';
-import { api, ApiRouter, DeviceInfo } from '../api/client';
+import { Router as RouterIcon, Plus, Plug, RefreshCw, Copy, Check, Loader2, X, Cpu, Pencil, Trash2 } from 'lucide-react';
+import { api, ApiError, ApiRouter, DeviceInfo } from '../api/client';
 import {
   Badge, Btn, Field, inputCls, Panel, RefreshBtn, TableShell, tdCls, toast, useList, ViewHeader, fmtDateTime,
 } from './ui';
@@ -19,7 +19,19 @@ export default function RoutersView() {
   const [testing, setTesting] = useState<number | null>(null);
   const [infoFor, setInfoFor] = useState<ApiRouter | null>(null);
   const [info, setInfo] = useState<DeviceInfo | null>(null);
+  const [editRouter, setEditRouter] = useState<ApiRouter | null>(null);
   const { rows, error, refreshing, reload } = useList(() => api.routers.list());
+
+  const deleteRouter = async (r: ApiRouter) => {
+    if (!confirm(`Delete router "${r.name}"? Clients and sessions on it must be moved first.`)) return;
+    try {
+      await api.routers.remove(r.id);
+      toast('success', `${r.name} deleted.`);
+      reload();
+    } catch (e) {
+      toast('error', e instanceof ApiError ? e.message : 'Could not delete the router.');
+    }
+  };
 
   const openInfo = async (r: ApiRouter) => {
     setInfoFor(r);
@@ -182,6 +194,8 @@ export default function RoutersView() {
                   </button>
                 </>
               )}
+              <Btn variant="outline" onClick={() => setEditRouter(r)} title="Edit router"><Pencil className="h-3.5 w-3.5" /></Btn>
+              <Btn variant="danger" onClick={() => deleteRouter(r)} title="Delete router"><Trash2 className="h-3.5 w-3.5" /></Btn>
             </td>
           </tr>
         ))}
@@ -250,6 +264,106 @@ export default function RoutersView() {
           </div>
         </div>
       )}
+      {editRouter && (
+        <EditRouterModal
+          router={editRouter}
+          onClose={() => setEditRouter(null)}
+          onSaved={() => { setEditRouter(null); reload(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Edit a router's details. Most fields self-fill when the router phones home, so the common
+ * edit is a rename; the connection fields are here for a hand-configured router. The password
+ * is write-only (never returned) — leave it blank to keep the current one.
+ */
+function EditRouterModal({
+  router,
+  onClose,
+  onSaved,
+}: {
+  router: ApiRouter;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [form, setForm] = useState({
+    name: router.name,
+    management_host: router.management_host,
+    api_port: String(router.api_port),
+    username: router.username,
+    password: '',
+    use_tls: router.use_tls,
+    verify_tls: router.verify_tls,
+    is_active: router.is_active,
+  });
+  const [busy, setBusy] = useState(false);
+
+  const save = async (e: FormEvent) => {
+    e.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    const body: Partial<ApiRouter> & { password?: string } = {
+      name: form.name,
+      management_host: form.management_host,
+      api_port: Number(form.api_port) || 443,
+      username: form.username,
+      use_tls: form.use_tls,
+      verify_tls: form.verify_tls,
+      is_active: form.is_active,
+    };
+    if (form.password) body.password = form.password; // set-only; blank keeps the current one
+    try {
+      await api.routers.update(router.id, body);
+      toast('success', `${form.name} updated.`);
+      onSaved();
+    } catch (err) {
+      toast('error', err instanceof ApiError ? err.message : 'Could not save the router.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-[#141414]/50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white border border-[#141414] w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-4 border-b border-[#141414]">
+          <h3 className="font-bold font-mono uppercase text-sm">Edit — {router.name}</h3>
+          <button onClick={onClose} className="cursor-pointer"><X className="h-4 w-4" /></button>
+        </div>
+        <form onSubmit={save} className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Field label="Site name" className="sm:col-span-2">
+            <input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className={inputCls} />
+          </Field>
+          <Field label="Management host">
+            <input value={form.management_host} onChange={(e) => setForm({ ...form, management_host: e.target.value })} className={inputCls} placeholder="auto when it phones home" />
+          </Field>
+          <Field label="API port">
+            <input type="number" value={form.api_port} onChange={(e) => setForm({ ...form, api_port: e.target.value })} className={inputCls} />
+          </Field>
+          <Field label="API username">
+            <input value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} className={inputCls} />
+          </Field>
+          <Field label="API password (blank = keep)">
+            <input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} className={inputCls} placeholder="••••••" />
+          </Field>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={form.use_tls} onChange={(e) => setForm({ ...form, use_tls: e.target.checked })} /> Use TLS
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={form.verify_tls} onChange={(e) => setForm({ ...form, verify_tls: e.target.checked })} /> Verify TLS cert
+          </label>
+          <label className="flex items-center gap-2 text-sm sm:col-span-2">
+            <input type="checkbox" checked={form.is_active} onChange={(e) => setForm({ ...form, is_active: e.target.checked })} /> Active
+          </label>
+          <div className="sm:col-span-2 flex justify-end gap-2 pt-2 border-t border-[#141414]/15">
+            <Btn type="button" variant="outline" onClick={onClose}>Cancel</Btn>
+            <Btn type="submit" variant="green" disabled={busy}>{busy ? 'Saving…' : 'Save changes'}</Btn>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

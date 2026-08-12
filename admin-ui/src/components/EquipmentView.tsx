@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
-import { HardDrive, Plus } from 'lucide-react';
-import { api, ApiEquipment } from '../api/client';
+import { HardDrive, Pencil, Plus, Trash2 } from 'lucide-react';
+import { api, ApiEquipment, ApiError } from '../api/client';
 import {
   Badge, Btn, Field, FilterChips, inputCls, Panel, RefreshBtn, TableShell, tdCls, toast, useList, ViewHeader, fmtKsh,
 } from './ui';
@@ -14,30 +14,45 @@ const STATUS_COLOR: Record<ApiEquipment['status'], 'green' | 'gray' | 'amber' | 
   retired: 'gray',
 };
 
+const BLANK = {
+  name: '', equipment_type: 'other' as ApiEquipment['equipment_type'], serial_number: '', cost: '',
+};
+
 export default function EquipmentView() {
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>('all');
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({
-    name: '',
-    equipment_type: 'other' as ApiEquipment['equipment_type'],
-    serial_number: '',
-    cost: '',
-  });
+  const [editing, setEditing] = useState<ApiEquipment | null>(null);
+  const [form, setForm] = useState({ ...BLANK });
   const { rows, count, error, refreshing, reload } = useList(
     () => api.equipment.list(filter === 'all' ? '' : `?status=${filter}`),
     [filter]
   );
 
-  const create = async (e: FormEvent) => {
+  const openNew = () => { setEditing(null); setForm({ ...BLANK }); setShowForm(true); };
+  const openEdit = (item: ApiEquipment) => {
+    setEditing(item);
+    setForm({
+      name: item.name, equipment_type: item.equipment_type,
+      serial_number: item.serial_number, cost: item.cost ? String(item.cost) : '',
+    });
+    setShowForm(true);
+  };
+
+  const submit = async (e: FormEvent) => {
     e.preventDefault();
+    const body = { ...form, cost: form.cost || null };
     try {
-      await api.equipment.create({ ...form, cost: form.cost || null });
-      toast('success', 'Equipment added to inventory.');
-      setForm({ name: '', equipment_type: 'other', serial_number: '', cost: '' });
-      setShowForm(false);
+      if (editing) {
+        await api.equipment.update(editing.id, body);
+        toast('success', 'Equipment updated.');
+      } else {
+        await api.equipment.create(body);
+        toast('success', 'Equipment added to inventory.');
+      }
+      setForm({ ...BLANK }); setEditing(null); setShowForm(false);
       reload();
-    } catch {
-      toast('error', 'Failed to add equipment.');
+    } catch (err) {
+      toast('error', err instanceof ApiError ? err.message : 'Failed to save equipment.');
     }
   };
 
@@ -50,6 +65,17 @@ export default function EquipmentView() {
     }
   };
 
+  const remove = async (item: ApiEquipment) => {
+    if (!confirm(`Delete "${item.name}" from inventory?`)) return;
+    try {
+      await api.equipment.remove(item.id);
+      toast('success', 'Equipment deleted.');
+      reload();
+    } catch (err) {
+      toast('error', err instanceof ApiError ? err.message : 'Could not delete the equipment.');
+    }
+  };
+
   return (
     <div className="space-y-5 text-[#141414]">
       <ViewHeader
@@ -57,15 +83,15 @@ export default function EquipmentView() {
         title="Equipment"
         subtitle="Inventory of radios, antennas and network gear — what's in store, deployed, or faulty."
       >
-        <Btn onClick={() => setShowForm(!showForm)}>
+        <Btn onClick={openNew}>
           <Plus className="h-3.5 w-3.5" /> Add Equipment
         </Btn>
         <RefreshBtn onClick={reload} spinning={refreshing} />
       </ViewHeader>
 
       {showForm && (
-        <Panel title="Add equipment">
-          <form onSubmit={create} className="grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
+        <Panel title={editing ? `Edit ${editing.name}` : 'Add equipment'}>
+          <form onSubmit={submit} className="grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
             <Field label="Name">
               <input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className={inputCls} placeholder="e.g. LiteBeam AC" />
             </Field>
@@ -80,7 +106,10 @@ export default function EquipmentView() {
             <Field label="Cost (KSh, optional)">
               <input type="number" min="0" step="0.01" value={form.cost} onChange={(e) => setForm({ ...form, cost: e.target.value })} className={inputCls} />
             </Field>
-            <Btn type="submit" variant="green">Save</Btn>
+            <div className="flex gap-2">
+              <Btn type="submit" variant="green">{editing ? 'Save' : 'Save'}</Btn>
+              {editing && <Btn type="button" variant="outline" onClick={() => { setShowForm(false); setEditing(null); }}>Cancel</Btn>}
+            </div>
           </form>
         </Panel>
       )}
@@ -102,16 +131,20 @@ export default function EquipmentView() {
             <td className={`${tdCls} font-mono whitespace-nowrap`}>{fmtKsh(item.cost)}</td>
             <td className={tdCls}><Badge color={STATUS_COLOR[item.status]}>{item.status.replace('_', ' ')}</Badge></td>
             <td className={tdCls}>
-              <select
-                value={item.status}
-                onChange={(e) => setStatus(item, e.target.value as ApiEquipment['status'])}
-                className="border border-[#141414]/40 bg-white text-[11px] font-mono p-1 outline-none cursor-pointer"
-                title="Change status"
-              >
-                {(['in_store', 'deployed', 'faulty', 'retired'] as const).map((s) => (
-                  <option key={s} value={s}>{s.replace('_', ' ')}</option>
-                ))}
-              </select>
+              <div className="flex items-center gap-1.5">
+                <select
+                  value={item.status}
+                  onChange={(e) => setStatus(item, e.target.value as ApiEquipment['status'])}
+                  className="border border-[#141414]/40 bg-white text-[11px] font-mono p-1 outline-none cursor-pointer"
+                  title="Change status"
+                >
+                  {(['in_store', 'deployed', 'faulty', 'retired'] as const).map((s) => (
+                    <option key={s} value={s}>{s.replace('_', ' ')}</option>
+                  ))}
+                </select>
+                <Btn variant="outline" onClick={() => openEdit(item)} title="Edit equipment"><Pencil className="h-3.5 w-3.5" /></Btn>
+                <Btn variant="danger" onClick={() => remove(item)} title="Delete equipment"><Trash2 className="h-3.5 w-3.5" /></Btn>
+              </div>
             </td>
           </tr>
         ))}
