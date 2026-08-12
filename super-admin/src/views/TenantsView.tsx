@@ -261,7 +261,7 @@ function CreateIspDialog({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
       <div
         className="w-full max-w-lg border p-5"
-        style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
+        style={{ background: 'var(--surface-1)', borderColor: 'var(--hairline-strong)' }}
       >
         <p className="text-sm font-bold">Onboard an ISP by hand</p>
         <p className="mt-1 text-xs leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
@@ -308,7 +308,7 @@ function CredentialsDialog({ result, onClose }: { result: ProvisionResult; onClo
   const block = `${result.console_url}\nPhone: ${result.owner_phone}\nPassword: ${result.temp_password}`;
 
   const row = (label: string, value: string) => (
-    <div className="flex items-center justify-between gap-3 border-b py-2" style={{ borderColor: 'var(--border)' }}>
+    <div className="flex items-center justify-between gap-3 border-b py-2" style={{ borderColor: 'var(--hairline-strong)' }}>
       <span className="text-[11px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>{label}</span>
       <span className="flex items-center gap-2">
         <span className="tnum text-sm">{value}</span>
@@ -321,7 +321,7 @@ function CredentialsDialog({ result, onClose }: { result: ProvisionResult; onClo
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="w-full max-w-md border p-5" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
+      <div className="w-full max-w-md border p-5" style={{ background: 'var(--surface-1)', borderColor: 'var(--hairline-strong)' }}>
         <p className="text-sm font-bold">{result.name || result.slug} is ready</p>
         <p className="mt-1 text-xs leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
           Send these to the owner. The password is shown <b>once</b> — it can't be retrieved
@@ -381,7 +381,7 @@ function ResetMfaDialog({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
       <div
         className="w-full max-w-md border p-5"
-        style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
+        style={{ background: 'var(--surface-1)', borderColor: 'var(--hairline-strong)' }}
       >
         <p className="text-sm font-bold">Reset 2FA for {tenant.name}</p>
         <p className="mt-2 text-xs leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
