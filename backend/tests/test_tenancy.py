@@ -279,3 +279,67 @@ class TestMe:
         assert data["is_platform_staff"] is True
         assert data["operator"]["slug"] == "wisp-a"
         assert data["acting_operator"]["slug"] == "wisp-a"
+
+
+class TestOwnSubdomainBeatsImpersonationCookie:
+    """The act_as cookie is shared across *.wifios.co.ke, so entering another ISP in Platform
+    Control must NOT hijack your OWN console in the same browser. On your own subdomain, you
+    always act as your own ISP — this is what lets admin. and homelink. stay open together."""
+
+    def test_own_subdomain_ignores_a_live_grant_for_another_isp(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from apps.accounts.cookie_auth import ACT_AS_COOKIE
+        from apps.core.models import ImpersonationGrant
+        from apps.pppoe.models import ServicePlan
+
+        home = OperatorFactory(slug="homelink", status=Operator.Status.ACTIVE)
+        other = OperatorFactory(slug="otherx", status=Operator.Status.ACTIVE)
+        ServicePlan.objects.create(operator=home, name="Home Plan", price=1000,
+                                   download_kbps=8192, upload_kbps=4096, mikrotik_profile="h")
+        ServicePlan.objects.create(operator=other, name="Other Plan", price=1000,
+                                   download_kbps=8192, upload_kbps=4096, mikrotik_profile="o")
+        owner = UserFactory(operator=home, is_staff=True, role=Role.PLATFORM_OWNER)
+        # They ARE impersonating otherx in Platform Control (live grant + shared act_as cookie)
+        ImpersonationGrant.objects.create(
+            actor=owner, operator=other, reason="support",
+            expires_at=timezone.now() + timedelta(hours=1),
+        )
+
+        c = APIClient()
+        c.force_authenticate(user=owner)
+        c.cookies[ACT_AS_COOKIE] = "otherx"
+
+        # ...but on their OWN subdomain they still see their OWN ISP, not otherx.
+        resp = c.get("/api/v1/pppoe/plans/", HTTP_HOST="homelink.wifios.co.ke")
+        names = [p["name"] for p in resp.json()["results"]]
+        assert "Home Plan" in names
+        assert "Other Plan" not in names
+
+    def test_impersonation_still_works_on_the_targets_own_subdomain(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from apps.accounts.cookie_auth import ACT_AS_COOKIE
+        from apps.core.models import ImpersonationGrant
+        from apps.pppoe.models import ServicePlan
+
+        home = OperatorFactory(slug="homelink", status=Operator.Status.ACTIVE)
+        other = OperatorFactory(slug="otherx", status=Operator.Status.ACTIVE)
+        ServicePlan.objects.create(operator=other, name="Other Plan", price=1000,
+                                   download_kbps=8192, upload_kbps=4096, mikrotik_profile="o")
+        owner = UserFactory(operator=home, is_staff=True, role=Role.PLATFORM_OWNER)
+        ImpersonationGrant.objects.create(
+            actor=owner, operator=other, reason="support",
+            expires_at=timezone.now() + timedelta(hours=1),
+        )
+        c = APIClient()
+        c.force_authenticate(user=owner)
+        c.cookies[ACT_AS_COOKIE] = "otherx"
+        # On otherx's OWN subdomain, the grant still lets them see otherx.
+        resp = c.get("/api/v1/pppoe/plans/", HTTP_HOST="otherx.wifios.co.ke")
+        names = [p["name"] for p in resp.json()["results"]]
+        assert "Other Plan" in names

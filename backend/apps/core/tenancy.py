@@ -119,6 +119,21 @@ def acting_tenant(request) -> Operator | None:
         # Platform staff may act as another tenant, but ONLY through a live,
         # audited ImpersonationGrant — never by simply setting a header.
         if user.is_platform_staff:
+            # On your OWN ISP's subdomain, act as your OWN ISP — full stop. The act_as
+            # impersonation cookie is shared across *.wifios.co.ke, so entering another ISP
+            # in Platform Control would otherwise hijack your own console (homelink.) in the
+            # same browser: "cannot load data" until you log out. The subdomain wins here, so
+            # admin. and homelink. can stay open side by side. Impersonating ANOTHER ISP still
+            # works — that happens on their subdomain (host != your operator) or on admin.
+            # (a reserved host with no tenant), neither of which matches this guard.
+            host_tenant = getattr(request, "tenant", None)
+            if (
+                host_tenant is not None
+                and user.operator_id
+                and host_tenant.pk == user.operator_id
+            ):
+                return host_tenant
+
             requested = _requested_tenant(request)
             if not requested:
                 return user.operator  # their own ISP, if they run one
