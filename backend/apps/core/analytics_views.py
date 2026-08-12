@@ -42,6 +42,21 @@ RECURRING_TYPES = [
 
 _MONEY = DecimalField(max_digits=14, decimal_places=2)
 
+# The DEMO tenant is a showcase, not a real business — it moves no real money. Platform
+# analytics must treat it as if it doesn't exist, or its seeded data would inflate every
+# headline (tenant counts, volume, routers). Exclude it everywhere the numbers are summed;
+# its fees are likewise never charged (see apps/billing). `_not_demo` filters the money
+# models by their operator FK; `real_operators()` is the Operator queryset.
+#
+# NOTE: ~Q(is_demo=True), NOT Q(is_demo=False). An UNMATCHED C2B payment has a NULL operator
+# (it matched no ISP), and `operator__is_demo=False` would drop those rows (SQL NULL logic) —
+# silently hiding the very alert Platform Control needs. The negated form keeps NULLs.
+_not_demo = ~Q(operator__is_demo=True)
+
+
+def real_operators():
+    return Operator.objects.exclude(is_demo=True)
+
 
 def _sum(qs, field="amount") -> Decimal:
     return qs.aggregate(v=Coalesce(Sum(field), Value(Decimal("0")), output_field=_MONEY))["v"]
@@ -77,17 +92,19 @@ class PlatformKpisView(APIView):
         costs_month = (
             _sum(
                 Transaction.objects.filter(
+                    _not_demo,
                     status__in=Transaction.SUCCESS_STATUSES,
                     callback_received_at__gte=month_start,
                 ),
                 "platform_cost",
             )
             + _sum(
-                C2BPayment.objects.filter(received_at__gte=month_start), "platform_cost"
+                C2BPayment.objects.filter(_not_demo, received_at__gte=month_start),
+                "platform_cost",
             )
             + _sum(
                 Payout.objects.filter(
-                    status=Payout.Status.PAID, processed_at__gte=month_start
+                    _not_demo, status=Payout.Status.PAID, processed_at__gte=month_start
                 ),
                 "platform_cost",
             )
@@ -95,7 +112,7 @@ class PlatformKpisView(APIView):
 
         gross_volume_month = _sum(
             LedgerEntry.objects.filter(
-                entry_type=LedgerEntry.Type.SALE, created_at__gte=month_start
+                _not_demo, entry_type=LedgerEntry.Type.SALE, created_at__gte=month_start
             )
         )
         # Float = every ISP wallet balance summed = what we owe them, and therefore what we
@@ -103,27 +120,29 @@ class PlatformKpisView(APIView):
         # touched our account, so counting them here would inflate our float by money that
         # was never ours to hold — and this number is what tells us we can cover a payout
         # run.
-        float_held = _sum(LedgerEntry.objects.filter(settlement=Settlement.PLATFORM))
+        float_held = _sum(
+            LedgerEntry.objects.filter(_not_demo, settlement=Settlement.PLATFORM)
+        )
 
         # --- Alerts (things a human must act on) ------------------------------
-        pending_approvals = Operator.objects.filter(status=Operator.Status.PENDING).count()
-        trials_expiring = Operator.objects.filter(
+        pending_approvals = real_operators().filter(status=Operator.Status.PENDING).count()
+        trials_expiring = real_operators().filter(
             status=Operator.Status.ACTIVE,
             trial_ends_at__isnull=False,
             trial_ends_at__gte=today,
             trial_ends_at__lte=today + timedelta(days=7),
         ).count()
-        pending_payouts = Payout.objects.filter(status=Payout.Status.REQUESTED)
+        pending_payouts = Payout.objects.filter(_not_demo, status=Payout.Status.REQUESTED)
         stale_payouts = pending_payouts.filter(
             created_at__lte=now - timedelta(days=2)
         ).count()
         unmatched_c2b = C2BPayment.objects.filter(
-            status=C2BPayment.Status.UNMATCHED
+            _not_demo, status=C2BPayment.Status.UNMATCHED
         ).count()
 
         from apps.provisioning.models import Router, Session
 
-        routers = Router.objects.filter(is_active=True)
+        routers = Router.objects.filter(_not_demo, is_active=True)
         routers_total = routers.count()
         routers_online = routers.filter(status=Router.Status.ONLINE).count()
 
@@ -147,18 +166,18 @@ class PlatformKpisView(APIView):
                 "gross_volume_month": gross_volume_month,
                 "float_held": float_held,
                 # Tenants
-                "tenants_active": Operator.objects.filter(
+                "tenants_active": real_operators().filter(
                     status=Operator.Status.ACTIVE
                 ).count(),
-                "tenants_total": Operator.objects.count(),
-                "new_tenants_30d": Operator.objects.filter(
+                "tenants_total": real_operators().count(),
+                "new_tenants_30d": real_operators().filter(
                     created_at__gte=now - timedelta(days=30)
                 ).count(),
                 # Fleet
                 "routers_online": routers_online,
                 "routers_total": routers_total,
                 "active_sessions": Session.objects.filter(
-                    status=Session.Status.ACTIVE
+                    _not_demo, status=Session.Status.ACTIVE
                 ).count(),
                 # Alerts — each is a number that should be zero
                 "alerts": {
@@ -204,17 +223,18 @@ class PlatformTimeseriesView(APIView):
         from apps.billing.revenue import PLATFORM_REVENUE_REASONS
 
         sales = daily(
-            LedgerEntry.objects.filter(entry_type=LedgerEntry.Type.SALE), "created_at"
+            LedgerEntry.objects.filter(_not_demo, entry_type=LedgerEntry.Type.SALE),
+            "created_at",
         )
         # Earnings span both ledgers now: aggregator commission withheld in the wallet PLUS
         # every fee accrued on the platform account. Merge the two daily series so no day
         # under-reports.
         earn_wallet = daily(
-            LedgerEntry.objects.filter(entry_type=LedgerEntry.Type.COMMISSION),
+            LedgerEntry.objects.filter(_not_demo, entry_type=LedgerEntry.Type.COMMISSION),
             "created_at", negate=True,
         )
         earn_platform = daily(
-            PlatformLedgerEntry.objects.filter(reason__in=PLATFORM_REVENUE_REASONS),
+            PlatformLedgerEntry.objects.filter(_not_demo, reason__in=PLATFORM_REVENUE_REASONS),
             "created_at", negate=True,
         )
         earnings = {
@@ -222,13 +242,13 @@ class PlatformTimeseriesView(APIView):
             for d in set(earn_wallet) | set(earn_platform)
         }
         tx_costs = daily(
-            Transaction.objects.filter(status__in=Transaction.SUCCESS_STATUSES),
+            Transaction.objects.filter(_not_demo, status__in=Transaction.SUCCESS_STATUSES),
             "callback_received_at",
             "platform_cost",
         )
-        c2b_costs = daily(C2BPayment.objects.all(), "received_at", "platform_cost")
+        c2b_costs = daily(C2BPayment.objects.filter(_not_demo), "received_at", "platform_cost")
         signups = (
-            Operator.objects.filter(created_at__gte=start)
+            real_operators().filter(created_at__gte=start)
             .annotate(d=TruncDate("created_at"))
             .values("d")
             .annotate(n=Count("id"))
@@ -270,7 +290,9 @@ class TenantPnlView(APIView):
 
     def get(self, request):
         rows = []
-        operators = Operator.objects.all().order_by("name")
+        # The demo tenant is excluded — the per-operator aggregate dicts below may still
+        # contain its id, but the loop only walks THIS list, so it never appears in the P&L.
+        operators = real_operators().order_by("name")
 
         from apps.billing.models import PlatformLedgerEntry
         from apps.billing.revenue import PLATFORM_REVENUE_REASONS
@@ -399,7 +421,7 @@ class PlatformSearchView(APIView):
         # ISPs
         results["tenants"] = [
             {"id": o.id, "slug": o.slug, "name": o.name, "status": o.status}
-            for o in Operator.objects.filter(
+            for o in real_operators().filter(
                 Q(name__icontains=q) | Q(slug__icontains=q) | Q(contact_phone__icontains=q)
             )[: self.LIMIT]
         ]
@@ -417,9 +439,10 @@ class PlatformSearchView(APIView):
             }
             for t in Transaction.objects.select_related("operator")
             .filter(
+                _not_demo,
                 Q(mpesa_receipt__iexact=q)
                 | Q(phone__icontains=q)
-                | Q(checkout_request_id__iexact=q)
+                | Q(checkout_request_id__iexact=q),
             )
             .order_by("-created_at")[: self.LIMIT]
         ]
@@ -438,7 +461,8 @@ class PlatformSearchView(APIView):
             }
             for p in C2BPayment.objects.select_related("operator")
             .filter(
-                Q(trans_id__iexact=q) | Q(bill_ref__icontains=q) | Q(msisdn__icontains=q)
+                _not_demo,
+                Q(trans_id__iexact=q) | Q(bill_ref__icontains=q) | Q(msisdn__icontains=q),
             )
             .order_by("-received_at")[: self.LIMIT]
         ]
@@ -457,10 +481,11 @@ class PlatformSearchView(APIView):
                 "plan": c.plan.name if c.plan_id else "",
             }
             for c in Client.objects.select_related("operator", "plan").filter(
+                _not_demo,
                 Q(account_number__icontains=q)
                 | Q(full_name__icontains=q)
                 | Q(phone__icontains=q)
-                | Q(pppoe_username__icontains=q)
+                | Q(pppoe_username__icontains=q),
             )[: self.LIMIT]
         ]
 
@@ -475,7 +500,7 @@ class PlatformSearchView(APIView):
                 "name": s.name,
             }
             for s in Subscriber.objects.select_related("operator").filter(
-                Q(phone__icontains=q) | Q(name__icontains=q)
+                _not_demo, Q(phone__icontains=q) | Q(name__icontains=q)
             )[: self.LIMIT]
         ]
 
@@ -491,7 +516,7 @@ class PlatformSearchView(APIView):
                 "status": r.status,
             }
             for r in Router.objects.select_related("operator").filter(
-                Q(name__icontains=q) | Q(management_host__icontains=q)
+                _not_demo, Q(name__icontains=q) | Q(management_host__icontains=q)
             )[: self.LIMIT]
         ]
 

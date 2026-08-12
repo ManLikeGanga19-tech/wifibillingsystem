@@ -533,13 +533,15 @@ class PlatformOverviewView(APIView):
 
         now = timezone.now()
         month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        # The DEMO tenant is excluded everywhere — platform numbers are real money only.
+        real = Operator.objects.exclude(is_demo=True)
         paid_month = Transaction.objects.filter(
             status__in=Transaction.SUCCESS_STATUSES, callback_received_at__gte=month_start
-        )
+        ).exclude(operator__is_demo=True)
         commission_month = (
             LedgerEntry.objects.filter(
                 entry_type=LedgerEntry.Type.COMMISSION, created_at__gte=month_start
-            ).aggregate(v=Sum("amount"))["v"]
+            ).exclude(operator__is_demo=True).aggregate(v=Sum("amount"))["v"]
             or 0
         )
         fees_month = (
@@ -550,34 +552,29 @@ class PlatformOverviewView(APIView):
                     LedgerEntry.Type.SETUP_FEE,
                 ],
                 created_at__gte=month_start,
-            ).aggregate(v=Sum("amount"))["v"]
+            ).exclude(operator__is_demo=True).aggregate(v=Sum("amount"))["v"]
             or 0
         )
         return Response(
             {
                 "scope": "all_isps",  # never confuse with a single tenant's data
-                "tenants_total": Operator.objects.count(),
-                "tenants_pending": Operator.objects.filter(
-                    status=Operator.Status.PENDING
-                ).count(),
-                "tenants_active": Operator.objects.filter(
-                    status=Operator.Status.ACTIVE
-                ).count(),
-                "tenants_suspended": Operator.objects.filter(
-                    status=Operator.Status.SUSPENDED
-                ).count(),
+                "tenants_total": real.count(),
+                "tenants_pending": real.filter(status=Operator.Status.PENDING).count(),
+                "tenants_active": real.filter(status=Operator.Status.ACTIVE).count(),
+                "tenants_suspended": real.filter(status=Operator.Status.SUSPENDED).count(),
                 # Platform earnings = commissions + fees withheld (stored negative)
                 "platform_revenue_month": -(commission_month + fees_month),
                 "gross_volume_month": paid_month.aggregate(v=Sum("amount"))["v"] or 0,
                 "transactions_month": paid_month.count(),
                 "routers_online": Router.objects.filter(
                     is_active=True, status=Router.Status.ONLINE
-                ).count(),
-                "routers_total": Router.objects.filter(is_active=True).count(),
+                ).exclude(operator__is_demo=True).count(),
+                "routers_total": Router.objects.filter(is_active=True)
+                .exclude(operator__is_demo=True).count(),
                 "active_sessions": Session.objects.filter(
                     status=Session.Status.ACTIVE
-                ).count(),
-                "new_tenants_30d": Operator.objects.filter(
+                ).exclude(operator__is_demo=True).count(),
+                "new_tenants_30d": real.filter(
                     created_at__gte=now - timedelta(days=30)
                 ).count(),
             }

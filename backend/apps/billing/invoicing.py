@@ -106,7 +106,7 @@ def issue_monthly_invoices(period: str = "") -> int:
 
     period = period or _prior_period()
     issued = 0
-    for operator in Operator.objects.filter(is_platform_owned=False):
+    for operator in Operator.objects.filter(is_platform_owned=False, is_demo=False):
         if build_invoice(operator, period) is not None:
             issued += 1
     return issued

@@ -57,6 +57,10 @@ def platform_earnings(*, start=None, end=None, operator=None, recurring_only=Fal
     if operator is not None:
         plat = plat.filter(operator=operator)
         wallet = wallet.filter(operator=operator)
+    else:
+        # Platform-wide totals ignore the DEMO tenant — it earns no real revenue.
+        plat = plat.exclude(operator__is_demo=True)
+        wallet = wallet.exclude(operator__is_demo=True)
     if start is not None:
         plat = plat.filter(created_at__gte=start)
         wallet = wallet.filter(created_at__gte=start)
@@ -72,7 +76,7 @@ def platform_earnings_by_stream(*, start=None, end=None) -> dict[str, Decimal]:
     the same 'commission' stream from the platform's point of view."""
     result: dict[str, Decimal] = {}
     for reason in PLATFORM_REVENUE_REASONS:
-        qs = PlatformLedgerEntry.objects.filter(reason=reason)
+        qs = PlatformLedgerEntry.objects.filter(reason=reason).exclude(operator__is_demo=True)
         if start is not None:
             qs = qs.filter(created_at__gte=start)
         if end is not None:
@@ -80,7 +84,9 @@ def platform_earnings_by_stream(*, start=None, end=None) -> dict[str, Decimal]:
         result[reason] = -_sum(qs)
 
     # Fold the withheld aggregator commission into the commission stream.
-    wallet = LedgerEntry.objects.filter(entry_type=LedgerEntry.Type.COMMISSION)
+    wallet = LedgerEntry.objects.filter(
+        entry_type=LedgerEntry.Type.COMMISSION
+    ).exclude(operator__is_demo=True)
     if start is not None:
         wallet = wallet.filter(created_at__gte=start)
     if end is not None:

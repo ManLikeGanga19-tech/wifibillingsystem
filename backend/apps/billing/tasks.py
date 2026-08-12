@@ -63,8 +63,10 @@ def warn_past_due_operators():
     from apps.notifications.services import send_sms
 
     warned = 0
-    # Only tenants that can actually owe — skip the platform's own WISP.
-    for operator in Operator.objects.filter(is_platform_owned=False, is_active=True):
+    # Only tenants that can actually owe — skip the platform's own WISP and the demo tenant.
+    for operator in Operator.objects.filter(
+        is_platform_owned=False, is_demo=False, is_active=True
+    ):
         level = enf.billing_level(operator)
         past_warn = level in (enf.WARNED, enf.RESTRICTED, enf.LOCKED)
 
