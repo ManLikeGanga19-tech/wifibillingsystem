@@ -99,7 +99,7 @@ def charge_pppoe_user_fees() -> int:
     period = timezone.localdate().strftime("%Y-%m")
     charged = 0
     operators = Operator.objects.filter(
-        status=Operator.Status.ACTIVE, is_platform_owned=False
+        status=Operator.Status.ACTIVE, is_platform_owned=False, is_demo=False
     )
     for operator in operators:
         active = Client.objects.filter(
@@ -394,7 +394,8 @@ def charge_monthly_base_fees() -> int:
     charged = 0
     operators = list(
         Operator.objects.filter(
-            status=Operator.Status.ACTIVE, base_fee__gt=0, is_platform_owned=False
+            status=Operator.Status.ACTIVE, base_fee__gt=0,
+            is_platform_owned=False, is_demo=False,
         )
     )
     for operator in operators:
