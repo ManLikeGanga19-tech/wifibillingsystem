@@ -382,6 +382,27 @@ def reject_payout(payout: Payout, *, by, note: str) -> Payout:
     return payout
 
 
+def adjust_wallet(operator, *, amount: Decimal, reason: str, actor) -> LedgerEntry:
+    """Platform-owner manual wallet correction: credit (+) or debit (-) an ISP's wallet with
+    an audited reason. NOT a cash movement — it moves the ledger balance (hence what we owe
+    the ISP and what they can withdraw), so it's owner-gated and always recorded. A positive
+    amount gives them money (goodwill, a fee waiver); a negative one takes it (an error fix)."""
+    amount = Decimal(amount)
+    if amount == 0:
+        raise WalletError("An adjustment must be a non-zero amount.")
+    if not (reason or "").strip():
+        raise WalletError("An adjustment needs a reason — it is recorded against your name.")
+    entry = LedgerEntry.objects.create(
+        operator=operator,
+        entry_type=LedgerEntry.Type.ADJUSTMENT,
+        amount=amount,
+        memo=f"Manual adjustment: {reason.strip()}"[:200],
+    )
+    audit("wallet_adjusted", operator=operator, actor=actor, target=operator,
+          amount=str(amount), reason=reason.strip())
+    return entry
+
+
 def charge_monthly_base_fees() -> int:
     """Beat task body (1st of month): deduct each active tenant's base fee.
     Idempotent per (operator, month) via DB constraint."""

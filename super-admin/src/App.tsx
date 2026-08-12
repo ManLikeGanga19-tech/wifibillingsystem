@@ -4,6 +4,7 @@ import {
   Building2,
   Gauge,
   Globe,
+  LineChart,
   Loader2,
   Search as SearchIcon,
   ShieldAlert,
@@ -17,12 +18,13 @@ import { ToastHost } from './components/ui';
 import LoginView from './components/LoginView';
 import CommandCenter from './views/CommandCenter';
 import FinanceView from './views/FinanceView';
+import GrowthView from './views/GrowthView';
 import GovernanceView from './views/GovernanceView';
 import OpsView from './views/OpsView';
 import SearchView from './views/SearchView';
 import TenantsView from './views/TenantsView';
 
-type Tab = 'command' | 'finance' | 'tenants' | 'ops' | 'governance' | 'search';
+type Tab = 'command' | 'finance' | 'growth' | 'tenants' | 'ops' | 'governance' | 'search';
 
 /** The sections the URL may name; anything else falls back to the Command Center. */
 const KNOWN_TABS: ReadonlySet<Tab> = new Set<Tab>([
@@ -44,6 +46,7 @@ const NAV: { title: string | null; items: { id: Tab; label: string; icon: typeof
     title: 'Danamo Tech',
     items: [
       { id: 'finance', label: 'Finance', icon: TrendingUp },
+      { id: 'growth', label: 'Growth', icon: LineChart },
       { id: 'tenants', label: 'ISP Tenants', icon: Building2 },
     ],
   },
@@ -266,6 +269,7 @@ export default function App() {
                 }}
               />
             )}
+            {tab === 'growth' && <GrowthView />}
             {tab === 'tenants' && <TenantsView openId={openTenant} onOpen={setOpenTenant} />}
             {tab === 'ops' && <OpsView />}
             {tab === 'governance' && <GovernanceView />}

@@ -95,6 +95,31 @@ export interface Pnl {
   tenants: PnlRow[];
 }
 
+export interface MrrMonth {
+  month: string; // "YYYY-MM"
+  mrr: Money;
+  new: Money;
+  expansion: Money;
+  contraction: Money;
+  churned: Money;
+  net: Money;
+  new_tenants: number;
+  churned_tenants: number;
+  tenant_churn_rate: number | null;
+}
+export interface MrrMover {
+  operator: number;
+  name: string;
+  delta: Money;
+  mrr: Money;
+  bucket: 'new' | 'expansion' | 'contraction' | 'churned';
+}
+export interface MrrMovement {
+  as_of: string;
+  months: MrrMonth[];
+  movers: MrrMover[];
+}
+
 export interface UnmatchedSuggestion {
   client_id: number;
   account_number: string;
@@ -286,6 +311,7 @@ export const api = {
   timeseries: (days: number) =>
     get<{ days: number; series: SeriesPoint[] }>(`/platform/timeseries/?days=${days}`),
   pnl: () => get<Pnl>('/platform/tenant-pnl/'),
+  mrrMovement: (months: number) => get<MrrMovement>(`/platform/mrr-movement/?months=${months}`),
   search: (q: string) => get<SearchResults>(`/platform/search/?q=${encodeURIComponent(q)}`),
 
   /** The unmatched-payments queue: money that landed on a mistyped account number. */
@@ -305,6 +331,9 @@ export const api = {
       post<ProvisionResult>('/platform/tenants/provision/', body),
     /** One click stands up (or refreshes) the read-only demo tenant. */
     createDemo: () => post<ProvisionResult>('/platform/tenants/create-demo/', {}),
+    /** Credit (+) or debit (-) a tenant's wallet with an audited reason. Owner-only. */
+    adjust: (id: number, amount: string, reason: string) =>
+      post<{ detail: string; amount: string }>(`/platform/tenants/${id}/adjust/`, { amount, reason }),
     detail: (id: number) => get<TenantDetail>(`/platform/tenants/${id}/detail_stats/`),
     update: (id: number, body: Partial<Tenant>) => patch<Tenant>(`/platform/tenants/${id}/`, body),
     approve: (id: number) => post<unknown>(`/platform/tenants/${id}/approve/`),

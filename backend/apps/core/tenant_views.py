@@ -2,6 +2,7 @@
 own business/M-Pesa settings."""
 
 import secrets
+from decimal import Decimal
 
 from django.db import IntegrityError
 from django.db import transaction as db_transaction
@@ -272,6 +273,33 @@ class PlatformTenantViewSet(viewsets.ModelViewSet):
                 "temp_password": DEMO_OWNER_PASSWORD,
                 "detail": "The read-only demo tenant is ready.",
             },
+            status=status.HTTP_201_CREATED,
+        )
+
+    @extend_schema(request=OBJECT_REQUEST, responses=OBJECT_RESPONSE,
+                   summary="Manually adjust a tenant's wallet balance")
+    @action(detail=True, methods=["post"])
+    def adjust(self, request, pk=None):
+        """Credit (+) or debit (-) an ISP's wallet with a recorded reason. Owner-gated (see
+        get_permissions). Not a cash movement — a ledger correction that changes what we owe
+        them, so a reason is mandatory and it's audited against your name."""
+        from decimal import InvalidOperation
+
+        from apps.billing.services import WalletError, adjust_wallet
+
+        operator = self.get_object()
+        try:
+            amount = Decimal(str(request.data.get("amount")))
+        except (TypeError, ValueError, InvalidOperation):
+            return Response({"detail": "Enter a valid amount."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        reason = (request.data.get("reason") or "").strip()
+        try:
+            adjust_wallet(operator, amount=amount, reason=reason, actor=request.user)
+        except WalletError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {"detail": "Wallet adjusted.", "amount": str(amount)},
             status=status.HTTP_201_CREATED,
         )
 
