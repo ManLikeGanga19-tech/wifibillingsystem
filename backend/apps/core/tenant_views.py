@@ -1,6 +1,9 @@
 """Tenant lifecycle: public ISP signup, platform approval queue, and the ISP's
 own business/M-Pesa settings."""
 
+import secrets
+
+from django.db import IntegrityError
 from django.db import transaction as db_transaction
 from django.db.models import Count, Q
 from django.utils import timezone
@@ -24,7 +27,7 @@ from .permissions import (
     RequireTenant,
 )
 from .public import PublicAPIView
-from .schema import OBJECT_RESPONSE
+from .schema import OBJECT_REQUEST, OBJECT_RESPONSE
 from .services import audit
 from .tenancy import acting_tenant
 
@@ -173,6 +176,103 @@ class PlatformTenantViewSet(viewsets.ModelViewSet):
                 "can_transact": operator.can_transact,
                 "settlement_verified": operator.settlement_verified_at is not None,
             }
+        )
+
+    @extend_schema(request=OBJECT_REQUEST, responses=OBJECT_RESPONSE,
+                   summary="Manually provision an ISP tenant + owner login")
+    @action(detail=False, methods=["post"])
+    def provision(self, request):
+        """Hand-onboard an ISP from Platform Control — the manual alternative to the
+        marketing signup wizard. Creates the operator AND its owner login with a temporary
+        password, then returns the credentials ONCE so you can pass them to the ISP yourself.
+
+        Lands PENDING, exactly like self-signup: they can sign in and configure straight
+        away, but cannot take money until their settlement account is verified (or you
+        approve them). Owner-gated."""
+        name = (request.data.get("name") or "").strip()
+        owner_name = (request.data.get("owner_name") or name).strip()
+        raw_slug = (request.data.get("slug") or "").strip().lower()
+
+        if not name:
+            return Response({"detail": "A company name is required."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        try:
+            phone = normalize_msisdn(request.data.get("owner_phone") or "")
+        except InvalidPhoneError:
+            return Response({"detail": "Enter a valid Kenyan phone number."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        slug = slugify(raw_slug or name)[:50]
+        if not slug:
+            return Response({"detail": "Could not derive a subdomain — set one explicitly."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if slug in Operator.RESERVED_SLUGS:
+            return Response({"detail": f"'{slug}' is reserved — choose another subdomain."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if Operator.objects.filter(slug=slug).exists():
+            return Response({"detail": f"The subdomain '{slug}' is already taken."},
+                            status=status.HTTP_409_CONFLICT)
+
+        password = secrets.token_urlsafe(9)
+        try:
+            with db_transaction.atomic():
+                operator = Operator.objects.create(
+                    name=name, slug=slug, status=Operator.Status.PENDING,
+                    owner_name=owner_name, contact_phone=phone,
+                )
+                User.objects.create_user(
+                    phone=phone, password=password, name=owner_name,
+                    operator=operator, is_staff=True, role=Role.TENANT_OWNER,
+                )
+        except IntegrityError:
+            # The DB is the referee: the name/subdomain/phone was taken in the last instant.
+            return Response(
+                {"detail": "That name, subdomain or phone was just taken — try again."},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        audit("tenant_provisioned_by_platform", operator=operator, actor=request.user,
+              target=operator, slug=slug)
+        return Response(
+            {
+                "slug": slug,
+                "name": name,
+                "console_url": f"https://{slug}.wifios.co.ke",
+                "owner_phone": phone,
+                "owner_name": owner_name,
+                "temp_password": password,
+                "status": operator.status,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+    @extend_schema(request=OBJECT_REQUEST, responses=OBJECT_RESPONSE,
+                   summary="Create or refresh the read-only demo tenant")
+    @action(detail=False, methods=["post"], url_path="create-demo")
+    def create_demo(self, request):
+        """One click stands up (or refreshes) the fully-seeded read-only demo tenant, so
+        demo.wifios.co.ke works without touching the server. Idempotent — safe to re-run to
+        get a clean showcase. Owner-gated."""
+        from django.core.management import call_command
+
+        from .management.commands.seed_demo import (
+            DEMO_OWNER_PASSWORD,
+            DEMO_OWNER_PHONE,
+            DEMO_SLUG,
+        )
+
+        call_command("seed_demo")
+        operator = Operator.objects.filter(slug=DEMO_SLUG).first()
+        audit("demo_tenant_seeded", operator=operator, actor=request.user, target=operator)
+        return Response(
+            {
+                "slug": DEMO_SLUG,
+                "console_url": f"https://{DEMO_SLUG}.wifios.co.ke",
+                "owner_phone": DEMO_OWNER_PHONE,
+                "temp_password": DEMO_OWNER_PASSWORD,
+                "detail": "The read-only demo tenant is ready.",
+            },
+            status=status.HTTP_201_CREATED,
         )
 
     @action(detail=True, methods=["get"])

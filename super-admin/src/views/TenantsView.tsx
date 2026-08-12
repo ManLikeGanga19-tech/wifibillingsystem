@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { ArrowLeft, Ban, Check, Eye, Receipt, SmartphoneNfc } from 'lucide-react';
-import { api, dt, ksh, num, type Tenant } from '../api/client';
+import { ArrowLeft, Ban, Check, Copy, Eye, Plus, Receipt, Sparkles, SmartphoneNfc } from 'lucide-react';
+import { api, dt, ksh, num, type ProvisionResult, type Tenant } from '../api/client';
 import {
   Badge,
   Btn,
@@ -38,6 +38,24 @@ function TenantList({ onOpen }: { onOpen: (id: number) => void }) {
   const { data, error, reload } = useLoad(() => api.tenants.list(), []);
   // Declared before the early returns — hooks cannot live behind a conditional.
   const [resetting, setResetting] = useState<Tenant | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [creds, setCreds] = useState<ProvisionResult | null>(null);
+  const [demoBusy, setDemoBusy] = useState(false);
+
+  const createDemo = async () => {
+    if (demoBusy) return;
+    setDemoBusy(true);
+    try {
+      const r = await api.tenants.createDemo();
+      setCreds(r);
+      reload();
+    } catch {
+      toast('red', 'Could not create the demo tenant.');
+    } finally {
+      setDemoBusy(false);
+    }
+  };
+
   if (error) return <ErrorBox message={error} onRetry={reload} />;
   if (!data) return <Spinner />;
 
@@ -55,7 +73,17 @@ function TenantList({ onOpen }: { onOpen: (id: number) => void }) {
     <Panel
       title="ISP tenants"
       subtitle="Every ISP on the platform. Click one to open its full profile."
-      right={<RefreshBtn onClick={reload} />}
+      right={
+        <div className="flex flex-wrap gap-2">
+          <Btn onClick={createDemo} disabled={demoBusy} title="Stand up (or refresh) the read-only demo tenant">
+            <Sparkles className="h-3.5 w-3.5" /> {demoBusy ? 'Creating…' : 'Create demo'}
+          </Btn>
+          <Btn variant="dark" onClick={() => setCreating(true)} title="Onboard an ISP by hand, skipping the signup wizard">
+            <Plus className="h-3.5 w-3.5" /> New ISP
+          </Btn>
+          <RefreshBtn onClick={reload} />
+        </div>
+      }
     >
       {data.results.length === 0 ? (
         <Empty message="No ISPs yet." />
@@ -161,7 +189,159 @@ function TenantList({ onOpen }: { onOpen: (id: number) => void }) {
           }}
         />
       )}
+
+      {creating && (
+        <CreateIspDialog
+          onClose={() => setCreating(false)}
+          onCreated={(r) => {
+            setCreating(false);
+            setCreds(r);
+            reload();
+          }}
+        />
+      )}
+
+      {creds && <CredentialsDialog result={creds} onClose={() => setCreds(null)} />}
     </Panel>
+  );
+}
+
+/**
+ * Hand-onboard an ISP — the manual path when someone signs up over the phone or in person,
+ * so they never touch the marketing wizard. We create the operator and its owner login; the
+ * ISP lands PENDING (can configure, cannot take money until settlement is verified).
+ */
+function CreateIspDialog({
+  onClose,
+  onCreated,
+}: {
+  onClose: () => void;
+  onCreated: (r: ProvisionResult) => void;
+}) {
+  const [form, setForm] = useState({ name: '', slug: '', owner_name: '', owner_phone: '' });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  const set = (k: keyof typeof form, v: string) => setForm({ ...form, [k]: v });
+
+  const submit = async () => {
+    if (busy || !form.name.trim() || !form.owner_phone.trim()) return;
+    setBusy(true);
+    setErr('');
+    try {
+      const r = await api.tenants.provision({
+        name: form.name.trim(),
+        slug: form.slug.trim(),
+        owner_name: form.owner_name.trim() || form.name.trim(),
+        owner_phone: form.owner_phone.trim(),
+      });
+      onCreated(r);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not create the ISP.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const field = (k: keyof typeof form, label: string, placeholder: string) => (
+    <label className="block">
+      <span className="text-[11px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+        {label}
+      </span>
+      <input
+        value={form[k]}
+        onChange={(e) => set(k, e.target.value)}
+        placeholder={placeholder}
+        className="mt-1 w-full"
+      />
+    </label>
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div
+        className="w-full max-w-lg border p-5"
+        style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
+      >
+        <p className="text-sm font-bold">Onboard an ISP by hand</p>
+        <p className="mt-1 text-xs leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+          Creates the ISP and its owner login. You'll get a temporary password to pass on —
+          they change it after signing in. They land pending until settlement is verified.
+        </p>
+
+        <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {field('name', 'Company name', 'Sunrise Networks')}
+          {field('slug', 'Subdomain (optional)', 'sunrise')}
+          {field('owner_name', 'Owner name', 'Jane Owner')}
+          {field('owner_phone', 'Owner phone', '0712 345 678')}
+        </div>
+        <p className="mt-2 text-[10px]" style={{ color: 'var(--text-muted)' }}>
+          Leave the subdomain blank to derive it from the company name. Their console will be
+          at <span className="tnum">{(form.slug.trim() || 'name') + '.wifios.co.ke'}</span>.
+        </p>
+
+        {err && <p className="mt-3 text-xs" style={{ color: 'var(--danger, #B22222)' }}>{err}</p>}
+
+        <div className="mt-4 flex justify-end gap-2">
+          <Btn onClick={onClose}>Cancel</Btn>
+          <Btn variant="dark" onClick={submit} disabled={busy || !form.name.trim() || !form.owner_phone.trim()}>
+            {busy ? 'Creating…' : 'Create ISP'}
+          </Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The credentials, shown ONCE. There's no way to reveal the temporary password again (it's
+ * hashed the moment it's set), so this dialog is the one chance to copy and send it.
+ */
+function CredentialsDialog({ result, onClose }: { result: ProvisionResult; onClose: () => void }) {
+  const copy = (text: string, what: string) => {
+    navigator.clipboard?.writeText(text).then(
+      () => toast('green', `${what} copied.`),
+      () => toast('red', 'Copy failed — select it by hand.'),
+    );
+  };
+
+  const block = `${result.console_url}\nPhone: ${result.owner_phone}\nPassword: ${result.temp_password}`;
+
+  const row = (label: string, value: string) => (
+    <div className="flex items-center justify-between gap-3 border-b py-2" style={{ borderColor: 'var(--border)' }}>
+      <span className="text-[11px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>{label}</span>
+      <span className="flex items-center gap-2">
+        <span className="tnum text-sm">{value}</span>
+        <button onClick={() => copy(value, label)} title={`Copy ${label}`} className="opacity-70 hover:opacity-100">
+          <Copy className="h-3.5 w-3.5" />
+        </button>
+      </span>
+    </div>
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="w-full max-w-md border p-5" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
+        <p className="text-sm font-bold">{result.name || result.slug} is ready</p>
+        <p className="mt-1 text-xs leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+          Send these to the owner. The password is shown <b>once</b> — it can't be retrieved
+          later, only reset.
+        </p>
+
+        <div className="mt-3">
+          {row('Console', result.console_url)}
+          {row('Phone', result.owner_phone)}
+          {row('Password', result.temp_password)}
+        </div>
+
+        <div className="mt-4 flex justify-between gap-2">
+          <Btn onClick={() => copy(block, 'Login details')}>
+            <Copy className="h-3.5 w-3.5" /> Copy all
+          </Btn>
+          <Btn variant="dark" onClick={onClose}>Done</Btn>
+        </div>
+      </div>
+    </div>
   );
 }
 

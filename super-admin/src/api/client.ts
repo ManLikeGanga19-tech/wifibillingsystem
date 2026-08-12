@@ -115,6 +115,18 @@ export interface UnmatchedPayment {
   suggestions: UnmatchedSuggestion[];
 }
 
+/** The one-time credentials returned when you provision a tenant by hand. */
+export interface ProvisionResult {
+  slug: string;
+  name?: string;
+  console_url: string;
+  owner_phone: string;
+  owner_name?: string;
+  temp_password: string;
+  status?: string;
+  detail?: string;
+}
+
 export interface Tenant {
   id: number;
   name: string;
@@ -287,6 +299,12 @@ export const api = {
 
   tenants: {
     list: () => get<Page<Tenant>>('/platform/tenants/'),
+    /** Hand-onboard an ISP (skip the marketing signup wizard). Returns the owner's login,
+     *  shown once so you can pass it on yourself. */
+    provision: (body: { name: string; slug: string; owner_phone: string; owner_name: string }) =>
+      post<ProvisionResult>('/platform/tenants/provision/', body),
+    /** One click stands up (or refreshes) the read-only demo tenant. */
+    createDemo: () => post<ProvisionResult>('/platform/tenants/create-demo/', {}),
     detail: (id: number) => get<TenantDetail>(`/platform/tenants/${id}/detail_stats/`),
     update: (id: number, body: Partial<Tenant>) => patch<Tenant>(`/platform/tenants/${id}/`, body),
     approve: (id: number) => post<unknown>(`/platform/tenants/${id}/approve/`),
