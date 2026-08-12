@@ -28,7 +28,7 @@ type Tab = 'command' | 'finance' | 'growth' | 'tenants' | 'ops' | 'governance' |
 
 /** The sections the URL may name; anything else falls back to the Command Center. */
 const KNOWN_TABS: ReadonlySet<Tab> = new Set<Tab>([
-  'command', 'finance', 'tenants', 'ops', 'governance', 'search',
+  'command', 'finance', 'growth', 'tenants', 'ops', 'governance', 'search',
 ]);
 
 // Derived from the CURRENT domain so links work on any deployment (dev localhost
