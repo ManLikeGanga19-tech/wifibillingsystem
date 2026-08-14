@@ -1,5 +1,8 @@
 import { useState } from 'react';
-import { ArrowLeft, Ban, Check, Copy, Eye, Plus, Receipt, Sparkles, SmartphoneNfc, Wallet } from 'lucide-react';
+import {
+  ArrowLeft, Ban, Check, Copy, Download, Eye, LogOut, Plus, Receipt, RotateCcw,
+  Sparkles, SmartphoneNfc, Wallet,
+} from 'lucide-react';
 import { api, dt, ksh, num, type ProvisionResult, type Tenant } from '../api/client';
 import {
   Badge,
@@ -429,10 +432,13 @@ function TenantDetail({ id, onBack }: { id: number; onBack: () => void }) {
   const { data, error, reload } = useLoad(() => api.tenants.detail(id), [id]);
   const [impersonating, setImpersonating] = useState(false);
   const [adjusting, setAdjusting] = useState(false);
+  const [offboarding, setOffboarding] = useState(false);
+  const [busy, setBusy] = useState(false);
 
   if (error) return <ErrorBox message={error} onRetry={reload} />;
   if (!data) return <Spinner />;
   const { tenant: t, finance, usage } = data;
+  const ob = t.offboarding;
 
   const chargeSetup = async () => {
     try {
@@ -441,6 +447,51 @@ function TenantDetail({ id, onBack }: { id: number; onBack: () => void }) {
       reload();
     } catch {
       toast('red', 'Could not bill the setup fee.');
+    }
+  };
+
+  const abortOffboard = async () => {
+    setBusy(true);
+    try {
+      await api.tenants.offboardAbort(t.id);
+      toast('good', `${t.name} reinstated.`);
+      reload();
+    } catch {
+      toast('red', 'Could not reinstate the tenant.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const completeOffboard = async (force: boolean) => {
+    if (!window.confirm(
+      `This permanently tears every subscriber off the router and closes ${t.name}. ` +
+      'It cannot be undone. Continue?')) return;
+    setBusy(true);
+    try {
+      const r = await api.tenants.offboardComplete(t.id, force);
+      toast('good', `Offboarding completed — ${r.subscribers_torn_down} subscribers removed.`);
+      reload();
+    } catch (e) {
+      toast('red', e instanceof Error ? e.message : 'Could not complete offboarding.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // The tenant leaves WITH their data: pull the JSON export and hand the browser a download.
+  const exportData = async () => {
+    try {
+      const blob = await api.tenants.exportData(t.id);
+      const url = URL.createObjectURL(
+        new Blob([JSON.stringify(blob, null, 2)], { type: 'application/json' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${t.slug}-export.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast('red', 'Could not export the tenant data.');
     }
   };
 
@@ -467,12 +518,37 @@ function TenantDetail({ id, onBack }: { id: number; onBack: () => void }) {
           <Btn onClick={chargeSetup} title="Only for ISPs who opted into assisted onboarding">
             <Receipt className="h-3.5 w-3.5" /> Bill setup fee
           </Btn>
+          <Btn onClick={exportData} title="Download this ISP's data as JSON (owner-only)">
+            <Download className="h-3.5 w-3.5" /> Export data
+          </Btn>
           {/* The audited door. Everything above exists so this is rarely needed. */}
           <Btn variant="dark" onClick={() => setImpersonating(true)}>
             <Eye className="h-3.5 w-3.5" /> Enter their console
           </Btn>
+          {/* Offboarding: only offered to a live tenant with none already in flight. */}
+          {!ob && t.is_active && (
+            <Btn variant="danger" onClick={() => setOffboarding(true)}
+                 title="Begin removing this ISP from the platform">
+              <LogOut className="h-3.5 w-3.5" /> Offboard
+            </Btn>
+          )}
         </div>
       </div>
+
+      {ob && (
+        <OffboardingBanner
+          info={ob}
+          busy={busy}
+          onAbort={abortOffboard}
+          onComplete={completeOffboard}
+        />
+      )}
+      {!t.is_active && !ob && (
+        <div className="panel p-3.5 text-xs flex items-center gap-2" style={{ color: 'var(--critical)' }}>
+          <Ban className="h-4 w-4 shrink-0" />
+          <span>This tenant has been <b>offboarded</b> — access is revoked and records are retained.</span>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <Stat
@@ -561,6 +637,118 @@ function TenantDetail({ id, onBack }: { id: number; onBack: () => void }) {
           onDone={() => { setAdjusting(false); reload(); }}
         />
       )}
+
+      {offboarding && (
+        <OffboardingDialog
+          tenant={t}
+          onClose={() => setOffboarding(false)}
+          onDone={() => { setOffboarding(false); reload(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * The grace-window banner: a tenant is frozen and scheduled to be torn down, but can still be
+ * reinstated. Shows the money that has to settle either way (we owe them / they owe us) and
+ * the two exits — undo, or complete now (which is irreversible).
+ */
+function OffboardingBanner({
+  info,
+  busy,
+  onAbort,
+  onComplete,
+}: {
+  info: NonNullable<Tenant['offboarding']>;
+  busy: boolean;
+  onAbort: () => void;
+  onComplete: (force: boolean) => void;
+}) {
+  const owe = Number(info.snapshot_withdrawable);
+  const owed = Number(info.snapshot_owed);
+  return (
+    <div className="panel p-4 space-y-3" style={{ borderColor: 'var(--critical)' }}>
+      <div className="flex items-start gap-2" style={{ color: 'var(--critical)' }}>
+        <LogOut className="h-4 w-4 shrink-0 mt-0.5" />
+        <div className="text-xs leading-relaxed">
+          <b>Offboarding scheduled.</b> The console is frozen. Reason: “{info.reason}”.{' '}
+          {info.in_grace
+            ? <>Grace window ends <b>{dt(info.grace_until)}</b> — until then this is fully reversible.</>
+            : <>The grace window has passed; this can be completed now.</>}
+          <div className="mt-1.5" style={{ color: 'var(--text-secondary)' }}>
+            {owe > 0 && <>We owe them <b>{ksh(info.snapshot_withdrawable)}</b> to pay out. </>}
+            {owed > 0 && <>They owe us <b>{ksh(info.snapshot_owed)}</b> to collect. </>}
+            {owe <= 0 && owed <= 0 && <>Nothing outstanding either way.</>}
+          </div>
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Btn onClick={onAbort} disabled={busy}>
+          <RotateCcw className="h-3.5 w-3.5" /> Undo — reinstate
+        </Btn>
+        <Btn variant="danger" onClick={() => onComplete(!info.in_grace ? false : true)} disabled={busy}>
+          <Ban className="h-3.5 w-3.5" /> {info.in_grace ? 'Complete now (force)' : 'Complete offboarding'}
+        </Btn>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Start offboarding an ISP. This only FREEZES them and opens a grace window — nothing on the
+ * network is torn down yet, and it can be undone. A reason is mandatory (it becomes the
+ * record). Owner-only on the server.
+ */
+function OffboardingDialog({
+  tenant,
+  onClose,
+  onDone,
+}: {
+  tenant: Tenant;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  const submit = async () => {
+    if (!reason.trim()) return;
+    setBusy(true);
+    setErr('');
+    try {
+      await api.tenants.offboard(tenant.id, reason.trim());
+      toast('good', `${tenant.name} is being offboarded (grace window opened).`);
+      onDone();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not start offboarding.');
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="w-full max-w-md border p-5" style={{ background: 'var(--surface-1)', borderColor: 'var(--hairline-strong)' }}>
+        <p className="text-sm font-bold">Offboard {tenant.name}</p>
+        <p className="mt-1 text-xs leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+          This <b>freezes</b> the ISP&apos;s console and starts a grace window. Nothing on the
+          network is touched yet — you can reinstate them with one click. Only <b>completing</b>{' '}
+          the offboarding later tears their subscribers off the router. This is audited.
+        </p>
+        <label className="mt-3 block">
+          <span className="text-[11px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Reason (recorded)</span>
+          <textarea rows={3} autoFocus value={reason} onChange={(e) => setReason(e.target.value)}
+                    className="mt-1 w-full" placeholder="e.g. Business closed / migrated off / non-payment write-off" />
+        </label>
+        {err && <p className="mt-2 text-xs" style={{ color: 'var(--critical)' }}>{err}</p>}
+        <div className="mt-4 flex justify-end gap-2">
+          <Btn onClick={onClose}>Cancel</Btn>
+          <Btn variant="danger" onClick={submit} disabled={busy || !reason.trim()}>
+            <LogOut className="h-3.5 w-3.5" /> {busy ? 'Starting…' : 'Begin offboarding'}
+          </Btn>
+        </div>
+      </div>
     </div>
   );
 }

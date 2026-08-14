@@ -177,6 +177,7 @@ export interface Tenant {
   name: string;
   slug: string;
   status: 'pending' | 'active' | 'suspended';
+  is_active: boolean; // false = hard-killed (e.g. offboarding completed)
   owner_name: string;
   contact_phone: string;
   contact_email: string;
@@ -189,6 +190,17 @@ export interface Tenant {
   created_at: string;
   router_count: number;
   staff_count: number;
+  offboarding: OffboardingInfo | null;
+}
+
+export interface OffboardingInfo {
+  id: number;
+  reason: string;
+  grace_until: string;
+  in_grace: boolean;
+  snapshot_withdrawable: string; // + = we owe them
+  snapshot_owed: string; // + = they owe us
+  initiated_at: string;
 }
 
 export interface TenantDetail {
@@ -366,6 +378,18 @@ export const api = {
     restore: (id: number) => post<unknown>(`/platform/tenants/${id}/restore/`),
     chargeSetup: (id: number) =>
       post<{ charged: boolean; detail: string }>(`/platform/tenants/${id}/charge-setup/`),
+    /** Begin offboarding: freeze the console + open a reversible grace window. Owner-only. */
+    offboard: (id: number, reason: string) =>
+      post<{ detail: string; grace_until: string; snapshot_withdrawable: string; snapshot_owed: string }>(
+        `/platform/tenants/${id}/offboard/`, { reason }),
+    /** Reinstate a tenant still in its grace window. */
+    offboardAbort: (id: number) => post<{ detail: string }>(`/platform/tenants/${id}/offboard-abort/`),
+    /** Terminal: tear every subscriber off the router + CANCELLED. `force` skips the grace. */
+    offboardComplete: (id: number, force: boolean) =>
+      post<{ detail: string; subscribers_torn_down: number }>(
+        `/platform/tenants/${id}/offboard-complete/`, { force }),
+    /** A portable JSON snapshot of the tenant's own data (owner-only; contains PII). */
+    exportData: (id: number) => get<Record<string, unknown>>(`/platform/tenants/${id}/export/`),
     /** THE LOST PHONE. Clears an ISP owner's authenticator so they can enrol a new one.
      *  Owner-only, audited, emails them, and freezes their withdrawals for 24h — this
      *  is a human switching off somebody else's second factor, so it is never quiet. */
