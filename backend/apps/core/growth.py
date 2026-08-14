@@ -54,8 +54,75 @@ def _recurring_mrr_by_operator_month(window_start) -> dict[int, dict[str, Decima
     return out
 
 
+def _live_state_stream() -> dict[int, list[tuple[datetime, bool]]]:
+    """{operator_id: [(occurred_at, is_live), ...]} sorted oldest→newest, from the tenant
+    lifecycle log. activated/reactivated → live; suspended → not live. This is the source of
+    truth for tenant churn — an actual transition, not "their MRR happened to hit zero"."""
+    from .models import TenantLifecycleEvent
+
+    LIVE = {TenantLifecycleEvent.Event.ACTIVATED, TenantLifecycleEvent.Event.REACTIVATED}
+    stream: dict[int, list[tuple[datetime, bool]]] = defaultdict(list)
+    rows = (
+        TenantLifecycleEvent.objects.filter(operator__isnull=False)
+        .order_by("occurred_at")
+        .values_list("operator_id", "event", "occurred_at")
+    )
+    for op_id, event, when in rows:
+        stream[op_id].append((when, event in LIVE))
+    return stream
+
+
+def _live_at(events: list[tuple[datetime, bool]], instant: datetime) -> bool:
+    """Was this tenant live at `instant`? = the live-ness of its last event at or before then
+    (never activated → not live). Events are pre-sorted oldest→newest."""
+    live = False
+    for when, is_live in events:
+        if when <= instant:
+            live = is_live
+        else:
+            break
+    return live
+
+
+def _status_churn(windows: list[tuple[datetime, datetime]]) -> list[dict]:
+    """Precise, status-based tenant churn for each reported month, given its [start, end)
+    window (the month's own span — the newest month's end is `now`, so a mid-month
+    suspension counts the moment it happens).
+
+    Compares each tenant's LIVE state at the window start vs its end (derived from real
+    activation/suspension events), so a tenant that merely skipped a billing month is NOT
+    counted as churn — only one that actually went from live to suspended is. Independent of
+    MRR timing on purpose. Returns one dict per window (newest last)."""
+    stream = _live_state_stream()
+    out = []
+    for start, end in windows:
+        active_start = churned = activated = 0
+        for events in stream.values():
+            was = _live_at(events, start)
+            now_ = _live_at(events, end)
+            if was:
+                active_start += 1
+                if not now_:
+                    churned += 1
+            elif now_:
+                activated += 1
+        out.append({
+            "active_tenants": active_start,
+            "activated_tenants": activated,
+            "churned_tenants": churned,
+            "tenant_churn_rate": round(churned / active_start, 4) if active_start else None,
+        })
+    return out
+
+
 def mrr_movement(*, months: int = 6) -> dict:
-    """Per-month MRR waterfall + tenant churn for the last `months` months (newest last)."""
+    """Per-month MRR waterfall + precise tenant churn for the last `months` months (newest
+    last).
+
+    The money buckets (new/expansion/contraction/churned MRR) are derived from the fee
+    ledgers. Tenant COUNT churn is separate and precise: it comes from real
+    activation/suspension events (see _status_churn), so a billing-timing gap no longer masks
+    as a lost ISP."""
     months = max(1, min(months, MAX_MONTHS))
     now = timezone.now()
 
@@ -68,25 +135,27 @@ def mrr_movement(*, months: int = 6) -> dict:
     keys = [s.strftime("%Y-%m") for s in starts]
 
     by_op = _recurring_mrr_by_operator_month(starts[0])
+    # Churn window for reported month keys[i] is its OWN span [starts[i], starts[i+1]); the
+    # newest month has no next start yet, so it runs to `now` (a partial, live month).
+    windows = [(starts[i], starts[i + 1] if i + 1 < len(starts) else now)
+               for i in range(1, len(starts))]
+    churn = _status_churn(windows)  # aligned 1:1 with the reported months below
 
     series = []
     for i in range(1, len(keys)):
         prev_k, cur_k = keys[i - 1], keys[i]
         new = expansion = contraction = churned = Decimal("0")
         mrr_total = Decimal("0")
-        new_t = churned_t = paying_start = 0
+        new_t = 0
         for series_by_month in by_op.values():
             prev = series_by_month.get(prev_k, Decimal("0"))
             cur = series_by_month.get(cur_k, Decimal("0"))
             mrr_total += cur
-            if prev > 0:
-                paying_start += 1
             if prev == 0 and cur > 0:
                 new += cur
                 new_t += 1
             elif prev > 0 and cur == 0:
                 churned += prev
-                churned_t += 1
             elif cur > prev:
                 expansion += cur - prev
             elif cur < prev:
@@ -100,10 +169,8 @@ def mrr_movement(*, months: int = 6) -> dict:
             "churned": churned,
             "net": new + expansion - contraction - churned,
             "new_tenants": new_t,
-            "churned_tenants": churned_t,
-            "tenant_churn_rate": (
-                round(churned_t / paying_start, 4) if paying_start else None
-            ),
+            # precise, status-based tenant counts (NOT the MRR heuristic)
+            **churn[i - 1],
         })
 
     return {

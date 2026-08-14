@@ -20,7 +20,7 @@ from rest_framework.views import APIView
 from apps.accounts.models import Role, User
 from apps.core.phone import InvalidPhoneError, normalize_msisdn
 
-from .models import Operator
+from .models import Operator, TenantLifecycleEvent
 from .permissions import (
     IsPlatformOwner,
     IsPlatformStaff,
@@ -29,7 +29,7 @@ from .permissions import (
 )
 from .public import PublicAPIView
 from .schema import OBJECT_REQUEST, OBJECT_RESPONSE
-from .services import audit
+from .services import audit, record_tenant_event
 from .tenancy import acting_tenant
 
 
@@ -396,11 +396,17 @@ class PlatformTenantViewSet(viewsets.ModelViewSet):
         """
         operator = self.get_object()
         reason = str(request.data.get("reason", "")).strip()[:200]
+        was = operator.status  # capture BEFORE the flip so the churn log records the from→to
         operator.status = Operator.Status.SUSPENDED
         operator.suspension_reason = reason
         operator.save(update_fields=["status", "suspension_reason", "updated_at"])
         audit("tenant_suspended", operator=operator, actor=request.user, target=operator,
               reason=reason)
+        if was != Operator.Status.SUSPENDED:  # not a no-op re-suspend
+            record_tenant_event(
+                operator, TenantLifecycleEvent.Event.SUSPENDED,
+                from_status=was, actor=request.user, reason=reason,
+            )
         return Response({"status": operator.status, "suspension_reason": reason})
 
     @action(detail=True, methods=["post"])

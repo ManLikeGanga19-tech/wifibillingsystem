@@ -23,8 +23,9 @@ const signed = (v: string | number) => {
  *
  * MRR here is the platform's recurring fee revenue (commission + base + PPPoE per-user).
  * The waterfall splits each month's change into new / expansion / contraction / churned, so
- * a flat MRR that's actually churn-masked-by-new-signups can't hide. The demo tenant is
- * excluded everywhere.
+ * a flat MRR that's actually churn-masked-by-new-signups can't hide. Tenant CHURN is
+ * separate and precise — it counts real suspension events, not "their MRR hit zero", so a
+ * billing-timing gap isn't mistaken for a lost ISP. The demo tenant is excluded everywhere.
  */
 export default function GrowthView() {
   const [months, setMonths] = useState(6);
@@ -62,11 +63,18 @@ export default function GrowthView() {
         <Stat label="MRR" value={ksh(cur?.mrr ?? 0)} hint="recurring fees / month" />
         <Stat label="Net new MRR" value={signed(cur?.net ?? 0)} hint="this month" />
         <Stat label="New MRR" value={ksh(cur?.new ?? 0)} hint={`${cur?.new_tenants ?? 0} new tenants`} />
-        <Stat label="Churned MRR" value={ksh(cur?.churned ?? 0)} hint={`${cur?.churned_tenants ?? 0} tenants lost`} />
-        <Stat label="Tenant churn" value={pct(cur?.tenant_churn_rate ?? null)} hint="of paying ISPs" />
+        <Stat label="Churned MRR" value={ksh(cur?.churned ?? 0)} hint={`${cur?.churned_tenants ?? 0} ISPs suspended`} />
+        <Stat
+          label="Tenant churn"
+          value={pct(cur?.tenant_churn_rate ?? null)}
+          hint={`${cur?.churned_tenants ?? 0} of ${cur?.active_tenants ?? 0} live ISPs`}
+        />
       </div>
 
-      <Panel title="Movement by month" subtitle="New + expansion − contraction − churned = net.">
+      <Panel
+        title="Movement by month"
+        subtitle="MRR: new + expansion − contraction − churned = net. Churn %: ISPs actually suspended."
+      >
         <Table head={['Month', 'MRR', 'New', 'Expansion', 'Contraction', 'Churned', 'Net', 'Churn']}>
           {data.months.map((m) => (
             <tr key={m.month}>

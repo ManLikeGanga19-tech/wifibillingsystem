@@ -11,6 +11,7 @@ from rest_framework.test import APIClient
 from apps.accounts.models import Role
 from apps.billing.models import LedgerEntry
 from apps.core.growth import mrr_movement
+from apps.core.models import TenantLifecycleEvent
 
 from .factories import OperatorFactory, UserFactory
 
@@ -32,6 +33,14 @@ def _commission(operator, amount, when):
     )
     LedgerEntry.objects.filter(pk=e.pk).update(created_at=when)  # bypass auto_now_add
     return e
+
+
+def _life(operator, event, when):
+    """A tenant lifecycle event dated at a given instant (the source of precise churn)."""
+    return TenantLifecycleEvent.objects.create(
+        operator=operator, slug=operator.slug, name=operator.name, event=event,
+        occurred_at=when,
+    )
 
 
 class TestMrrMovement:
@@ -61,10 +70,10 @@ class TestMrrMovement:
         assert cur["contraction"] == Decimal("400")
         assert cur["churned"] == Decimal("1000")
         assert cur["net"] == Decimal("800") + Decimal("500") - Decimal("400") - Decimal("1000")
-        assert cur["new_tenants"] == 1
-        assert cur["churned_tenants"] == 1
-        # 3 tenants were paying at the start (grew, left, shrank); 1 churned
-        assert cur["tenant_churn_rate"] == round(1 / 3, 4)
+        assert cur["new_tenants"] == 1  # MRR-based: started paying this month
+        # Tenant COUNT churn is status-based now, NOT the MRR heuristic: with no lifecycle
+        # events, `left` going to zero MRR is a billing gap, not a proven departure.
+        assert cur["churned_tenants"] == 0
 
     def test_demo_tenant_is_excluded(self):
         now = timezone.now().replace(day=15)
@@ -80,6 +89,81 @@ class TestMrrMovement:
         body = _platform().get("/api/v1/platform/mrr-movement/?months=3").json()
         assert len(body["months"]) == 3
         assert "movers" in body
+
+
+class TestStatusChurn:
+    """Precise tenant churn — from real activation/suspension events, not MRR-hit-zero."""
+
+    def test_suspension_this_month_counts_as_churn(self):
+        now = timezone.now()
+        last_month = (now.replace(day=1) - timedelta(days=5)).replace(day=12)
+
+        stayed = OperatorFactory(slug="stayed")
+        _life(stayed, TenantLifecycleEvent.Event.ACTIVATED, last_month)
+        gone = OperatorFactory(slug="gone")
+        _life(gone, TenantLifecycleEvent.Event.ACTIVATED, last_month)
+        _life(gone, TenantLifecycleEvent.Event.SUSPENDED, now.replace(day=1) + timedelta(hours=1))
+
+        cur = mrr_movement(months=1)["months"][-1]
+        assert cur["active_tenants"] == 2   # both live entering the month
+        assert cur["churned_tenants"] == 1  # only `gone` was suspended
+        assert cur["tenant_churn_rate"] == round(1 / 2, 4)
+
+    def test_mrr_gap_without_suspension_is_not_churn(self):
+        """The whole point: a paying tenant that skips a billing month but is never
+        suspended must NOT be counted as a lost ISP."""
+        now = timezone.now()
+        old = (now.replace(day=1) - timedelta(days=40)).replace(day=12)
+        still_here = OperatorFactory(slug="still-here")
+        _life(still_here, TenantLifecycleEvent.Event.ACTIVATED, old)
+
+        cur = mrr_movement(months=1)["months"][-1]
+        assert cur["churned_tenants"] == 0
+        assert cur["tenant_churn_rate"] == 0.0
+
+    def test_reactivation_wins_back(self):
+        now = timezone.now()
+        two_ago = (now.replace(day=1) - timedelta(days=40)).replace(day=10)
+        last_month = (now.replace(day=1) - timedelta(days=5)).replace(day=10)
+
+        op = OperatorFactory(slug="boomerang")
+        _life(op, TenantLifecycleEvent.Event.ACTIVATED, two_ago)
+        _life(op, TenantLifecycleEvent.Event.SUSPENDED, last_month)
+        # reactivated inside the current month
+        _life(op, TenantLifecycleEvent.Event.REACTIVATED, now.replace(day=1) + timedelta(hours=2))
+
+        cur = mrr_movement(months=1)["months"][-1]
+        assert cur["active_tenants"] == 0     # was suspended entering the month
+        assert cur["activated_tenants"] == 1  # came back this month
+        assert cur["churned_tenants"] == 0
+
+    def test_demo_lifecycle_events_never_recorded(self):
+        from apps.core.services import record_tenant_event
+
+        demo = OperatorFactory(slug="demo-life", is_demo=True)
+        assert record_tenant_event(demo, TenantLifecycleEvent.Event.SUSPENDED) is None
+        assert not TenantLifecycleEvent.objects.filter(operator=demo).exists()
+
+    def test_chokepoints_record_transitions(self):
+        """activate_operator and the platform suspend action are the only doors — each must
+        leave a lifecycle row, so churn history can never quietly drift from reality."""
+        from apps.core.models import Operator
+        from apps.core.settlement import activate_operator
+
+        op = OperatorFactory(slug="chokepoint", status=Operator.Status.PENDING)
+        activate_operator(op, reason="approved by platform")
+        assert op.lifecycle_events.filter(event="activated").count() == 1
+
+        c = _platform()
+        r = c.post(f"/api/v1/platform/tenants/{op.id}/suspend/",
+                   {"reason": "test"}, format="json")
+        assert r.status_code == 200, r.content
+        assert op.lifecycle_events.filter(event="suspended").count() == 1
+
+        # restore goes back through activate_operator → a REACTIVATED (won back), not a dup
+        r = c.post(f"/api/v1/platform/tenants/{op.id}/restore/", {}, format="json")
+        assert r.status_code == 200, r.content
+        assert op.lifecycle_events.filter(event="reactivated").count() == 1
 
 
 class TestWalletAdjustment:

@@ -4,6 +4,7 @@ from decimal import Decimal
 from django.conf import settings
 from django.db import models
 from django.db.models.functions import Lower
+from django.utils import timezone
 
 
 def _webhook_token() -> str:
@@ -515,3 +516,48 @@ class ImpersonationGrant(models.Model):
         from django.utils import timezone
 
         return self.ended_at is None and self.expires_at > timezone.now()
+
+
+class TenantLifecycleEvent(models.Model):
+    """Append-only record of every status change an ISP TENANT goes through on the platform.
+
+    This is the source of truth for TENANT churn — the ISPs leaving Danamo, not the
+    subscribers leaving an ISP (that is pppoe.ClientLifecycleEvent). A status field only
+    knows NOW, so it can't answer "how many ISPs churned in July" or tell a genuine
+    departure from a one-month billing gap. Each row is emitted at the two chokepoints
+    where a tenant's live-ness actually flips — core.settlement.activate_operator (on) and
+    the platform suspend action (off) — and snapshots slug/name so the history SURVIVES the
+    operator being deleted (on_delete=SET_NULL). Mirrors [[pppoe.ClientLifecycleEvent]]."""
+
+    class Event(models.TextChoices):
+        ACTIVATED = "activated", "Activated"  # first time the money gate opened
+        SUSPENDED = "suspended", "Suspended (left / cut off)"
+        REACTIVATED = "reactivated", "Reactivated (won back)"
+
+    # Kept even if the operator row is deleted, so churn history is never destroyed.
+    operator = models.ForeignKey(
+        Operator, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="lifecycle_events",
+    )
+    slug = models.SlugField(db_index=True)
+    name = models.CharField(max_length=120, blank=True)
+
+    event = models.CharField(max_length=15, choices=Event.choices, db_index=True)
+    from_status = models.CharField(max_length=10, blank=True)
+    to_status = models.CharField(max_length=10, blank=True)
+    reason = models.CharField(max_length=200, blank=True)
+    occurred_at = models.DateTimeField(default=timezone.now, db_index=True)
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL
+    )
+
+    class Meta:
+        ordering = ["-occurred_at"]
+        indexes = [
+            # the churn query: events of a kind within a date window
+            models.Index(fields=["event", "occurred_at"]),
+            models.Index(fields=["operator", "occurred_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.slug} {self.event} @ {self.occurred_at:%Y-%m-%d}"
