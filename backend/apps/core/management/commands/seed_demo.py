@@ -67,6 +67,7 @@ class Command(BaseCommand):
         self._pppoe_clients(op, service_plans, routers, aps)
         self._wallet(op)
         self._ops(op, subs, routers)
+        self._platform_showcase()
         self.stdout.write(self.style.SUCCESS(
             f"Demo tenant ready: https://{DEMO_SLUG}.wifios.co.ke  "
             f"login {DEMO_OWNER_PHONE} / {DEMO_OWNER_PASSWORD} (READ-ONLY)"
@@ -437,3 +438,62 @@ class Command(BaseCommand):
                 serial_number=uuid.uuid4().hex[:10].upper(),
                 cost=Decimal(self.rng.randint(3000, 45000)),
             )
+
+    # -- platform showcase (Growth / KPIs / P&L) ----------------------------------
+
+    #: A handful of sample ISP tenants with 6 months of platform-fee history, so Platform
+    #: Control's Growth waterfall, MRR and P&L render REAL numbers. These are NON-demo on
+    #: purpose — the demo tenant is excluded from platform figures, so it can't populate them.
+    #: base_fee + a monthly pppoe-fee series (oldest→newest); 0 = not paying that month, which
+    #: drives the New / Churned buckets. A healthy growth story with a bit of churn.
+    SHOWCASE_ISPS = [
+        ("Kilifi Connect", "isp-kilifi", [4000, 4500, 5000, 5500, 6000, 6500]),   # expansion
+        ("Nyali Networks", "isp-nyali", [2000, 2500, 3000, 3500, 4000, 4500]),     # expansion
+        ("Bamburi WiFi", "isp-bamburi", [3000, 3200, 3400, 3600, 3800, 4000]),     # expansion
+        ("Mtwapa Mesh", "isp-mtwapa", [1500, 1700, 1900, 2100, 2300, 2500]),       # expansion
+        ("Diani Broadband", "isp-diani", [0, 0, 0, 0, 0, 5000]),                   # NEW this month
+        ("Likoni Links", "isp-likoni", [2000, 2100, 2200, 2300, 2400, 0]),         # CHURNED
+        ("Malindi Fibre", "isp-malindi", [6000, 6200, 6400, 6600, 6800, 5500]),    # CONTRACTION
+    ]
+    BASE_FEE = 500
+
+    def _platform_showcase(self):
+        from apps.billing.models import PlatformLedgerEntry
+        from apps.core.models import Operator
+
+        now = timezone.now()
+        # 6 month anchors, oldest → newest, mid-month so timezone can't shift the bucket.
+        months = []
+        d = now
+        for _ in range(6):
+            months.append(d.replace(day=15, hour=12, minute=0, second=0, microsecond=0))
+            d = d.replace(day=1) - timedelta(days=5)
+        months.reverse()
+
+        for name, slug, pppoe_series in self.SHOWCASE_ISPS:
+            op, _ = Operator.objects.get_or_create(slug=slug, defaults={"name": name})
+            op.name = name
+            op.status = Operator.Status.ACTIVE
+            op.is_active = True
+            op.is_demo = False
+            op.save()
+            PlatformLedgerEntry.objects.filter(operator=op, memo="showcase").delete()
+            for when, pppoe in zip(months, pppoe_series, strict=True):
+                if pppoe == 0:  # not paying this month → nothing accrues
+                    continue
+                period = when.strftime("%Y-%m")
+                base = PlatformLedgerEntry.Reason.BASE_FEE
+                fee = PlatformLedgerEntry.Reason.PPPOE_FEE
+                # Fees are stored NEGATIVE (they debit the ISP); MRR negates them back.
+                self._plat_fee(op, base, -self.BASE_FEE, period, when)
+                self._plat_fee(op, fee, -pppoe, period, when)
+        self.stdout.write(f"Platform showcase: {len(self.SHOWCASE_ISPS)} sample ISPs w/ 6mo fees")
+
+    def _plat_fee(self, op, reason, amount, period, when):
+        from apps.billing.models import PlatformLedgerEntry
+
+        e = PlatformLedgerEntry.objects.create(
+            operator=op, reason=reason, amount=Decimal(amount), period=period, memo="showcase",
+        )
+        # created_at is auto_now_add; MRR movement buckets by it, so backdate to the month.
+        PlatformLedgerEntry.objects.filter(pk=e.pk).update(created_at=when)
