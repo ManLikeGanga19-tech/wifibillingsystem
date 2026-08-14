@@ -123,6 +123,22 @@ export interface MrrMovement {
   months: MrrMonth[];
   movers: MrrMover[];
 }
+export interface FunnelStage {
+  key: string;
+  label: string;
+  count: number;
+  pct: number | null; // of cohort
+  drop_from_prev: number;
+}
+export interface OnboardingFunnel {
+  as_of: string;
+  window_days: number | null; // null = all-time
+  cohort_size: number;
+  stages: FunnelStage[];
+  median_days_to_activate: number | null;
+  median_days_to_first_payment: number | null;
+  stuck: { pending_over_7d: number; activated_no_payment_over_14d: number };
+}
 
 export interface UnmatchedSuggestion {
   client_id: number;
@@ -316,6 +332,8 @@ export const api = {
     get<{ days: number; series: SeriesPoint[] }>(`/platform/timeseries/?days=${days}`),
   pnl: () => get<Pnl>('/platform/tenant-pnl/'),
   mrrMovement: (months: number) => get<MrrMovement>(`/platform/mrr-movement/?months=${months}`),
+  onboardingFunnel: (days: number) =>
+    get<OnboardingFunnel>(`/platform/onboarding-funnel/?days=${days}`),
   search: (q: string) => get<SearchResults>(`/platform/search/?q=${encodeURIComponent(q)}`),
 
   /** The unmatched-payments queue: money that landed on a mistyped account number. */
