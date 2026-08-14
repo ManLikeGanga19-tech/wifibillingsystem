@@ -260,6 +260,31 @@ def cancel_client(client: Client, *, reason: str = "churned", actor=None) -> Non
     _emit(client.operator, "subscriber.cancelled", _client_payload(client))
 
 
+def force_cancel_client(client: Client, *, reason: str = "operator offboarded", actor=None) -> None:
+    """Terminally cancel a client REGARDLESS of its current status — the teardown used when
+    the whole ISP is being offboarded.
+
+    Unlike cancel_client (which only churns an already-SUSPENDED overdue account), this pulls
+    the service off the router for ANY live or suspended client and marks it CANCELLED. An
+    already-cancelled client is left alone. Router removal is best-effort: an ISP must still
+    leave the books even if a router is unreachable at the moment of offboarding."""
+    if client.status == Client.Status.CANCELLED:
+        return
+    try:
+        _remove_service(client)
+    except Exception:
+        logger.exception("Could not remove the service for offboarded client %s", client.pk)
+    _record_transition(
+        client,
+        event=ClientLifecycleEvent.Event.CANCELLED,
+        to_status=Client.Status.CANCELLED,
+        reason=reason,
+        actor=actor,
+    )
+    audit("pppoe_client_cancelled", operator=client.operator, actor=actor,
+          target=client, reason=reason)
+
+
 #: Fields an edit may change that the ROUTER also needs to know about. Everything else
 #: (name, phone, email, address, billing day, notes…) is bookkeeping the router never sees.
 ROUTER_VISIBLE_FIELDS = ("plan_id", "router_id", "static_ip")

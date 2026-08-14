@@ -533,6 +533,7 @@ class TenantLifecycleEvent(models.Model):
         ACTIVATED = "activated", "Activated"  # first time the money gate opened
         SUSPENDED = "suspended", "Suspended (left / cut off)"
         REACTIVATED = "reactivated", "Reactivated (won back)"
+        CANCELLED = "cancelled", "Cancelled (offboarded — terminal)"
 
     # Kept even if the operator row is deleted, so churn history is never destroyed.
     operator = models.ForeignKey(
@@ -561,3 +562,69 @@ class TenantLifecycleEvent(models.Model):
 
     def __str__(self):
         return f"{self.slug} {self.event} @ {self.occurred_at:%Y-%m-%d}"
+
+
+class TenantOffboarding(models.Model):
+    """One ISP leaving the platform — a deliberate, audited, REVERSIBLE-within-grace process.
+
+    Offboarding is never a silent hard-delete: an ISP holds real customers and real money, so
+    removal is staged. Initiating freezes the console and starts a grace window; during it the
+    tenant can be reinstated with one click (nothing on the network has been torn down yet).
+    Completing is the terminal act — every subscriber's service is pulled off the router and
+    the tenant goes to a CANCELLED terminal state — and only then. Financials are snapshotted
+    at both ends so the final settlement is never reconstructed from scratch. Records are kept
+    for compliance; the tenant loses ACCESS, not its history."""
+
+    class State(models.TextChoices):
+        SCHEDULED = "scheduled", "Scheduled (in grace window)"
+        COMPLETED = "completed", "Completed (terminal)"
+        ABORTED = "aborted", "Aborted (reinstated)"
+
+    operator = models.ForeignKey(
+        Operator, on_delete=models.CASCADE, related_name="offboardings"
+    )
+    state = models.CharField(
+        max_length=10, choices=State.choices, default=State.SCHEDULED, db_index=True
+    )
+    reason = models.CharField(max_length=200)
+
+    initiated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="+",
+    )
+    initiated_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    # Until this instant the tenant is only FROZEN and can be reinstated; after it, completion
+    # (network teardown + terminal state) is allowed. An owner may force completion sooner.
+    grace_until = models.DateTimeField(db_index=True)
+
+    resolved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="+",
+    )
+    resolved_at = models.DateTimeField(null=True, blank=True)  # completed OR aborted
+
+    # Money owed/held at the moments that matter, so a final settlement never has to be
+    # reconstructed. Positive withdrawable = WE owe THEM; positive owed = THEY owe US.
+    snapshot_withdrawable = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    snapshot_owed = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    subscribers_torn_down = models.PositiveIntegerField(default=0)
+    notes = models.TextField(blank=True, default="")
+
+    class Meta:
+        ordering = ["-initiated_at"]
+        constraints = [
+            # At most ONE live offboarding per tenant — you can't schedule a second while one
+            # is already in flight. Historical (completed/aborted) rows are unconstrained.
+            models.UniqueConstraint(
+                fields=["operator"],
+                condition=models.Q(state="scheduled"),
+                name="one_active_offboarding_per_operator",
+            ),
+        ]
+
+    def __str__(self):
+        return f"offboard {self.operator.slug} [{self.state}]"
+
+    @property
+    def in_grace(self) -> bool:
+        return self.state == self.State.SCHEDULED and self.grace_until > timezone.now()

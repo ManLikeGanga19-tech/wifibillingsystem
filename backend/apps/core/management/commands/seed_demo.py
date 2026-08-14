@@ -69,6 +69,7 @@ class Command(BaseCommand):
         self._ops(op, subs, routers)
         self._platform_showcase()
         self._onboarding_showcase()
+        self._offboarding_showcase()
         self.stdout.write(self.style.SUCCESS(
             f"Demo tenant ready: https://{DEMO_SLUG}.wifios.co.ke  "
             f"login {DEMO_OWNER_PHONE} / {DEMO_OWNER_PASSWORD} (READ-ONLY)"
@@ -520,6 +521,27 @@ class Command(BaseCommand):
                 self._plat_fee(op, base, -self.BASE_FEE, period, when)
                 self._plat_fee(op, fee, -pppoe, period, when)
         self.stdout.write(f"Platform showcase: {len(self.SHOWCASE_ISPS)} sample ISPs w/ 6mo fees")
+
+    def _offboarding_showcase(self):
+        """Put one recent signup into a live grace window, so Platform Control shows the
+        offboarding banner (undo / complete) and a tenant frozen mid-departure."""
+        from apps.core.models import Operator, TenantOffboarding
+        from apps.core.offboarding import initiate_offboarding
+
+        op = Operator.objects.filter(slug="signup-ganze").first()
+        if not op:
+            return
+        # Idempotent on reseed: clear any prior offboarding and return the tenant to a clean
+        # active state before starting a fresh one.
+        TenantOffboarding.objects.filter(operator=op).delete()
+        op.status = Operator.Status.ACTIVE
+        op.is_active = True
+        op.suspension_reason = ""
+        op.save(update_fields=["status", "is_active", "suspension_reason", "updated_at"])
+        initiate_offboarding(
+            op, reason="Migrating to a competitor — winding down", actor=None, grace_days=10
+        )
+        self.stdout.write("Offboarding showcase: 1 tenant in a grace window")
 
     def _plat_event(self, op, event, to_status, when):
         from apps.core.models import TenantLifecycleEvent

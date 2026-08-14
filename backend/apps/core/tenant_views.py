@@ -108,6 +108,7 @@ class TenantSignupView(PublicAPIView):
 class PlatformTenantSerializer(serializers.ModelSerializer):
     router_count = serializers.IntegerField(read_only=True)
     staff_count = serializers.IntegerField(read_only=True)
+    offboarding = serializers.SerializerMethodField()
 
     class Meta:
         model = Operator
@@ -116,6 +117,7 @@ class PlatformTenantSerializer(serializers.ModelSerializer):
             "name",
             "slug",
             "status",
+            "is_active",
             "owner_name",
             "contact_phone",
             "contact_email",
@@ -128,8 +130,30 @@ class PlatformTenantSerializer(serializers.ModelSerializer):
             "created_at",
             "router_count",
             "staff_count",
+            "offboarding",
         ]
-        read_only_fields = ["slug", "status", "approved_at", "trial_ends_at"]
+        read_only_fields = ["slug", "status", "is_active", "approved_at", "trial_ends_at"]
+
+    def get_offboarding(self, obj) -> dict | None:
+        """The live offboarding, if any — so the console can show the grace banner + controls.
+        None for the common case of a healthy tenant. Reads from the prefetched
+        `scheduled_offboardings` when present (list view) to avoid an N+1."""
+        cached = getattr(obj, "scheduled_offboardings", None)
+        if cached is not None:
+            ob = cached[0] if cached else None
+        else:
+            ob = obj.offboardings.filter(state="scheduled").first()
+        if ob is None:
+            return None
+        return {
+            "id": ob.id,
+            "reason": ob.reason,
+            "grace_until": ob.grace_until.isoformat(),
+            "in_grace": ob.in_grace,
+            "snapshot_withdrawable": str(ob.snapshot_withdrawable),
+            "snapshot_owed": str(ob.snapshot_owed),
+            "initiated_at": ob.initiated_at.isoformat(),
+        }
 
 
 class PlatformTenantViewSet(viewsets.ModelViewSet):
@@ -139,15 +163,35 @@ class PlatformTenantViewSet(viewsets.ModelViewSet):
     serializer_class = PlatformTenantSerializer
     http_method_names = ["get", "patch", "post", "head", "options"]
 
+    #: GET actions that are owner-only despite being reads — they expose money or PII. A
+    #: plain method check would wave these through to read-only support staff.
+    OWNER_ONLY_READS = {"export"}
+
     def get_permissions(self):
         if self.request.method in ("GET", "HEAD", "OPTIONS"):
+            if getattr(self, "action", None) in self.OWNER_ONLY_READS:
+                return [IsPlatformOwner()]
             return [IsPlatformStaff()]
         return [IsPlatformOwner()]
 
     def get_queryset(self):
+        from django.db.models import Prefetch
+
+        from .models import TenantOffboarding
+
         return Operator.objects.annotate(
             router_count=Count("routers", filter=Q(routers__is_active=True), distinct=True),
             staff_count=Count("users", filter=Q(users__is_staff=True), distinct=True),
+        ).prefetch_related(
+            # only the LIVE offboarding, so the serializer's grace banner is one prefetch, not
+            # an N+1 across the tenant list
+            Prefetch(
+                "offboardings",
+                queryset=TenantOffboarding.objects.filter(
+                    state=TenantOffboarding.State.SCHEDULED
+                ),
+                to_attr="scheduled_offboardings",
+            )
         ).order_by("-created_at")
 
     @action(detail=True, methods=["post"])
@@ -428,6 +472,87 @@ class PlatformTenantViewSet(viewsets.ModelViewSet):
         activate_operator(operator, actor=request.user, reason="restored by platform")
         audit("tenant_restored", operator=operator, actor=request.user, target=operator)
         return Response({"status": operator.status})
+
+    # ---- offboarding: removing an ISP, safely (see core.offboarding) ---------------------
+
+    @extend_schema(request=OBJECT_REQUEST, responses=OBJECT_RESPONSE,
+                   summary="Begin offboarding an ISP (freeze + grace window)")
+    @action(detail=True, methods=["post"])
+    def offboard(self, request, pk=None):
+        """Start offboarding: freeze the console and open a reversible grace window. Nothing on
+        the network is torn down yet. Owner-gated; a reason is mandatory (it's the record)."""
+        from .offboarding import OffboardingError, initiate_offboarding
+
+        operator = self.get_object()
+        reason = (request.data.get("reason") or "").strip()
+        grace = request.data.get("grace_days")
+        try:
+            grace_days = int(grace) if grace is not None else 14
+        except (TypeError, ValueError):
+            grace_days = 14
+        try:
+            ob = initiate_offboarding(
+                operator, reason=reason, actor=request.user, grace_days=grace_days
+            )
+        except OffboardingError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {
+                "detail": "Offboarding started — the tenant is frozen and can still be reinstated.",
+                "grace_until": ob.grace_until.isoformat(),
+                "snapshot_withdrawable": str(ob.snapshot_withdrawable),
+                "snapshot_owed": str(ob.snapshot_owed),
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+    @extend_schema(request=OBJECT_REQUEST, responses=OBJECT_RESPONSE,
+                   summary="Abort a scheduled offboarding (reinstate the tenant)")
+    @action(detail=True, methods=["post"], url_path="offboard-abort")
+    def offboard_abort(self, request, pk=None):
+        """Reinstate a tenant still in its grace window — the accidental/disputed-offboarding
+        undo. Reverses the freeze through the normal activation path."""
+        from .offboarding import OffboardingError, abort_offboarding
+
+        operator = self.get_object()
+        try:
+            abort_offboarding(operator, actor=request.user)
+        except OffboardingError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"detail": "Offboarding aborted — the tenant is live again.",
+                         "status": operator.status})
+
+    @extend_schema(request=OBJECT_REQUEST, responses=OBJECT_RESPONSE,
+                   summary="Complete offboarding (terminal — tears down all service)")
+    @action(detail=True, methods=["post"], url_path="offboard-complete")
+    def offboard_complete(self, request, pk=None):
+        """The terminal act: pull every subscriber off the router and drop the tenant to a
+        CANCELLED terminal state. Blocked until the grace window elapses unless `force`."""
+        from .offboarding import OffboardingError, complete_offboarding
+
+        operator = self.get_object()
+        force = bool(request.data.get("force"))
+        try:
+            ob = complete_offboarding(operator, actor=request.user, force=force)
+        except OffboardingError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({
+            "detail": "Offboarding completed.",
+            "subscribers_torn_down": ob.subscribers_torn_down,
+            "snapshot_withdrawable": str(ob.snapshot_withdrawable),
+            "snapshot_owed": str(ob.snapshot_owed),
+        })
+
+    @extend_schema(responses=OBJECT_RESPONSE, summary="Export a tenant's data (portability)")
+    @action(detail=True, methods=["get"], permission_classes=[IsPlatformOwner])
+    def export(self, request, pk=None):
+        """A portable JSON snapshot of the tenant's own records — handed over on offboarding so
+        the ISP leaves WITH its data. Owner-only: it contains subscriber PII."""
+        from .offboarding import export_tenant_data
+
+        operator = self.get_object()
+        audit("tenant_data_exported", operator=operator, actor=request.user, target=operator)
+        return Response(export_tenant_data(operator))
 
 
 class OperatorSettingsSerializer(serializers.ModelSerializer):
