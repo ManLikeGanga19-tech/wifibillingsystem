@@ -396,7 +396,12 @@ def activate_operator(operator: Operator, *, actor=None, reason: str = "") -> in
     """
     from apps.payments.c2b import release_held_payments
 
-    if operator.approved_at is None:
+    from .models import TenantLifecycleEvent
+    from .services import record_tenant_event
+
+    was = operator.status  # status BEFORE we flip it — the churn log needs the transition
+    first_time = operator.approved_at is None
+    if first_time:
         operator.approved_at = timezone.now()
     operator.status = Operator.Status.ACTIVE
     # The free month starts when they can actually EARN — not when they filled in a
@@ -406,6 +411,22 @@ def activate_operator(operator: Operator, *, actor=None, reason: str = "") -> in
     operator.save(
         update_fields=["status", "approved_at", "trial_ends_at", "updated_at"]
     )
+
+    # Log the transition ONLY when live-ness actually changed (idempotent activation is
+    # common — approval, restore and self-activate all land here). A tenant returning from
+    # a prior activation is REACTIVATED (won back); a brand-new one is ACTIVATED.
+    if was != Operator.Status.ACTIVE:
+        prior = TenantLifecycleEvent.objects.filter(
+            operator=operator, event=TenantLifecycleEvent.Event.ACTIVATED
+        ).exists()
+        record_tenant_event(
+            operator,
+            (TenantLifecycleEvent.Event.REACTIVATED if prior
+             else TenantLifecycleEvent.Event.ACTIVATED),
+            from_status=was,
+            actor=actor,
+            reason=reason,
+        )
 
     # Everything their customers paid while they were still setting up is credited
     # now. Nobody loses a shilling because WE made them wait.

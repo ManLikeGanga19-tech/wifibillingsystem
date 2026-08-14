@@ -103,7 +103,11 @@ export interface MrrMonth {
   contraction: Money;
   churned: Money;
   net: Money;
-  new_tenants: number;
+  new_tenants: number; // MRR-based: ISPs that started paying this month
+  // Precise, status-based tenant counts — from real activation/suspension events, not the
+  // MRR heuristic, so a billing-timing gap no longer masks as a lost ISP.
+  active_tenants: number; // live at the start of the month (the churn denominator)
+  activated_tenants: number;
   churned_tenants: number;
   tenant_churn_rate: number | null;
 }

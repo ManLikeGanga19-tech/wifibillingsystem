@@ -459,26 +459,49 @@ class Command(BaseCommand):
 
     def _platform_showcase(self):
         from apps.billing.models import PlatformLedgerEntry
-        from apps.core.models import Operator
+        from apps.core.models import Operator, TenantLifecycleEvent
 
         now = timezone.now()
         # 6 month anchors, oldest → newest, mid-month so timezone can't shift the bucket.
+        # The newest anchor is capped just below `now`: precise churn compares against the
+        # live instant, so an event dated later this month (day 15 when today is the 14th)
+        # would fall in the future and be missed.
         months = []
         d = now
         for _ in range(6):
-            months.append(d.replace(day=15, hour=12, minute=0, second=0, microsecond=0))
+            anchor = d.replace(day=15, hour=12, minute=0, second=0, microsecond=0)
+            if anchor >= now:
+                anchor = now - timedelta(hours=1)
+            months.append(anchor)
             d = d.replace(day=1) - timedelta(days=5)
         months.reverse()
 
         for name, slug, pppoe_series in self.SHOWCASE_ISPS:
             op, _ = Operator.objects.get_or_create(slug=slug, defaults={"name": name})
             op.name = name
-            op.status = Operator.Status.ACTIVE
+            # Current status reflects the LAST month: still paying → active, dropped → suspended.
+            op.status = (Operator.Status.ACTIVE if pppoe_series[-1] > 0
+                         else Operator.Status.SUSPENDED)
             op.is_active = True
             op.is_demo = False
             op.save()
             PlatformLedgerEntry.objects.filter(operator=op, memo="showcase").delete()
+            TenantLifecycleEvent.objects.filter(operator=op, reason="showcase").delete()
+            was_live = False
+            ever_activated = False
             for when, pppoe in zip(months, pppoe_series, strict=True):
+                # Emit a lifecycle event on every live-ness flip, so precise (status-based)
+                # tenant churn has real transitions to count — Diani activates late, Likoni
+                # churns in the last month.
+                now_live = pppoe > 0
+                if now_live and not was_live:
+                    ev = (TenantLifecycleEvent.Event.REACTIVATED if ever_activated
+                          else TenantLifecycleEvent.Event.ACTIVATED)
+                    self._plat_event(op, ev, "active", when)
+                    ever_activated = True
+                elif was_live and not now_live:
+                    self._plat_event(op, TenantLifecycleEvent.Event.SUSPENDED, "suspended", when)
+                was_live = now_live
                 if pppoe == 0:  # not paying this month → nothing accrues
                     continue
                 period = when.strftime("%Y-%m")
@@ -488,6 +511,14 @@ class Command(BaseCommand):
                 self._plat_fee(op, base, -self.BASE_FEE, period, when)
                 self._plat_fee(op, fee, -pppoe, period, when)
         self.stdout.write(f"Platform showcase: {len(self.SHOWCASE_ISPS)} sample ISPs w/ 6mo fees")
+
+    def _plat_event(self, op, event, to_status, when):
+        from apps.core.models import TenantLifecycleEvent
+
+        TenantLifecycleEvent.objects.create(
+            operator=op, slug=op.slug, name=op.name, event=event,
+            to_status=to_status, reason="showcase", occurred_at=when,
+        )
 
     def _plat_fee(self, op, reason, amount, period, when):
         from apps.billing.models import PlatformLedgerEntry
