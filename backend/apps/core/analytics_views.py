@@ -294,6 +294,24 @@ class PlatformMrrMovementView(APIView):
         return Response(mrr_movement(months=months))
 
 
+@extend_schema(responses=OBJECT_RESPONSE, summary="Platform ISP onboarding funnel")
+class PlatformOnboardingFunnelView(APIView):
+    """The acquisition funnel: of the ISPs that signed up recently, how many made it to
+    activated → settlement verified → first payment, where they drop off, how long each step
+    takes, and who is stuck right now. Answers 'why aren't new signups turning into revenue?'"""
+
+    permission_classes = [IsPlatformStaff]
+
+    def get(self, request):
+        from .growth import onboarding_funnel
+
+        try:
+            days = int(request.query_params.get("days", 90))
+        except (TypeError, ValueError):
+            days = 90
+        return Response(onboarding_funnel(days=days))
+
+
 @extend_schema(responses=OBJECT_RESPONSE, summary="Per-ISP profit and loss")
 class TenantPnlView(APIView):
     """Per-ISP profitability: what each tenant EARNS us versus what it COSTS us.

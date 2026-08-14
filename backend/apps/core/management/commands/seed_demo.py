@@ -68,6 +68,7 @@ class Command(BaseCommand):
         self._wallet(op)
         self._ops(op, subs, routers)
         self._platform_showcase()
+        self._onboarding_showcase()
         self.stdout.write(self.style.SUCCESS(
             f"Demo tenant ready: https://{DEMO_SLUG}.wifios.co.ke  "
             f"login {DEMO_OWNER_PHONE} / {DEMO_OWNER_PASSWORD} (READ-ONLY)"
@@ -484,7 +485,15 @@ class Command(BaseCommand):
                          else Operator.Status.SUSPENDED)
             op.is_active = True
             op.is_demo = False
+            # Onboarded when they first went live — so the onboarding funnel sees them as
+            # fully activated back then (and mostly OUTSIDE its 90-day window), not as
+            # brand-new signups stuck at stage one.
+            first_live = next((m for m, p in zip(months, pppoe_series, strict=True) if p > 0),
+                              months[0])
+            op.approved_at = first_live
+            op.settlement_verified_at = first_live + timedelta(days=1)
             op.save()
+            Operator.objects.filter(pk=op.pk).update(created_at=first_live - timedelta(days=2))
             PlatformLedgerEntry.objects.filter(operator=op, memo="showcase").delete()
             TenantLifecycleEvent.objects.filter(operator=op, reason="showcase").delete()
             was_live = False
@@ -528,3 +537,56 @@ class Command(BaseCommand):
         )
         # created_at is auto_now_add; MRR movement buckets by it, so backdate to the month.
         PlatformLedgerEntry.objects.filter(pk=e.pk).update(created_at=when)
+
+    # -- onboarding funnel showcase ----------------------------------------------------------
+
+    #: Recent ISP signups at every stage of the onboarding funnel, so Platform Growth's
+    #: funnel (a 90-day cohort) shows real drop-off instead of an empty chart. The 6-month
+    #: MRR-showcase ISPs above are too OLD to fall in that window, so this is a separate set.
+    #: (name, slug, days_ago, stage) — stage ladder: signed < activated < verified < paid.
+    RECENT_SIGNUPS = [
+        ("Watamu Wireless", "signup-watamu", 3, "verified"),
+        ("Kilifi Coast Net", "signup-kcoast", 8, "paid"),
+        ("Shanzu Fibre", "signup-shanzu", 12, "signed"),       # stuck: pending > 7 days
+        ("Vipingo Links", "signup-vipingo", 18, "activated"),  # stuck: live 14d+, no payment
+        ("Mariakani Mesh", "signup-mariakani", 25, "paid"),
+        ("Rabai Radio", "signup-rabai", 40, "verified"),
+        ("Kaloleni Connect", "signup-kaloleni", 55, "paid"),
+        ("Ganze Gateway", "signup-ganze", 70, "activated"),    # stuck: live 14d+, no payment
+    ]
+    _LADDER = ["signed", "activated", "verified", "paid"]
+
+    def _onboarding_showcase(self):
+        from apps.core.models import Operator, TenantLifecycleEvent
+        from apps.payments.models import C2BPayment
+
+        now = timezone.now()
+        for name, slug, days_ago, stage in self.RECENT_SIGNUPS:
+            reached = self._LADDER.index(stage)
+            created = now - timedelta(days=days_ago)
+            approved = created + timedelta(days=2) if reached >= 1 else None
+            op, _ = Operator.objects.get_or_create(slug=slug, defaults={"name": name})
+            op.name = name
+            op.is_demo = False
+            op.is_platform_owned = False
+            op.status = (Operator.Status.ACTIVE if reached >= 1 else Operator.Status.PENDING)
+            op.approved_at = approved
+            op.settlement_verified_at = (approved + timedelta(days=1)) if reached >= 2 else None
+            op.save()
+            Operator.objects.filter(pk=op.pk).update(created_at=created)  # bypass auto_now_add
+
+            TenantLifecycleEvent.objects.filter(operator=op, reason="showcase").delete()
+            if approved:
+                self._plat_event(op, TenantLifecycleEvent.Event.ACTIVATED, "active", approved)
+
+            # "First payment" = one matched C2B collection. Lightweight: no plan/subscriber.
+            C2BPayment.objects.filter(operator=op, raw_payload={"seed": "onboarding"}).delete()
+            if reached >= 3:
+                p = C2BPayment.objects.create(
+                    operator=op, trans_id=f"SEED{uuid.uuid4().hex[:8].upper()}",
+                    bill_ref=slug, amount=Decimal("500"),
+                    status=C2BPayment.Status.MATCHED, raw_payload={"seed": "onboarding"},
+                )
+                C2BPayment.objects.filter(pk=p.pk).update(
+                    received_at=approved + timedelta(days=3))
+        self.stdout.write(f"Onboarding showcase: {len(self.RECENT_SIGNUPS)} recent signups")

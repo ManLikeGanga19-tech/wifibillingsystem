@@ -166,6 +166,82 @@ class TestStatusChurn:
         assert op.lifecycle_events.filter(event="reactivated").count() == 1
 
 
+class TestOnboardingFunnel:
+    """The ISP acquisition funnel: signed up → activated → verified → first payment."""
+
+    def _op(self, slug, *, created_days_ago, approved_days_ago=None, verified=False):
+        from apps.core.models import Operator
+
+        op = OperatorFactory(
+            slug=slug,
+            status=Operator.Status.ACTIVE if approved_days_ago is not None
+            else Operator.Status.PENDING,
+        )
+        now = timezone.now()
+        op.approved_at = (now - timedelta(days=approved_days_ago)
+                          if approved_days_ago is not None else None)
+        op.settlement_verified_at = now - timedelta(days=1) if verified else None
+        op.save()
+        Operator.objects.filter(pk=op.pk).update(created_at=now - timedelta(days=created_days_ago))
+        return op
+
+    def _paid(self, op):
+        from apps.payments.models import C2BPayment
+
+        C2BPayment.objects.create(
+            operator=op, trans_id=f"T{op.slug}", bill_ref=op.slug,
+            amount=Decimal("500"), status=C2BPayment.Status.MATCHED,
+        )
+
+    def test_funnel_counts_and_dropoff(self):
+        from apps.core.growth import onboarding_funnel
+
+        # 3 signed up; 2 activated; 1 verified; that 1 also paid.
+        self._op("f-signed", created_days_ago=3)                       # signup only
+        self._op("f-active", created_days_ago=10, approved_days_ago=8)  # activated, no verify
+        full = self._op("f-full", created_days_ago=20, approved_days_ago=18, verified=True)
+        self._paid(full)
+
+        f = onboarding_funnel(days=90)
+        counts = {s["key"]: s["count"] for s in f["stages"]}
+        assert f["cohort_size"] == 3
+        assert counts == {
+            "signed_up": 3, "activated": 2, "settlement_verified": 1, "first_payment": 1,
+        }
+        activated = next(s for s in f["stages"] if s["key"] == "activated")
+        assert activated["drop_from_prev"] == 1  # 3 signed → 2 activated
+
+    def test_stuck_buckets_are_actionable(self):
+        from apps.core.growth import onboarding_funnel
+
+        self._op("s-pending", created_days_ago=10)                       # pending > 7d
+        self._op("s-nopay", created_days_ago=30, approved_days_ago=20)   # live 20d, no pay
+        f = onboarding_funnel(days=90)
+        assert f["stuck"]["pending_over_7d"] == 1
+        assert f["stuck"]["activated_no_payment_over_14d"] == 1
+
+    def test_window_excludes_old_signups(self):
+        from apps.core.growth import onboarding_funnel
+
+        self._op("recent", created_days_ago=5)
+        self._op("ancient", created_days_ago=200)
+        assert onboarding_funnel(days=30)["cohort_size"] == 1
+        assert onboarding_funnel(days=0)["cohort_size"] == 2  # 0 = all-time
+
+    def test_demo_and_platform_owned_excluded(self):
+        from apps.core.growth import onboarding_funnel
+
+        OperatorFactory(slug="f-demo", is_demo=True)
+        OperatorFactory(slug="f-ours", is_platform_owned=True)
+        self._op("f-real", created_days_ago=2)
+        assert onboarding_funnel(days=90)["cohort_size"] == 1
+
+    def test_endpoint_is_platform_only(self):
+        r = _platform(owner=False).get("/api/v1/platform/onboarding-funnel/?days=30")
+        assert r.status_code == 200
+        assert "stages" in r.json()
+
+
 class TestWalletAdjustment:
     def test_owner_can_credit_and_debit(self):
         op = OperatorFactory(slug="adj")

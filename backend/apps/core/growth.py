@@ -207,3 +207,114 @@ def _top_movers(by_op, prev_k, cur_k, limit=8) -> list[dict]:
     for m in moves:
         m["name"] = names.get(m["operator"], "")
     return moves
+
+
+# ---- onboarding funnel -------------------------------------------------------------------
+
+MAX_FUNNEL_DAYS = 730
+STALE_PENDING_DAYS = 7     # signed up this long ago and STILL not activated = stuck
+STALE_NO_PAY_DAYS = 14     # activated this long ago and STILL no collection = stuck
+
+
+def _median_days(deltas: list[float]) -> float | None:
+    if not deltas:
+        return None
+    s = sorted(deltas)
+    n = len(s)
+    mid = n // 2
+    med = s[mid] if n % 2 else (s[mid - 1] + s[mid]) / 2
+    return round(med, 1)
+
+
+def onboarding_funnel(*, days: int = 90) -> dict:
+    """Where do new ISPs stall between signing up and actually earning?
+
+    A cohort funnel over operators that SIGNED UP in the last `days` (0 = all-time), demo
+    excluded. Four milestones, each a strict prerequisite of the next in practice:
+    signed up → activated (money gate opened) → settlement verified (cleared to be paid out)
+    → first payment (a real collection landed). Plus median time-to-activate /
+    time-to-first-payment, and who is stuck RIGHT NOW so support has a call list."""
+    from apps.payments.models import C2BPayment, Transaction
+
+    days = max(0, min(days, MAX_FUNNEL_DAYS))
+    now = timezone.now()
+
+    cohort = Operator.objects.exclude(is_demo=True).exclude(is_platform_owned=True)
+    if days:
+        cohort = cohort.filter(created_at__gte=now - timedelta(days=days))
+    rows = list(cohort.values("id", "created_at", "approved_at", "settlement_verified_at"))
+    ids = [r["id"] for r in rows]
+
+    # First real collection per operator = earliest successful STK txn OR matched C2B payment.
+    first_pay: dict[int, datetime] = {}
+
+    def _note(op_id, when):
+        if op_id in ids and (op_id not in first_pay or when < first_pay[op_id]):
+            first_pay[op_id] = when
+
+    for op_id, when in (
+        Transaction.objects.filter(
+            operator_id__in=ids, status__in=Transaction.SUCCESS_STATUSES
+        ).values_list("operator_id", "created_at")
+    ):
+        _note(op_id, when)
+    for op_id, when in (
+        C2BPayment.objects.filter(
+            operator_id__in=ids, status=C2BPayment.Status.MATCHED
+        ).values_list("operator_id", "received_at")
+    ):
+        _note(op_id, when)
+
+    signed = activated = verified = paid = 0
+    to_activate: list[float] = []
+    to_pay: list[float] = []
+    stuck_pending = stuck_no_pay = 0
+    DAY = 86400.0
+
+    for r in rows:
+        signed += 1
+        op_id = r["id"]
+        appr, ver, pay = r["approved_at"], r["settlement_verified_at"], first_pay.get(op_id)
+        if appr:
+            activated += 1
+            to_activate.append((appr - r["created_at"]).total_seconds() / DAY)
+        if ver:
+            verified += 1
+        if pay:
+            paid += 1
+            if appr:
+                to_pay.append((pay - appr).total_seconds() / DAY)
+        # stuck RIGHT NOW (actionable, not historical)
+        if not appr and (now - r["created_at"]).days >= STALE_PENDING_DAYS:
+            stuck_pending += 1
+        elif appr and not pay and (now - appr).days >= STALE_NO_PAY_DAYS:
+            stuck_no_pay += 1
+
+    def stage(key, label, count, prev):
+        return {
+            "key": key,
+            "label": label,
+            "count": count,
+            "pct": round(count / signed, 4) if signed else None,
+            "drop_from_prev": max(0, prev - count) if prev is not None else 0,
+        }
+
+    stages = [
+        stage("signed_up", "Signed up", signed, None),
+        stage("activated", "Activated", activated, signed),
+        stage("settlement_verified", "Settlement verified", verified, activated),
+        stage("first_payment", "First payment", paid, verified),
+    ]
+
+    return {
+        "as_of": now.isoformat(),
+        "window_days": days or None,  # None = all-time
+        "cohort_size": signed,
+        "stages": stages,
+        "median_days_to_activate": _median_days(to_activate),
+        "median_days_to_first_payment": _median_days(to_pay),
+        "stuck": {
+            "pending_over_7d": stuck_pending,
+            "activated_no_payment_over_14d": stuck_no_pay,
+        },
+    }
