@@ -360,12 +360,23 @@ WG_HUB_IP = os.getenv("WG_HUB_IP", "10.88.0.1")
 WG_HUB_ENDPOINT = os.getenv("WG_HUB_ENDPOINT", "")
 # The hub's WireGuard public key (public by definition), pasted into each router's peer.
 WG_HUB_PUBLIC_KEY = os.getenv("WG_HUB_PUBLIC_KEY", "")
+# The hub's PRIVATE key — lives ONLY on the hub host / secret manager, never shipped to a
+# router. Optional here: the console can render the hub config with a placeholder so the key
+# is filled in on the box itself, keeping the secret off this server entirely.
+WG_HUB_PRIVATE_KEY = os.getenv("WG_HUB_PRIVATE_KEY", "")
 WG_KEEPALIVE_SECONDS = int(os.getenv("WG_KEEPALIVE_SECONDS", "25"))
 
 # Dev/staging escape hatch: when set, routers redirect HERE instead of the tenant's real
 # subdomain (which does not resolve from a laptop or an ngrok tunnel). Unset in
 # production, where each ISP's portal genuinely lives on their own subdomain.
 PORTAL_BASE_URL = os.getenv("PORTAL_BASE_URL", "")
+
+# The operator a captive portal falls back to when NO tenant resolves — no ISP subdomain and
+# no ?router= param, e.g. hitting the co-located staging portal at its bare host. Empty in
+# PRODUCTION (every ISP has its own subdomain, so this never fires and an unknown host stays
+# neutral). Set it on a single-tenant / staging box (e.g. "homelink", our own ISP) so the bare
+# portal wears a real brand and shows real plans instead of the neutral WIFI.OS default.
+PORTAL_DEFAULT_OPERATOR_SLUG = os.getenv("PORTAL_DEFAULT_OPERATOR_SLUG", "")
 
 # Fernet key for encrypting router/operator secrets at rest. Never in code —
 # set via env (.env locally, secret manager in prod). Encryption features raise

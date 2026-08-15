@@ -37,15 +37,11 @@ class PlanViewSet(viewsets.ModelViewSet):
         verified is NOT LIVE, so it must not offer anything for sale. Showing plans
         we would then refuse to charge for is worse than showing none.
         """
-        from apps.provisioning.models import Router
+        from apps.core.public import resolve_portal_operator
 
-        tenant = getattr(self.request, "tenant", None)
-        if tenant is None:
-            router_id = self.request.query_params.get("router", "")
-            if router_id.isdigit():
-                router = Router.objects.filter(pk=int(router_id), is_active=True).first()
-                if router:
-                    tenant = router.operator
+        # allow_default: on a bare portal host (staging/single-tenant) fall back to the
+        # configured ISP, so the portal shows real plans instead of none. Unset in production.
+        tenant = resolve_portal_operator(self.request, allow_default=True)
         if tenant is None or not tenant.can_transact:
             return None
         return tenant
