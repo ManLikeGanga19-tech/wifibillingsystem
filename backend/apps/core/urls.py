@@ -6,6 +6,7 @@ from .analytics_views import (
     PlatformKpisView,
     PlatformMrrMovementView,
     PlatformOnboardingFunnelView,
+    PlatformRiskView,
     PlatformSearchView,
     PlatformTimeseriesView,
     TenantPnlView,
@@ -108,6 +109,7 @@ urlpatterns = [
          name="platform-onboarding-funnel"),
     path("platform/cohort-retention/", PlatformCohortRetentionView.as_view(),
          name="platform-cohort-retention"),
+    path("platform/risk/", PlatformRiskView.as_view(), name="platform-risk"),
     path("platform/search/", PlatformSearchView.as_view(), name="platform-search"),
     path("platform/health/", PlatformHealthView.as_view(), name="platform-health"),
     # Impersonation is a recorded act, not a header flip — these are the only doors

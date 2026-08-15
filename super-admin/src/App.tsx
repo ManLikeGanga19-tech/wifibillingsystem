@@ -22,16 +22,18 @@ import FinanceView from './views/FinanceView';
 import GrowthView from './views/GrowthView';
 import GovernanceView from './views/GovernanceView';
 import OpsView from './views/OpsView';
+import RiskView from './views/RiskView';
 import SearchView from './views/SearchView';
 import TenantsView from './views/TenantsView';
 import BroadcastsView from './views/BroadcastsView';
 
 type Tab =
-  | 'command' | 'finance' | 'growth' | 'tenants' | 'broadcast' | 'ops' | 'governance' | 'search';
+  | 'command' | 'finance' | 'growth' | 'tenants' | 'broadcast'
+  | 'risk' | 'ops' | 'governance' | 'search';
 
 /** The sections the URL may name; anything else falls back to the Command Center. */
 const KNOWN_TABS: ReadonlySet<Tab> = new Set<Tab>([
-  'command', 'finance', 'growth', 'tenants', 'broadcast', 'ops', 'governance', 'search',
+  'command', 'finance', 'growth', 'tenants', 'broadcast', 'risk', 'ops', 'governance', 'search',
 ]);
 
 // Derived from the CURRENT domain so links work on any deployment (dev localhost
@@ -58,6 +60,7 @@ const NAV: { title: string | null; items: { id: Tab; label: string; icon: typeof
     title: 'Operations',
     items: [
       { id: 'ops', label: 'System Health', icon: Activity },
+      { id: 'risk', label: 'Risk', icon: ShieldAlert },
       { id: 'search', label: 'Search', icon: SearchIcon },
     ],
   },
@@ -276,6 +279,7 @@ export default function App() {
             {tab === 'growth' && <GrowthView />}
             {tab === 'tenants' && <TenantsView openId={openTenant} onOpen={setOpenTenant} />}
             {tab === 'broadcast' && <BroadcastsView />}
+            {tab === 'risk' && <RiskView />}
             {tab === 'ops' && <OpsView />}
             {tab === 'governance' && <GovernanceView />}
             {tab === 'search' && <SearchView />}
