@@ -16,6 +16,11 @@ from .branding_views import (
     BrandingView,
     PublicBrandingView,
 )
+from .broadcast_views import (
+    ActiveBroadcastsView,
+    DismissBroadcastView,
+    PlatformBroadcastViewSet,
+)
 from .domain_views import ChangeDomainView, DomainCheckView, DomainView
 from .governance_views import (
     AuditLogViewSet,
@@ -42,6 +47,7 @@ router.register("platform/audit", AuditLogViewSet, basename="platform-audit")
 router.register(
     "platform/impersonation", ImpersonationViewSet, basename="platform-impersonation"
 )
+router.register("platform/broadcasts", PlatformBroadcastViewSet, basename="platform-broadcast")
 
 urlpatterns = [
     # Tenant-scoped (require an acting ISP)
@@ -74,6 +80,10 @@ urlpatterns = [
         ConfirmPayoutView.as_view(),
         name="settlement-confirm",
     ),
+    # Broadcasts shown IN the ISP console — any signed-in user, audience is every tenant.
+    path("broadcasts/active/", ActiveBroadcastsView.as_view(), name="broadcasts-active"),
+    path("broadcasts/<int:pk>/dismiss/", DismissBroadcastView.as_view(),
+         name="broadcasts-dismiss"),
     # Public
     path("tenants/signup/", TenantSignupView.as_view(), name="tenant-signup"),
     # Platform-wide (cross-tenant aggregates live ONLY here)

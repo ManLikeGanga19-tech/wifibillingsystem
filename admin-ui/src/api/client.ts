@@ -1335,9 +1335,24 @@ export function signup(data: {
   });
 }
 
+export interface Broadcast {
+  id: number;
+  title: string;
+  body: string;
+  level: 'info' | 'warning' | 'critical';
+  dismissable: boolean;
+  starts_at: string;
+}
+
 export const api = {
   stats: () => request<DashboardStats>('/stats/'),
   navCounts: () => request<NavCounts>('/nav/'),
+
+  /** Platform-wide notices Danamo pushes to every ISP console (maintenance, price changes,
+   *  outages). Live + not-yet-dismissed-by-me. */
+  activeBroadcasts: () => request<Broadcast[]>('/broadcasts/active/'),
+  dismissBroadcast: (id: number) =>
+    request<{ detail: string }>(`/broadcasts/${id}/dismiss/`, { method: 'POST', body: '{}' }),
   /** Also the "am I signed in / which ISP am I in?" probe — only the server knows. */
   me: () => request<Me>('/me/'),
 

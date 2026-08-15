@@ -18,6 +18,7 @@ const post = <T,>(p: string, body?: unknown) =>
   request<T>(p, { method: 'POST', body: body ? JSON.stringify(body) : undefined });
 const patch = <T,>(p: string, body: unknown) =>
   request<T>(p, { method: 'PATCH', body: JSON.stringify(body) });
+const del = (p: string) => request<void>(p, { method: 'DELETE' });
 
 // ---- types ------------------------------------------------------------------
 
@@ -154,6 +155,25 @@ export interface CohortRetention {
   months: number;
   cohorts: RetentionCohort[];
 }
+export interface Broadcast {
+  id: number;
+  title: string;
+  body: string;
+  level: 'info' | 'warning' | 'critical';
+  dismissable: boolean;
+  is_active: boolean;
+  starts_at: string;
+  ends_at: string | null;
+  created_at: string;
+  is_live: boolean;
+}
+export type BroadcastDraft = {
+  title: string;
+  body: string;
+  level: Broadcast['level'];
+  dismissable: boolean;
+  ends_at?: string | null;
+};
 
 export interface UnmatchedSuggestion {
   client_id: number;
@@ -363,6 +383,15 @@ export const api = {
     get<OnboardingFunnel>(`/platform/onboarding-funnel/?days=${days}`),
   cohortRetention: (months: number) =>
     get<CohortRetention>(`/platform/cohort-retention/?months=${months}`),
+
+  /** Broadcasts shown across every ISP console. Owner-only for writes. */
+  broadcasts: {
+    list: () => get<Page<Broadcast> | Broadcast[]>('/platform/broadcasts/'),
+    create: (body: BroadcastDraft) => post<Broadcast>('/platform/broadcasts/', body),
+    update: (id: number, body: Partial<Broadcast>) =>
+      patch<Broadcast>(`/platform/broadcasts/${id}/`, body),
+    remove: (id: number) => del(`/platform/broadcasts/${id}/`),
+  },
   search: (q: string) => get<SearchResults>(`/platform/search/?q=${encodeURIComponent(q)}`),
 
   /** The unmatched-payments queue: money that landed on a mistyped account number. */
