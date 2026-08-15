@@ -615,10 +615,20 @@ class Command(BaseCommand):
         op.is_active = True
         op.suspension_reason = ""
         op.save(update_fields=["status", "is_active", "suspension_reason", "updated_at"])
+
+        # Give them ARREARS (unpaid platform fees, no held balance to cover it) so the demo
+        # shows the export block + a real final settlement with residual bad debt.
+        from apps.billing.models import PlatformLedgerEntry
+
+        PlatformLedgerEntry.objects.filter(operator=op, memo__startswith="[seed]").delete()
+        PlatformLedgerEntry.objects.create(
+            operator=op, reason=PlatformLedgerEntry.Reason.BASE_FEE,
+            amount=Decimal("-3000"), memo="[seed] outstanding platform fees",
+        )
         initiate_offboarding(
             op, reason="Migrating to a competitor — winding down", actor=None, grace_days=10
         )
-        self.stdout.write("Offboarding showcase: 1 tenant in a grace window")
+        self.stdout.write("Offboarding showcase: 1 tenant in a grace window (with arrears)")
 
     def _plat_event(self, op, event, to_status, when):
         from apps.core.models import TenantLifecycleEvent

@@ -241,6 +241,16 @@ def request_payout(*, operator, amount: Decimal, user) -> Payout:
     if amount < MINIMUM_PAYOUT:
         raise WalletError(f"Minimum withdrawal is KSh {MINIMUM_PAYOUT}.")
 
+    # No ad-hoc withdrawals while a tenant is being offboarded: the balance is settled as ONE
+    # netted payout at completion, so an early drain can't jump the fee-recovery queue.
+    from apps.core.offboarding import current_offboarding
+
+    if current_offboarding(operator) is not None:
+        raise WalletError(
+            "This account is being offboarded. Its balance is settled in full at closure, "
+            "so individual withdrawals are paused."
+        )
+
     if not operator.has_settlement_account:
         raise WalletError("Add your payout account in Settings before withdrawing.")
 
@@ -401,6 +411,42 @@ def adjust_wallet(operator, *, amount: Decimal, reason: str, actor) -> LedgerEnt
     audit("wallet_adjusted", operator=operator, actor=actor, target=operator,
           amount=str(amount), reason=reason.strip())
     return entry
+
+
+@db_transaction.atomic
+def settle_from_wallet(operator, *, actor=None) -> dict:
+    """Apply an ISP's HELD (custody) balance against what they owe us — the netting done when
+    a tenant is offboarded, so the fee is collected from money we already hold instead of
+    chased after they've gone.
+
+    Moves the recoverable amount OUT of the wallet (we stop owing it) and credits the platform
+    account (clearing that much debt). What's left splits cleanly: `net_settlement` is what we
+    still owe THEM to pay out; `residual_owed` is the bad debt we could NOT cover — the only
+    figure a human ever has to follow up on. Idempotent-safe to call once at completion."""
+    from apps.billing import platform_account
+
+    debt = platform_account.debt(operator)
+    held = withdrawable_balance(operator)
+    recoverable = min(held, debt)
+    if recoverable > 0:
+        LedgerEntry.objects.create(
+            operator=operator,
+            entry_type=LedgerEntry.Type.ADJUSTMENT,
+            amount=-recoverable,
+            memo="Offboarding: held balance applied to outstanding platform fees",
+        )
+        platform_account.grant(
+            operator, recoverable, memo="Offboarding: held balance applied to fees"
+        )
+        audit("offboarding_fees_settled", operator=operator, actor=actor, target=operator,
+              recovered=str(recoverable), debt_before=str(debt), held_before=str(held))
+    return {
+        "debt_before": debt,
+        "held_before": held,
+        "fees_recovered": recoverable,
+        "residual_owed": max(Decimal("0.00"), debt - held),
+        "net_settlement": held - recoverable,  # still owed to the ISP → pay out
+    }
 
 
 def charge_monthly_base_fees() -> int:

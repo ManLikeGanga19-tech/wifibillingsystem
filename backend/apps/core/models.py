@@ -607,6 +607,14 @@ class TenantOffboarding(models.Model):
     # reconstructed. Positive withdrawable = WE owe THEM; positive owed = THEY owe US.
     snapshot_withdrawable = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     snapshot_owed = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+
+    # Final settlement, computed at completion (see core.offboarding.complete_offboarding):
+    # fees recovered from the held balance, the residual they still owe us that we could NOT
+    # cover (bad debt, for follow-up), and the net we still owe THEM to pay out.
+    fees_recovered = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    residual_owed = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    net_settlement = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+
     subscribers_torn_down = models.PositiveIntegerField(default=0)
     notes = models.TextField(blank=True, default="")
 

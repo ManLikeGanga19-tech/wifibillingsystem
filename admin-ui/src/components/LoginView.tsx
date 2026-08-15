@@ -1,6 +1,52 @@
 import { useState, type FormEvent } from 'react';
-import { Wifi, Lock, Loader2, Building2, CheckCircle2 } from 'lucide-react';
+import { Wifi, Lock, Loader2, Building2, CheckCircle2, Eye, EyeOff } from 'lucide-react';
 import { login, signup, ApiError } from '../api/client';
+
+const inputCls =
+  'w-full border border-[#141414] p-2.5 pr-10 text-sm font-mono outline-none focus:bg-[#f8f8f6]';
+
+/**
+ * Password box with a show/hide toggle. Typing a password blind is where most failed
+ * logins come from, so let people confirm what they typed — the eye button flips the
+ * field between masked and plain text without ever leaving the page.
+ */
+function PasswordField({
+  value,
+  onChange,
+  autoComplete,
+  minLength,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  autoComplete: string;
+  minLength?: number;
+}) {
+  const [show, setShow] = useState(false);
+  return (
+    <div className="relative">
+      <input
+        type={show ? 'text' : 'password'}
+        required
+        minLength={minLength}
+        autoComplete={autoComplete}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className={inputCls}
+      />
+      <button
+        type="button"
+        onClick={() => setShow((s) => !s)}
+        // tabIndex -1 so Tab goes straight from password to the submit button, not the eye
+        tabIndex={-1}
+        aria-label={show ? 'Hide password' : 'Show password'}
+        title={show ? 'Hide password' : 'Show password'}
+        className="absolute inset-y-0 right-0 px-2.5 flex items-center text-[#141414]/50 hover:text-[#141414] cursor-pointer"
+      >
+        {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+      </button>
+    </div>
+  );
+}
 
 export default function LoginView({ onLoggedIn }: { onLoggedIn: () => void }) {
   const [mode, setMode] = useState<'login' | 'signup' | 'signup-done'>('login');
@@ -97,7 +143,7 @@ export default function LoginView({ onLoggedIn }: { onLoggedIn: () => void }) {
             </div>
             <div>
               <label className={label}>Password</label>
-              <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className={input} />
+              <PasswordField value={password} onChange={setPassword} autoComplete="current-password" />
             </div>
             {error && <p className="text-xs text-[#B22222] font-mono">{error}</p>}
             <button type="submit" disabled={busy} className="w-full bg-[#141414] disabled:opacity-40 text-[#E4E3E0] font-bold font-mono uppercase py-3 flex items-center justify-center gap-2 hover:bg-[#228B22] transition cursor-pointer">
@@ -133,7 +179,7 @@ export default function LoginView({ onLoggedIn }: { onLoggedIn: () => void }) {
               </div>
               <div>
                 <label className={label}>Password</label>
-                <input type="password" required minLength={8} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} className={input} />
+                <PasswordField value={form.password} onChange={(v) => setForm({ ...form, password: v })} autoComplete="new-password" minLength={8} />
               </div>
             </div>
             <div>

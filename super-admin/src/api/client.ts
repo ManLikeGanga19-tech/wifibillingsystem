@@ -178,7 +178,12 @@ export interface RiskFinding {
   operator: number;
   name: string;
   slug: string;
-  signal: 'collection_spike' | 'duplicate_identity' | 'reactivation_cycling' | 'large_payout';
+  signal:
+    | 'collection_spike'
+    | 'duplicate_identity'
+    | 'reactivation_cycling'
+    | 'large_payout'
+    | 'offboarding_bad_debt';
   severity: 'high' | 'medium' | 'low';
   headline: string;
   detail: Record<string, unknown>;
@@ -445,10 +450,17 @@ export const api = {
         `/platform/tenants/${id}/offboard/`, { reason }),
     /** Reinstate a tenant still in its grace window. */
     offboardAbort: (id: number) => post<{ detail: string }>(`/platform/tenants/${id}/offboard-abort/`),
-    /** Terminal: tear every subscriber off the router + CANCELLED. `force` skips the grace. */
+    /** Terminal: tear every subscriber off the router + CANCELLED. `force` skips the grace.
+     *  Returns the final settlement — fees recovered from held balance, net paid to the ISP,
+     *  and any residual bad debt. */
     offboardComplete: (id: number, force: boolean) =>
-      post<{ detail: string; subscribers_torn_down: number }>(
-        `/platform/tenants/${id}/offboard-complete/`, { force }),
+      post<{
+        detail: string;
+        subscribers_torn_down: number;
+        fees_recovered: string;
+        net_settlement: string;
+        residual_owed: string;
+      }>(`/platform/tenants/${id}/offboard-complete/`, { force }),
     /** A portable JSON snapshot of the tenant's own data (owner-only; contains PII). */
     exportData: (id: number) => get<Record<string, unknown>>(`/platform/tenants/${id}/export/`),
     /** THE LOST PHONE. Clears an ISP owner's authenticator so they can enrol a new one.
