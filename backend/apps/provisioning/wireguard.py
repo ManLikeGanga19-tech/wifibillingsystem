@@ -90,6 +90,75 @@ def render_router_wg_setup(router) -> str:
     )
 
 
+def enrolled_peers():
+    """Every router that holds a WireGuard identity — the peers the hub must know about.
+    A pure DB read; ordered by overlay IP for a stable, diff-friendly config."""
+    from .models import Router
+
+    return (
+        Router.objects.filter(is_active=True)
+        .exclude(wg_public_key="")
+        .exclude(overlay_ip__isnull=True)
+        .order_by("overlay_ip")
+    )
+
+
+def render_hub_peers() -> str:
+    """The `[Peer]` blocks for the hub's wg-quick config — one per enrolled router, each
+    locked to its own /32. This RECONCILES the hub's peer set with the database: what the hub
+    should trust is exactly the routers we've enrolled, no more.
+
+    IMPORTANT: this only RENDERS text. It never connects to a router or the hub and never
+    changes any live config — applying it to the hub host is a deliberate, separate deploy
+    step. So it cannot affect a single customer's connectivity."""
+    blocks = []
+    for r in enrolled_peers():
+        blocks.append(
+            f"# {r.name} (operator: {r.operator.slug}, router #{r.id})\n"
+            "[Peer]\n"
+            f"PublicKey = {r.wg_public_key}\n"
+            f"AllowedIPs = {r.overlay_ip}/32\n"
+        )
+    return "\n".join(blocks)
+
+
+def render_hub_config() -> str:
+    """The FULL hub wg-quick config (`[Interface]` + every peer), for `wg-quick`/systemd on the
+    hub host. Needs WG_HUB_PRIVATE_KEY set (server-side only, never shipped to a router). Same
+    guarantee as render_hub_peers: it emits text for a human to apply — it touches nothing."""
+    private = getattr(settings, "WG_HUB_PRIVATE_KEY", "")
+    _, _, port = settings.WG_HUB_ENDPOINT.partition(":")
+    prefix = ipaddress.ip_network(settings.WG_OVERLAY_CIDR).prefixlen
+    header = [
+        "# WIFI.OS WireGuard hub — generated from the router registry.",
+        "# Apply on the HUB host only (wg-quick). Review the diff before `wg syncconf`.",
+        "[Interface]",
+        f"Address = {settings.WG_HUB_IP}/{prefix}",
+        f"ListenPort = {port or '51820'}",
+        f"PrivateKey = {private or '<SET WG_HUB_PRIVATE_KEY ON THE HUB>'}",
+        "",
+    ]
+    return "\n".join(header) + render_hub_peers()
+
+
+def tunnel_health() -> list[dict]:
+    """Per-router tunnel liveness for the platform console — a pure read of what we already
+    know (last handshake), computed into up/stale/down. No network activity."""
+    return [
+        {
+            "router": r.id,
+            "name": r.name,
+            "operator": r.operator.slug,
+            "overlay_ip": r.overlay_ip,
+            "state": r.tunnel_state,
+            "last_handshake_at": (
+                r.wg_last_handshake_at.isoformat() if r.wg_last_handshake_at else None
+            ),
+        }
+        for r in enrolled_peers().select_related("operator")
+    ]
+
+
 def ensure_wireguard_identity(router) -> bool:
     """Idempotently give a router a keypair + overlay IP. Returns True if anything changed.
 
