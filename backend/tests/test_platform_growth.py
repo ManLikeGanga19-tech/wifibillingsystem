@@ -242,6 +242,51 @@ class TestOnboardingFunnel:
         assert "stages" in r.json()
 
 
+class TestCohortRetention:
+    """Signup-month cohorts × months-since-join, retention read from the lifecycle log."""
+
+    def _op_joined(self, slug, *, days_ago):
+        op = OperatorFactory(slug=slug)
+        Operator = op.__class__
+        Operator.objects.filter(pk=op.pk).update(
+            created_at=timezone.now() - timedelta(days=days_ago)
+        )
+        return op
+
+    def test_triangle_shape_and_retention(self):
+        from apps.core.growth import cohort_retention
+
+        # Two tenants that joined ~2 months ago; one is still live, one churned last month.
+        joined = (timezone.now().replace(day=10) - timedelta(days=60))
+        stayed = self._op_joined("coh-stay", days_ago=60)
+        left = self._op_joined("coh-left", days_ago=60)
+        _life(stayed, TenantLifecycleEvent.Event.ACTIVATED, joined)
+        _life(left, TenantLifecycleEvent.Event.ACTIVATED, joined)
+        _life(left, TenantLifecycleEvent.Event.SUSPENDED, timezone.now() - timedelta(days=2))
+
+        data = cohort_retention(months=6)
+        # newest cohort has 1 column, oldest has 6 — triangular
+        assert [len(c["cells"]) for c in data["cohorts"]] == [6, 5, 4, 3, 2, 1]
+
+        their = next(c for c in data["cohorts"] if c["size"] == 2)
+        assert their["cells"][0]["retained"] == 2   # both live at join
+        assert their["cells"][-1]["retained"] == 1   # one left by the latest month
+
+    def test_demo_and_platform_owned_excluded(self):
+        from apps.core.growth import cohort_retention
+
+        OperatorFactory(slug="coh-demo", is_demo=True)
+        OperatorFactory(slug="coh-ours", is_platform_owned=True)
+        self._op_joined("coh-real", days_ago=5)
+        total = sum(c["size"] for c in cohort_retention(months=6)["cohorts"])
+        assert total == 1
+
+    def test_endpoint_is_platform_only(self):
+        body = _platform().get("/api/v1/platform/cohort-retention/?months=6").json()
+        assert body["months"] == 6
+        assert "cohorts" in body
+
+
 class TestWalletAdjustment:
     def test_owner_can_credit_and_debit(self):
         op = OperatorFactory(slug="adj")

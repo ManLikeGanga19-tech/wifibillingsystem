@@ -628,3 +628,64 @@ class TenantOffboarding(models.Model):
     @property
     def in_grace(self) -> bool:
         return self.state == self.State.SCHEDULED and self.grace_until > timezone.now()
+
+
+class PlatformBroadcast(models.Model):
+    """An operational message Danamo pushes to EVERY ISP console at once — a maintenance
+    window, a price change, an outage notice. One place to say something to all tenants,
+    instead of an SMS blast or nothing. Owner-authored, audited, and shown as a banner in the
+    ISP console until each user dismisses it (or it expires)."""
+
+    class Level(models.TextChoices):
+        INFO = "info", "Info"
+        WARNING = "warning", "Warning"
+        CRITICAL = "critical", "Critical"
+
+    title = models.CharField(max_length=120)
+    body = models.TextField()
+    level = models.CharField(max_length=8, choices=Level.choices, default=Level.INFO)
+    # A critical outage notice can be pinned (not dismissable) so it can't be waved away.
+    dismissable = models.BooleanField(default=True)
+    is_active = models.BooleanField(default=True, db_index=True)
+    starts_at = models.DateTimeField(default=timezone.now, db_index=True)
+    ends_at = models.DateTimeField(null=True, blank=True, help_text="Optional auto-expiry")
+
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"[{self.level}] {self.title}"
+
+    def is_live(self, *, now=None) -> bool:
+        now = now or timezone.now()
+        return (
+            self.is_active
+            and self.starts_at <= now
+            and (self.ends_at is None or self.ends_at > now)
+        )
+
+
+class BroadcastDismissal(models.Model):
+    """One user has dismissed one broadcast — so a banner stays gone once waved away, per
+    person (not per tenant: each user clears their own)."""
+
+    broadcast = models.ForeignKey(
+        PlatformBroadcast, on_delete=models.CASCADE, related_name="dismissals"
+    )
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    dismissed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["broadcast", "user"], name="one_dismissal_per_user_broadcast"
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.user_id} dismissed broadcast#{self.broadcast_id}"

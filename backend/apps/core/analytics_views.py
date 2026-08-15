@@ -312,6 +312,24 @@ class PlatformOnboardingFunnelView(APIView):
         return Response(onboarding_funnel(days=days))
 
 
+@extend_schema(responses=OBJECT_RESPONSE, summary="Platform tenant cohort retention")
+class PlatformCohortRetentionView(APIView):
+    """The retention triangle: of the ISPs signed up each month, how many are still live N
+    months on. Answers 'do the tenants we win actually stick?' — the question churn alone,
+    which mixes all cohorts together, can't."""
+
+    permission_classes = [IsPlatformStaff]
+
+    def get(self, request):
+        from .growth import cohort_retention
+
+        try:
+            months = int(request.query_params.get("months", 6))
+        except (TypeError, ValueError):
+            months = 6
+        return Response(cohort_retention(months=months))
+
+
 @extend_schema(responses=OBJECT_RESPONSE, summary="Per-ISP profit and loss")
 class TenantPnlView(APIView):
     """Per-ISP profitability: what each tenant EARNS us versus what it COSTS us.

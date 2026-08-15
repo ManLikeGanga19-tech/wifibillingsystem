@@ -70,6 +70,7 @@ class Command(BaseCommand):
         self._platform_showcase()
         self._onboarding_showcase()
         self._offboarding_showcase()
+        self._broadcast_showcase()
         self.stdout.write(self.style.SUCCESS(
             f"Demo tenant ready: https://{DEMO_SLUG}.wifios.co.ke  "
             f"login {DEMO_OWNER_PHONE} / {DEMO_OWNER_PASSWORD} (READ-ONLY)"
@@ -521,6 +522,19 @@ class Command(BaseCommand):
                 self._plat_fee(op, base, -self.BASE_FEE, period, when)
                 self._plat_fee(op, fee, -pppoe, period, when)
         self.stdout.write(f"Platform showcase: {len(self.SHOWCASE_ISPS)} sample ISPs w/ 6mo fees")
+
+    def _broadcast_showcase(self):
+        """One live platform broadcast, so every ISP console shows the notice banner."""
+        from apps.core.models import PlatformBroadcast
+
+        PlatformBroadcast.objects.filter(body__startswith="[seed]").delete()  # idempotent
+        PlatformBroadcast.objects.create(
+            title="Scheduled maintenance — Sunday 02:00–04:00 EAT",
+            body="[seed] We'll be upgrading the payments pipeline. Collections keep working; "
+                 "the console may be briefly read-only during the window.",
+            level=PlatformBroadcast.Level.WARNING,
+        )
+        self.stdout.write("Broadcast showcase: 1 live notice")
 
     def _offboarding_showcase(self):
         """Put one recent signup into a live grace window, so Platform Control shows the

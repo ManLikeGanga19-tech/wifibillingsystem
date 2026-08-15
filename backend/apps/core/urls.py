@@ -2,6 +2,7 @@ from django.urls import path
 from rest_framework.routers import SimpleRouter
 
 from .analytics_views import (
+    PlatformCohortRetentionView,
     PlatformKpisView,
     PlatformMrrMovementView,
     PlatformOnboardingFunnelView,
@@ -14,6 +15,11 @@ from .branding_views import (
     BrandingLogoView,
     BrandingView,
     PublicBrandingView,
+)
+from .broadcast_views import (
+    ActiveBroadcastsView,
+    DismissBroadcastView,
+    PlatformBroadcastViewSet,
 )
 from .domain_views import ChangeDomainView, DomainCheckView, DomainView
 from .governance_views import (
@@ -41,6 +47,7 @@ router.register("platform/audit", AuditLogViewSet, basename="platform-audit")
 router.register(
     "platform/impersonation", ImpersonationViewSet, basename="platform-impersonation"
 )
+router.register("platform/broadcasts", PlatformBroadcastViewSet, basename="platform-broadcast")
 
 urlpatterns = [
     # Tenant-scoped (require an acting ISP)
@@ -73,6 +80,10 @@ urlpatterns = [
         ConfirmPayoutView.as_view(),
         name="settlement-confirm",
     ),
+    # Broadcasts shown IN the ISP console — any signed-in user, audience is every tenant.
+    path("broadcasts/active/", ActiveBroadcastsView.as_view(), name="broadcasts-active"),
+    path("broadcasts/<int:pk>/dismiss/", DismissBroadcastView.as_view(),
+         name="broadcasts-dismiss"),
     # Public
     path("tenants/signup/", TenantSignupView.as_view(), name="tenant-signup"),
     # Platform-wide (cross-tenant aggregates live ONLY here)
@@ -95,6 +106,8 @@ urlpatterns = [
     path("platform/mrr-movement/", PlatformMrrMovementView.as_view(), name="platform-mrr-movement"),
     path("platform/onboarding-funnel/", PlatformOnboardingFunnelView.as_view(),
          name="platform-onboarding-funnel"),
+    path("platform/cohort-retention/", PlatformCohortRetentionView.as_view(),
+         name="platform-cohort-retention"),
     path("platform/search/", PlatformSearchView.as_view(), name="platform-search"),
     path("platform/health/", PlatformHealthView.as_view(), name="platform-health"),
     # Impersonation is a recorded act, not a header flip — these are the only doors

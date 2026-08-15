@@ -18,6 +18,7 @@ const post = <T,>(p: string, body?: unknown) =>
   request<T>(p, { method: 'POST', body: body ? JSON.stringify(body) : undefined });
 const patch = <T,>(p: string, body: unknown) =>
   request<T>(p, { method: 'PATCH', body: JSON.stringify(body) });
+const del = (p: string) => request<void>(p, { method: 'DELETE' });
 
 // ---- types ------------------------------------------------------------------
 
@@ -139,6 +140,40 @@ export interface OnboardingFunnel {
   median_days_to_first_payment: number | null;
   stuck: { pending_over_7d: number; activated_no_payment_over_14d: number };
 }
+export interface RetentionCell {
+  offset: number; // months since signup
+  retained: number;
+  pct: number | null;
+}
+export interface RetentionCohort {
+  cohort: string; // "YYYY-MM" signup month
+  size: number;
+  cells: RetentionCell[];
+}
+export interface CohortRetention {
+  as_of: string;
+  months: number;
+  cohorts: RetentionCohort[];
+}
+export interface Broadcast {
+  id: number;
+  title: string;
+  body: string;
+  level: 'info' | 'warning' | 'critical';
+  dismissable: boolean;
+  is_active: boolean;
+  starts_at: string;
+  ends_at: string | null;
+  created_at: string;
+  is_live: boolean;
+}
+export type BroadcastDraft = {
+  title: string;
+  body: string;
+  level: Broadcast['level'];
+  dismissable: boolean;
+  ends_at?: string | null;
+};
 
 export interface UnmatchedSuggestion {
   client_id: number;
@@ -346,6 +381,17 @@ export const api = {
   mrrMovement: (months: number) => get<MrrMovement>(`/platform/mrr-movement/?months=${months}`),
   onboardingFunnel: (days: number) =>
     get<OnboardingFunnel>(`/platform/onboarding-funnel/?days=${days}`),
+  cohortRetention: (months: number) =>
+    get<CohortRetention>(`/platform/cohort-retention/?months=${months}`),
+
+  /** Broadcasts shown across every ISP console. Owner-only for writes. */
+  broadcasts: {
+    list: () => get<Page<Broadcast> | Broadcast[]>('/platform/broadcasts/'),
+    create: (body: BroadcastDraft) => post<Broadcast>('/platform/broadcasts/', body),
+    update: (id: number, body: Partial<Broadcast>) =>
+      patch<Broadcast>(`/platform/broadcasts/${id}/`, body),
+    remove: (id: number) => del(`/platform/broadcasts/${id}/`),
+  },
   search: (q: string) => get<SearchResults>(`/platform/search/?q=${encodeURIComponent(q)}`),
 
   /** The unmatched-payments queue: money that landed on a mistyped account number. */

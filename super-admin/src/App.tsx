@@ -6,6 +6,7 @@ import {
   Globe,
   LineChart,
   Loader2,
+  Megaphone,
   Search as SearchIcon,
   ShieldAlert,
   ShieldCheck,
@@ -23,12 +24,14 @@ import GovernanceView from './views/GovernanceView';
 import OpsView from './views/OpsView';
 import SearchView from './views/SearchView';
 import TenantsView from './views/TenantsView';
+import BroadcastsView from './views/BroadcastsView';
 
-type Tab = 'command' | 'finance' | 'growth' | 'tenants' | 'ops' | 'governance' | 'search';
+type Tab =
+  | 'command' | 'finance' | 'growth' | 'tenants' | 'broadcast' | 'ops' | 'governance' | 'search';
 
 /** The sections the URL may name; anything else falls back to the Command Center. */
 const KNOWN_TABS: ReadonlySet<Tab> = new Set<Tab>([
-  'command', 'finance', 'growth', 'tenants', 'ops', 'governance', 'search',
+  'command', 'finance', 'growth', 'tenants', 'broadcast', 'ops', 'governance', 'search',
 ]);
 
 // Derived from the CURRENT domain so links work on any deployment (dev localhost
@@ -48,6 +51,7 @@ const NAV: { title: string | null; items: { id: Tab; label: string; icon: typeof
       { id: 'finance', label: 'Finance', icon: TrendingUp },
       { id: 'growth', label: 'Growth', icon: LineChart },
       { id: 'tenants', label: 'ISP Tenants', icon: Building2 },
+      { id: 'broadcast', label: 'Broadcasts', icon: Megaphone },
     ],
   },
   {
@@ -271,6 +275,7 @@ export default function App() {
             )}
             {tab === 'growth' && <GrowthView />}
             {tab === 'tenants' && <TenantsView openId={openTenant} onOpen={setOpenTenant} />}
+            {tab === 'broadcast' && <BroadcastsView />}
             {tab === 'ops' && <OpsView />}
             {tab === 'governance' && <GovernanceView />}
             {tab === 'search' && <SearchView />}
