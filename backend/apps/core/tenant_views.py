@@ -539,18 +539,25 @@ class PlatformTenantViewSet(viewsets.ModelViewSet):
         return Response({
             "detail": "Offboarding completed.",
             "subscribers_torn_down": ob.subscribers_torn_down,
-            "snapshot_withdrawable": str(ob.snapshot_withdrawable),
-            "snapshot_owed": str(ob.snapshot_owed),
+            "fees_recovered": str(ob.fees_recovered),
+            "net_settlement": str(ob.net_settlement),
+            "residual_owed": str(ob.residual_owed),
         })
 
     @extend_schema(responses=OBJECT_RESPONSE, summary="Export a tenant's data (portability)")
     @action(detail=True, methods=["get"], permission_classes=[IsPlatformOwner])
     def export(self, request, pk=None):
         """A portable JSON snapshot of the tenant's own records — handed over on offboarding so
-        the ISP leaves WITH its data. Owner-only: it contains subscriber PII."""
-        from .offboarding import export_tenant_data
+        the ISP leaves WITH its data. Owner-only: it contains subscriber PII.
+
+        Refused while the tenant is offboarding WITH arrears: the client data is leverage until
+        the balance is settled (same rule the ISP's own CSV export enforces)."""
+        from .offboarding import export_blocked_reason, export_tenant_data
 
         operator = self.get_object()
+        blocked = export_blocked_reason(operator)
+        if blocked:
+            return Response({"detail": blocked}, status=status.HTTP_403_FORBIDDEN)
         audit("tenant_data_exported", operator=operator, actor=request.user, target=operator)
         return Response(export_tenant_data(operator))
 

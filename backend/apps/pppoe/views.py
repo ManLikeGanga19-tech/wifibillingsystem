@@ -389,11 +389,19 @@ class ClientViewSet(TenantModelViewSet):
         The ISP's own owner can still take everything, whenever they want. It is simply a
         deliberate, audited act rather than a side effect of clicking Export.
         """
+        from apps.core.offboarding import export_blocked_reason
         from apps.core.tenancy import is_impersonating
 
         from .porting import clients_csv
 
         operator = self.get_operator()
+
+        # An ISP being offboarded with arrears cannot take its client list until it settles —
+        # the data is leverage while money is owed (enforced server-side, both consoles).
+        blocked = export_blocked_reason(operator)
+        if blocked:
+            return Response({"detail": blocked}, status=status.HTTP_403_FORBIDDEN)
+
         want_credentials = str(
             request.query_params.get("include_credentials", "")
         ).lower() in ("1", "true", "yes")

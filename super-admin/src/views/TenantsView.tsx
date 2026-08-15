@@ -470,7 +470,16 @@ function TenantDetail({ id, onBack }: { id: number; onBack: () => void }) {
     setBusy(true);
     try {
       const r = await api.tenants.offboardComplete(t.id, force);
-      toast('good', `Offboarding completed — ${r.subscribers_torn_down} subscribers removed.`);
+      const recovered = Number(r.fees_recovered);
+      const net = Number(r.net_settlement);
+      const residual = Number(r.residual_owed);
+      const money = residual > 0
+        ? `Unrecovered debt: ${ksh(r.residual_owed)} (flagged on Risk).`
+        : recovered > 0
+          ? `Recovered ${ksh(r.fees_recovered)} in fees; ${ksh(r.net_settlement)} to pay out.`
+          : net > 0 ? `${ksh(r.net_settlement)} to pay out.` : 'Nothing outstanding.';
+      toast(residual > 0 ? 'warning' : 'good',
+        `Offboarding completed — ${r.subscribers_torn_down} subscribers removed. ${money}`);
       reload();
     } catch (e) {
       toast('red', e instanceof Error ? e.message : 'Could not complete offboarding.');
@@ -681,6 +690,12 @@ function OffboardingBanner({
             {owed > 0 && <>They owe us <b>{ksh(info.snapshot_owed)}</b> to collect. </>}
             {owe <= 0 && owed <= 0 && <>Nothing outstanding either way.</>}
           </div>
+          {owed > 0 && (
+            <div className="mt-1 flex items-center gap-1.5" style={{ color: 'var(--critical)' }}>
+              <Ban className="h-3.5 w-3.5 shrink-0" />
+              <span>Client-data export is blocked until the arrears are settled.</span>
+            </div>
+          )}
         </div>
       </div>
       <div className="flex flex-wrap gap-2">

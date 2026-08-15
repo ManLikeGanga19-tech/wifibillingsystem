@@ -148,6 +148,13 @@ def complete_offboarding(
         force_cancel_client(client, reason="operator offboarded", actor=actor)
         torn += 1
 
+    # FINAL SETTLEMENT: collect what we can of their debt from the balance we're holding, so
+    # the fee is netted from money in hand rather than chased after they've gone. What can't
+    # be covered becomes recorded bad debt for follow-up.
+    from apps.billing.services import settle_from_wallet
+
+    settlement = settle_from_wallet(operator, actor=actor)
+
     # Terminal: console stays suspended AND the hard kill-switch goes off, so nothing can
     # transact again without a deliberate platform action.
     operator.status = Operator.Status.SUSPENDED
@@ -158,21 +165,68 @@ def complete_offboarding(
         from_status=Operator.Status.SUSPENDED, actor=actor, reason=ob.reason,
     )
 
-    snap = financial_snapshot(operator)  # refresh at the close
+    snap = financial_snapshot(operator)  # refresh AFTER netting
     ob.state = TenantOffboarding.State.COMPLETED
     ob.resolved_by = actor if getattr(actor, "pk", None) else None
     ob.resolved_at = timezone.now()
     ob.snapshot_withdrawable = snap["withdrawable"]
     ob.snapshot_owed = snap["owed"]
+    ob.fees_recovered = settlement["fees_recovered"]
+    ob.residual_owed = settlement["residual_owed"]
+    ob.net_settlement = settlement["net_settlement"]
     ob.subscribers_torn_down = torn
     ob.save(update_fields=[
         "state", "resolved_by", "resolved_at",
-        "snapshot_withdrawable", "snapshot_owed", "subscribers_torn_down",
+        "snapshot_withdrawable", "snapshot_owed",
+        "fees_recovered", "residual_owed", "net_settlement", "subscribers_torn_down",
     ])
     audit("tenant_offboarding_completed", operator=operator, actor=actor, target=operator,
           subscribers_torn_down=torn, forced=force,
-          withdrawable=str(snap["withdrawable"]), owed=str(snap["owed"]))
+          fees_recovered=str(settlement["fees_recovered"]),
+          net_settlement=str(settlement["net_settlement"]),
+          residual_owed=str(settlement["residual_owed"]))
+    if settlement["residual_owed"] > 0:
+        # Bad debt: we tore them down but couldn't cover the fees. Surfaced on the Risk screen.
+        audit("tenant_offboarding_bad_debt", operator=operator, actor=actor, target=operator,
+              residual_owed=str(settlement["residual_owed"]))
     return ob
+
+
+def final_statement(operator: Operator) -> dict | None:
+    """The closing settlement for a COMPLETED offboarding — the one-page truth of who owed
+    whom at the end, for the ISP's records and ours. None if the tenant was never offboarded."""
+    ob = operator.offboardings.filter(
+        state=TenantOffboarding.State.COMPLETED
+    ).order_by("-resolved_at").first()
+    if ob is None:
+        return None
+    return {
+        "operator": {"name": operator.name, "slug": operator.slug},
+        "closed_at": ob.resolved_at.isoformat() if ob.resolved_at else None,
+        "reason": ob.reason,
+        "held_balance": str(ob.snapshot_withdrawable + ob.fees_recovered),  # before netting
+        "fees_recovered": str(ob.fees_recovered),
+        "net_paid_to_isp": str(ob.net_settlement),
+        "residual_owed_by_isp": str(ob.residual_owed),  # bad debt, if any
+        "subscribers_removed": ob.subscribers_torn_down,
+    }
+
+
+def export_blocked_reason(operator: Operator) -> str | None:
+    """Why a client-data export is refused right now, or None if it's allowed.
+
+    An ISP in the middle of offboarding WITH arrears may not take its client list until the
+    balance is settled — the data is leverage while money is owed. Once there's no live
+    offboarding (or nothing owed), export is a portability right again."""
+    from apps.billing.services import amount_owed
+
+    ob = current_offboarding(operator)
+    if ob is not None and amount_owed(operator) > 0:
+        return (
+            "This ISP is being offboarded with an outstanding balance. Client data can be "
+            "exported once the arrears are settled."
+        )
+    return None
 
 
 def export_tenant_data(operator: Operator) -> dict:

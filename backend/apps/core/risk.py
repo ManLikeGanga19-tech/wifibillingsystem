@@ -221,6 +221,32 @@ def _large_payouts(now):
     return findings
 
 
+def _bad_debt_offboardings():
+    """Tenants offboarded owing money we could NOT recover from their held balance — the only
+    figure a human has to chase after closure. Read straight off the completed offboardings."""
+    from .models import TenantOffboarding
+
+    rows = (
+        TenantOffboarding.objects.filter(
+            state=TenantOffboarding.State.COMPLETED, residual_owed__gt=0
+        )
+        .select_related("operator")
+        .order_by("-residual_owed")
+    )
+    findings = []
+    for ob in rows:
+        op = ob.operator
+        if op is None or op.is_demo or op.is_platform_owned:
+            continue
+        findings.append(_finding(
+            op, "offboarding_bad_debt", "high",
+            f"Offboarded still owing KES {ob.residual_owed:,.0f} (unrecovered)",
+            residual_owed=str(ob.residual_owed), fees_recovered=str(ob.fees_recovered),
+            closed_at=ob.resolved_at.isoformat() if ob.resolved_at else None,
+        ))
+    return findings
+
+
 def risk_signals(*, days: int = 30) -> dict:
     """All current risk findings across real tenants, most severe first. Read-only."""
     now = timezone.now()
@@ -229,6 +255,7 @@ def risk_signals(*, days: int = 30) -> dict:
         + _duplicate_identity()
         + _reactivation_cycling(now)
         + _large_payouts(now)
+        + _bad_debt_offboardings()
     )
     findings.sort(key=lambda f: SEVERITY_ORDER.get(f["severity"], 9))
     counts = {"high": 0, "medium": 0, "low": 0}

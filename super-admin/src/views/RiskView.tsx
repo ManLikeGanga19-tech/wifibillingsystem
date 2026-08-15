@@ -15,6 +15,7 @@ const SIGNAL_LABEL: Record<RiskFinding['signal'], string> = {
   duplicate_identity: 'Shared identity',
   reactivation_cycling: 'Suspend/reactivate cycling',
   large_payout: 'Large payout',
+  offboarding_bad_debt: 'Offboarding bad debt',
 };
 
 /**
