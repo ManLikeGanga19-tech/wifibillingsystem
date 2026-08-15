@@ -2,6 +2,7 @@ from django.urls import path
 from rest_framework.routers import SimpleRouter
 
 from .analytics_views import (
+    PlatformCohortRetentionView,
     PlatformKpisView,
     PlatformMrrMovementView,
     PlatformOnboardingFunnelView,
@@ -95,6 +96,8 @@ urlpatterns = [
     path("platform/mrr-movement/", PlatformMrrMovementView.as_view(), name="platform-mrr-movement"),
     path("platform/onboarding-funnel/", PlatformOnboardingFunnelView.as_view(),
          name="platform-onboarding-funnel"),
+    path("platform/cohort-retention/", PlatformCohortRetentionView.as_view(),
+         name="platform-cohort-retention"),
     path("platform/search/", PlatformSearchView.as_view(), name="platform-search"),
     path("platform/health/", PlatformHealthView.as_view(), name="platform-health"),
     # Impersonation is a recorded act, not a header flip — these are the only doors

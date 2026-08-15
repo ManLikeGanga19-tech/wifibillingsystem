@@ -318,3 +318,64 @@ def onboarding_funnel(*, days: int = 90) -> dict:
             "activated_no_payment_over_14d": stuck_no_pay,
         },
     }
+
+
+# ---- cohort retention --------------------------------------------------------------------
+
+
+def cohort_retention(*, months: int = 6) -> dict:
+    """Do the ISPs we sign up in a given month STAY? A retention triangle.
+
+    Rows are signup-month cohorts (newest last); columns are months-since-signup. Cell [c][k]
+    is how many of cohort c were still live k months after they joined — 'live' read from the
+    real lifecycle log (activation/suspension/cancellation), the same source as churn, so a
+    tenant that left genuinely drops out and one that merely skipped a bill does not. Older
+    cohorts have more columns (more elapsed months), so the grid is triangular. Demo and the
+    platform's own tenant are excluded."""
+    months = max(1, min(months, MAX_MONTHS))
+    now = timezone.now()
+
+    # month starts, oldest .. newest (length = months). starts[i] begins cohort i; the boundary
+    # AFTER month j is starts[j+1], or `now` for the current (partial) month.
+    starts = [_month_start(now)]
+    for _ in range(months - 1):
+        starts.append(_month_start(starts[-1] - timedelta(days=1)))
+    starts.reverse()
+    keys = [s.strftime("%Y-%m") for s in starts]
+    key_set = set(keys)
+
+    # Which cohort each tenant belongs to (by signup month), within the window.
+    members: dict[str, list[int]] = {k: [] for k in keys}
+    rows = (
+        Operator.objects.exclude(is_demo=True).exclude(is_platform_owned=True)
+        .filter(created_at__gte=starts[0])
+        .values_list("id", "created_at")
+    )
+    for op_id, created in rows:
+        k = _month_start(created).strftime("%Y-%m")
+        if k in key_set:
+            members[k].append(op_id)
+
+    stream = _live_state_stream()
+
+    def _end_of(month_index: int):
+        """The instant that closes reported month `month_index` (start of the next one, or now
+        for the current partial month)."""
+        return starts[month_index + 1] if month_index + 1 < len(starts) else now
+
+    cohorts = []
+    for i, k in enumerate(keys):
+        ids = members[k]
+        size = len(ids)
+        cells = []
+        for offset in range(0, months - i):  # only as many months as have actually elapsed
+            end = _end_of(i + offset)
+            retained = sum(1 for op_id in ids if _live_at(stream.get(op_id, []), end))
+            cells.append({
+                "offset": offset,
+                "retained": retained,
+                "pct": round(retained / size, 4) if size else None,
+            })
+        cohorts.append({"cohort": k, "size": size, "cells": cells})
+
+    return {"as_of": now.isoformat(), "months": months, "cohorts": cohorts}

@@ -25,7 +25,7 @@ const signed = (v: string | number) => {
  * stall?). The demo tenant is excluded from both.
  */
 export default function GrowthView() {
-  const [lens, setLens] = useState<'revenue' | 'onboarding'>('revenue');
+  const [lens, setLens] = useState<'revenue' | 'onboarding' | 'retention'>('revenue');
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -42,9 +42,17 @@ export default function GrowthView() {
           >
             Onboarding funnel
           </Btn>
+          <Btn
+            variant={lens === 'retention' ? 'dark' : 'outline'}
+            onClick={() => setLens('retention')}
+          >
+            Retention
+          </Btn>
         </div>
       </div>
-      {lens === 'revenue' ? <RevenueMovement /> : <OnboardingFunnel />}
+      {lens === 'revenue' && <RevenueMovement />}
+      {lens === 'onboarding' && <OnboardingFunnel />}
+      {lens === 'retention' && <CohortRetention />}
     </div>
   );
 }
@@ -250,6 +258,98 @@ function OnboardingFunnel() {
                 </div>
               );
             })}
+          </div>
+        )}
+      </Panel>
+    </div>
+  );
+}
+
+/**
+ * Cohort retention — do the ISPs we sign up each month STAY? Rows are signup-month cohorts,
+ * columns are months-since-join; each cell is how many of that intake were still live that
+ * many months on. Reading DOWN a column compares intakes at the same age; reading ACROSS a
+ * row is one cohort decaying. The number is the signal — colour only reinforces it.
+ */
+function CohortRetention() {
+  const [months, setMonths] = useState(6);
+  const { data, error, reload } = useLoad(() => api.cohortRetention(months), [months]);
+
+  if (error) return <ErrorBox message={error} onRetry={reload} />;
+  if (!data) return <Spinner />;
+
+  const offsets = Array.from({ length: data.months }, (_, i) => i);
+  const withSignups = data.cohorts.filter((c) => c.size > 0);
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center justify-end gap-1.5">
+        {[6, 12].map((m) => (
+          <button
+            key={m}
+            onClick={() => setMonths(m)}
+            className={`px-2.5 py-1 text-xs font-mono border cursor-pointer ${
+              months === m ? 'bg-[#141414] text-white border-[#141414]' : 'border-[#141414]/40'
+            }`}
+          >
+            {m}m
+          </button>
+        ))}
+        <RefreshBtn onClick={reload} />
+      </div>
+
+      <Panel
+        title="Retention by signup cohort"
+        subtitle="Each row is an intake month; each column is months since they joined. Down a column = same age, different intakes."
+      >
+        {withSignups.length === 0 ? (
+          <Empty message="No signups in this window." />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs border-collapse">
+              <thead>
+                <tr style={{ color: 'var(--text-muted)' }}>
+                  <th className="text-left font-mono uppercase text-[10px] py-1.5 pr-3">Cohort</th>
+                  <th className="text-right font-mono uppercase text-[10px] py-1.5 pr-3">Size</th>
+                  {offsets.map((o) => (
+                    <th key={o} className="text-center font-mono uppercase text-[10px] py-1.5 px-1">
+                      M{o}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {data.cohorts.map((c) => (
+                  <tr key={c.cohort}>
+                    <td className="font-mono py-1.5 pr-3 whitespace-nowrap">{c.cohort}</td>
+                    <td className="tnum text-right py-1.5 pr-3" style={{ color: 'var(--text-secondary)' }}>
+                      {c.size || '—'}
+                    </td>
+                    {offsets.map((o) => {
+                      const cell = c.cells.find((x) => x.offset === o);
+                      if (!cell || c.size === 0) {
+                        return (
+                          <td key={o} className="text-center py-1.5 px-1" style={{ color: 'var(--text-muted)' }}>
+                            ·
+                          </td>
+                        );
+                      }
+                      const p = cell.pct ?? 0;
+                      return (
+                        <td
+                          key={o}
+                          className="text-center py-1.5 px-1 tnum"
+                          title={`${cell.retained} of ${c.size} live`}
+                          style={{ background: `rgba(34,139,34,${(0.1 + p * 0.55).toFixed(3)})` }}
+                        >
+                          {Math.round(p * 100)}%
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </Panel>

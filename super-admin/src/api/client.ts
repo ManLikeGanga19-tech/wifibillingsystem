@@ -139,6 +139,21 @@ export interface OnboardingFunnel {
   median_days_to_first_payment: number | null;
   stuck: { pending_over_7d: number; activated_no_payment_over_14d: number };
 }
+export interface RetentionCell {
+  offset: number; // months since signup
+  retained: number;
+  pct: number | null;
+}
+export interface RetentionCohort {
+  cohort: string; // "YYYY-MM" signup month
+  size: number;
+  cells: RetentionCell[];
+}
+export interface CohortRetention {
+  as_of: string;
+  months: number;
+  cohorts: RetentionCohort[];
+}
 
 export interface UnmatchedSuggestion {
   client_id: number;
@@ -346,6 +361,8 @@ export const api = {
   mrrMovement: (months: number) => get<MrrMovement>(`/platform/mrr-movement/?months=${months}`),
   onboardingFunnel: (days: number) =>
     get<OnboardingFunnel>(`/platform/onboarding-funnel/?days=${days}`),
+  cohortRetention: (months: number) =>
+    get<CohortRetention>(`/platform/cohort-retention/?months=${months}`),
   search: (q: string) => get<SearchResults>(`/platform/search/?q=${encodeURIComponent(q)}`),
 
   /** The unmatched-payments queue: money that landed on a mistyped account number. */
