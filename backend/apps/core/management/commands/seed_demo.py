@@ -71,6 +71,7 @@ class Command(BaseCommand):
         self._onboarding_showcase()
         self._offboarding_showcase()
         self._broadcast_showcase()
+        self._risk_showcase()
         self.stdout.write(self.style.SUCCESS(
             f"Demo tenant ready: https://{DEMO_SLUG}.wifios.co.ke  "
             f"login {DEMO_OWNER_PHONE} / {DEMO_OWNER_PASSWORD} (READ-ONLY)"
@@ -523,6 +524,64 @@ class Command(BaseCommand):
                 self._plat_fee(op, fee, -pppoe, period, when)
         self.stdout.write(f"Platform showcase: {len(self.SHOWCASE_ISPS)} sample ISPs w/ 6mo fees")
 
+    def _risk_showcase(self):
+        """Trip a few fraud/risk signals so the Risk screen shows real findings. Dedicated
+        `risk-*` tenants, dated ~300 days ago so they stay OUT of the funnel/cohort windows."""
+        from apps.billing.models import Payout
+        from apps.core.models import Operator, TenantLifecycleEvent
+        from apps.payments.models import C2BPayment
+
+        now = timezone.now()
+        old = now - timedelta(days=300)
+        # C2BPayment.operator is SET_NULL, so deleting the operators would ORPHAN their C2B
+        # rows (with our fixed trans_ids) and the recreate would collide — clear them by
+        # bill_ref first. Payouts cascade with the operator, so they need no special handling.
+        C2BPayment.objects.filter(bill_ref__startswith="risk-").delete()
+        Operator.objects.filter(slug__startswith="risk-").delete()  # cascades payouts/events
+
+        def _mk(slug, name, **kw):
+            op = Operator.objects.create(
+                slug=slug, name=name, status=Operator.Status.ACTIVE, **kw
+            )
+            Operator.objects.filter(pk=op.pk).update(created_at=old)
+            return op
+
+        # 1) Shared contact phone across two tenants (trial farming / one actor).
+        _mk("risk-twin-a", "Coastline Web A", contact_phone="254701234567")
+        _mk("risk-twin-b", "Coastline Web B", contact_phone="254701234567")
+
+        # 2) Suspend/reactivate cycling.
+        cycler = _mk("risk-cycler", "On-Off Networks")
+        for i in range(4):
+            TenantLifecycleEvent.objects.create(
+                operator=cycler, slug=cycler.slug, name=cycler.name,
+                event=TenantLifecycleEvent.Event.SUSPENDED,
+                occurred_at=now - timedelta(days=i * 12 + 1),
+            )
+
+        # 3) Large payout dwarfing a tiny collection (a drain).
+        drain = _mk("risk-drain", "Cashout Wireless")
+        c = C2BPayment.objects.create(
+            operator=drain, trans_id="RISKDRAIN01", bill_ref=drain.slug,
+            amount=Decimal("8000"), status=C2BPayment.Status.MATCHED,
+        )
+        C2BPayment.objects.filter(pk=c.pk).update(received_at=old)
+        Payout.objects.create(operator=drain, amount=Decimal("90000"))
+
+        # 4) Collection spike: quiet history, then a big day today.
+        spike = _mk("risk-spike", "Suddenly Busy ISP")
+        for d in range(3, 8):
+            p = C2BPayment.objects.create(
+                operator=spike, trans_id=f"RISKSPK{d}", bill_ref=spike.slug,
+                amount=Decimal("1200"), status=C2BPayment.Status.MATCHED,
+            )
+            C2BPayment.objects.filter(pk=p.pk).update(received_at=now - timedelta(days=d))
+        C2BPayment.objects.create(
+            operator=spike, trans_id="RISKSPKTODAY", bill_ref=spike.slug,
+            amount=Decimal("75000"), status=C2BPayment.Status.MATCHED,
+        )
+        self.stdout.write("Risk showcase: 4 signals tripped (dup id, cycling, drain, spike)")
+
     def _broadcast_showcase(self):
         """One live platform broadcast, so every ISP console shows the notice banner."""
         from apps.core.models import PlatformBroadcast
@@ -539,15 +598,19 @@ class Command(BaseCommand):
     def _offboarding_showcase(self):
         """Put one recent signup into a live grace window, so Platform Control shows the
         offboarding banner (undo / complete) and a tenant frozen mid-departure."""
-        from apps.core.models import Operator, TenantOffboarding
+        from apps.core.models import Operator, TenantLifecycleEvent, TenantOffboarding
         from apps.core.offboarding import initiate_offboarding
 
         op = Operator.objects.filter(slug="signup-ganze").first()
         if not op:
             return
-        # Idempotent on reseed: clear any prior offboarding and return the tenant to a clean
-        # active state before starting a fresh one.
+        # Idempotent on reseed: clear any prior offboarding AND the suspension events it
+        # emitted (they'd otherwise pile up across reseeds and falsely trip cycling detection),
+        # then return the tenant to a clean active state before starting a fresh one.
         TenantOffboarding.objects.filter(operator=op).delete()
+        TenantLifecycleEvent.objects.filter(
+            operator=op, event=TenantLifecycleEvent.Event.SUSPENDED
+        ).delete()
         op.status = Operator.Status.ACTIVE
         op.is_active = True
         op.suspension_reason = ""

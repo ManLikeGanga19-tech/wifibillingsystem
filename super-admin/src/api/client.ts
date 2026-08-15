@@ -174,6 +174,20 @@ export type BroadcastDraft = {
   dismissable: boolean;
   ends_at?: string | null;
 };
+export interface RiskFinding {
+  operator: number;
+  name: string;
+  slug: string;
+  signal: 'collection_spike' | 'duplicate_identity' | 'reactivation_cycling' | 'large_payout';
+  severity: 'high' | 'medium' | 'low';
+  headline: string;
+  detail: Record<string, unknown>;
+}
+export interface RiskSignals {
+  as_of: string;
+  counts: { high: number; medium: number; low: number };
+  findings: RiskFinding[];
+}
 
 export interface UnmatchedSuggestion {
   client_id: number;
@@ -383,6 +397,7 @@ export const api = {
     get<OnboardingFunnel>(`/platform/onboarding-funnel/?days=${days}`),
   cohortRetention: (months: number) =>
     get<CohortRetention>(`/platform/cohort-retention/?months=${months}`),
+  risk: () => get<RiskSignals>('/platform/risk/'),
 
   /** Broadcasts shown across every ISP console. Owner-only for writes. */
   broadcasts: {

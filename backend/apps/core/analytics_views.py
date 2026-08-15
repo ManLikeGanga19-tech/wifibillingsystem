@@ -330,6 +330,20 @@ class PlatformCohortRetentionView(APIView):
         return Response(cohort_retention(months=months))
 
 
+@extend_schema(responses=OBJECT_RESPONSE, summary="Platform fraud / risk signals")
+class PlatformRiskView(APIView):
+    """Read-only risk detection across real tenants: collection spikes, shared identities,
+    suspend/reactivate cycling, and outsized payouts. Hints for a human to look, never an
+    automatic action. Demo + platform-owned excluded."""
+
+    permission_classes = [IsPlatformStaff]
+
+    def get(self, request):
+        from .risk import risk_signals
+
+        return Response(risk_signals())
+
+
 @extend_schema(responses=OBJECT_RESPONSE, summary="Per-ISP profit and loss")
 class TenantPnlView(APIView):
     """Per-ISP profitability: what each tenant EARNS us versus what it COSTS us.
