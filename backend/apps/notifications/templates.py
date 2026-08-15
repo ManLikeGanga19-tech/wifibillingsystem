@@ -164,6 +164,24 @@ TEMPLATES = {
             _COMPANY,
         ],
     ),
+    "points_redeemed": Template(
+        key="points_redeemed",
+        group="Loyalty",
+        label="Points redeemed",
+        description="Sent when a subscriber redeems points for a reward voucher — carries the "
+                    "code they enter at the hotspot to get online.",
+        category="other",
+        default_body=(
+            "Redeemed for @plan with @company_name. Your code: @code. "
+            "Balance: @points_balance points."
+        ),
+        variables=[
+            ("plan", "1 Hour"),
+            ("code", "RWAB12CD"),
+            ("points_balance", "150"),
+            _COMPANY,
+        ],
+    ),
     # --- Voucher ------------------------------------------------------------------------
     "voucher_issued": Template(
         key="voucher_issued",

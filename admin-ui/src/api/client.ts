@@ -757,6 +757,23 @@ export interface LoyaltySummary {
   top: { phone: string; points: number }[];
 }
 
+export interface LoyaltyRedeemablePlan {
+  plan_id: number;
+  plan_name: string;
+  price: string;
+  points_cost: number;
+  affordable: boolean;
+}
+export interface LoyaltyAccountView {
+  phone: string;
+  found: boolean;
+  points_balance: number;
+  value_kes: string;
+  min_redeem_points: number;
+  redeemable_plans: LoyaltyRedeemablePlan[];
+  recent: { kind: string; points: number; reason: string; created_at: string }[];
+}
+
 /** Settings > Developer — API tokens & webhooks. */
 export interface ApiToken {
   id: number;
@@ -1505,6 +1522,14 @@ export const api = {
         body: JSON.stringify(data),
       }),
     summary: (q = '') => request<LoyaltySummary>(`/loyalty/summary/${q ? `?q=${encodeURIComponent(q)}` : ''}`),
+    account: (phone: string) =>
+      request<LoyaltyAccountView>(`/loyalty/account/?phone=${encodeURIComponent(phone)}`),
+    redeem: (phone: string, plan_id: number) =>
+      request<{ detail: string; voucher_code: string; plan: string; points_spent: number; points_balance: number }>(
+        '/loyalty/redeem/', { method: 'POST', body: JSON.stringify({ phone, plan_id }) }),
+    adjust: (phone: string, points: number, reason: string) =>
+      request<{ detail: string; points_balance: number }>(
+        '/loyalty/adjust/', { method: 'POST', body: JSON.stringify({ phone, points, reason }) }),
   },
 
   developer: {

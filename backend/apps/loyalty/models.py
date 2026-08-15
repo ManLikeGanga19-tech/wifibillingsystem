@@ -10,6 +10,7 @@ Keyed by (operator, phone): one identity that covers hotspot subscribers today a
 clients later, all tenant-scoped — a customer's points with one ISP never touch another's.
 """
 
+from django.conf import settings
 from django.db import models
 
 from apps.core.models import Operator, OperatorOwnedModel
@@ -105,3 +106,39 @@ class LoyaltyLedgerEntry(OperatorOwnedModel):
 
     def __str__(self):
         return f"{self.kind} {self.points:+d} for {self.account.phone}"
+
+
+class LoyaltyRedemption(OperatorOwnedModel):
+    """One redemption event: a subscriber spent points for a REWARD VOUCHER worth a plan.
+
+    Redemption reuses the proven voucher pipeline rather than inventing a parallel one — the
+    customer gets a code they use at the hotspot exactly like a bought voucher, so it provisions,
+    expires and reports the same way. The row records the exchange (points spent and the KES
+    value at that moment's rate) so a later rate change never rewrites history, and the ledger
+    REDEEM entry is the authoritative debit.
+    """
+
+    account = models.ForeignKey(
+        LoyaltyAccount, on_delete=models.CASCADE, related_name="redemptions"
+    )
+    plan = models.ForeignKey("plans.Plan", on_delete=models.PROTECT, related_name="+")
+    points_spent = models.PositiveIntegerField()
+    #: KES value of the points at the rate when redeemed — frozen, for the record.
+    value_kes = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    #: The reward voucher issued. SET_NULL so a later voucher purge never destroys the history.
+    voucher = models.OneToOneField(
+        "vouchers.Voucher", null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="loyalty_redemption",
+    )
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="+",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["operator", "-created_at"])]
+
+    def __str__(self):
+        return f"{self.account.phone} redeemed {self.points_spent} pts @ {self.operator.slug}"

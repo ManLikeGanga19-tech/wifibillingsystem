@@ -22,8 +22,41 @@ Both vanish if a public endpoint simply refuses to authenticate. Inherit
 `PublicAPIView`, or set `authentication_classes = []` explicitly.
 """
 
+from django.conf import settings
 from rest_framework.permissions import AllowAny
 from rest_framework.views import APIView
+
+
+def resolve_portal_operator(request, *, allow_default: bool = False):
+    """The operator a portal request belongs to: the ISP subdomain (request.tenant) first, then
+    the ?router= the customer is physically in front of.
+
+    When neither resolves and `allow_default` is set, fall back to
+    PORTAL_DEFAULT_OPERATOR_SLUG — the ISP a bare portal host should wear (staging/single-tenant
+    boxes). Unset in production, so an unknown host still resolves to None there. Never returns
+    the demo tenant. Returns None if nothing resolves."""
+    from apps.provisioning.models import Router
+
+    operator = getattr(request, "tenant", None)
+    if operator is None:
+        router_id = (request.query_params.get("router") or "").strip()
+        if router_id.isdigit():
+            router = Router.objects.filter(pk=int(router_id), is_active=True).first()
+            operator = router.operator if router else None
+    if operator is None and allow_default:
+        operator = default_portal_operator()
+    return operator
+
+
+def default_portal_operator():
+    """The configured fallback ISP for a portal with no tenant context, or None. See
+    PORTAL_DEFAULT_OPERATOR_SLUG. Excludes the demo tenant and inactive operators."""
+    slug = getattr(settings, "PORTAL_DEFAULT_OPERATOR_SLUG", "")
+    if not slug:
+        return None
+    from apps.core.models import Operator
+
+    return Operator.objects.filter(slug=slug, is_active=True, is_demo=False).first()
 
 
 class PublicEndpointMixin:

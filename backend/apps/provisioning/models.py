@@ -105,6 +105,27 @@ class Router(OperatorOwnedModel):
         return f"{scheme}://{self.management_host}:{self.api_port}/rest"
 
     @property
+    def tunnel_state(self) -> str:
+        """The WireGuard tunnel's health, derived (never pushed):
+          * "n/a"    — this router has no overlay identity yet (pre-hub / not enrolled).
+          * "up"     — a handshake within the last few keepalive intervals.
+          * "stale"  — had a handshake once, but not recently (router may be offline).
+          * "down"   — has an identity but we've never seen a handshake.
+        Pure read of wg_last_handshake_at; touches nothing on the network."""
+        from django.conf import settings
+        from django.utils import timezone
+
+        if not self.overlay_ip:
+            return "n/a"
+        if self.wg_last_handshake_at is None:
+            return "down"
+        # A tunnel is "up" while contact is fresh — a handful of keepalives (default 25s) with
+        # slack for a slow health sweep. Beyond that it's stale, not proven dead.
+        fresh = max(180, int(getattr(settings, "WG_KEEPALIVE_SECONDS", 25)) * 8)
+        age = (timezone.now() - self.wg_last_handshake_at).total_seconds()
+        return "up" if age <= fresh else "stale"
+
+    @property
     def is_enrolled(self) -> bool:
         """Went through the self-onboarding script (phoned home)."""
         return bool(self.enrolled_at and self.management_host)

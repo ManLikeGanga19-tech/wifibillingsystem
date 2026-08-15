@@ -134,6 +134,32 @@ class TestTheCaptivePortalReadsIt:
         assert resp.status_code == 200
         assert resp.json()["name_for_customers"] == "WIFI.OS"
 
+    def test_bare_host_wears_the_configured_default_operator(self):
+        """A direct portal URL with no subdomain and no ?router= (the staging case) should
+        wear the configured fallback ISP, not the neutral WIFI.OS default."""
+        from django.test import override_settings
+
+        op = OperatorFactory(slug="homelink", name="Homelink")
+        Branding.objects.create(operator=op, display_name="Homelink WiFi", accent_color="#0055ff")
+        with override_settings(PORTAL_DEFAULT_OPERATOR_SLUG="homelink"):
+            body = APIClient().get(PUBLIC).json()
+        assert body["name_for_customers"] == "Homelink WiFi"
+        assert body["accent_color"] == "#0055ff"
+
+    def test_default_fallback_is_off_in_production_by_default(self):
+        # Empty setting (production) => an unknown host stays neutral, never a random ISP.
+        OperatorFactory(slug="homelink", name="Homelink")
+        body = APIClient().get(PUBLIC).json()
+        assert body["name_for_customers"] == "WIFI.OS"
+
+    def test_default_fallback_never_serves_the_demo_tenant(self):
+        from django.test import override_settings
+
+        OperatorFactory(slug="demo", name="Demo", is_demo=True)
+        with override_settings(PORTAL_DEFAULT_OPERATOR_SLUG="demo"):
+            body = APIClient().get(PUBLIC).json()
+        assert body["name_for_customers"] == "WIFI.OS"  # demo excluded -> neutral
+
     def test_one_isp_never_sees_anothers_brand(self):
         a = OperatorFactory(slug="isp-a", name="Alpha")
         b = OperatorFactory(slug="isp-b", name="Bravo")

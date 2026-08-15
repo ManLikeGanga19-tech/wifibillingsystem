@@ -1,6 +1,6 @@
 import { ReactNode, useEffect, useState } from 'react';
-import { Loader2, Check, Award, Users } from 'lucide-react';
-import { api, LoyaltySettings, LoyaltySummary } from '../../api/client';
+import { Loader2, Check, Award, Users, Gift, Search, Ticket } from 'lucide-react';
+import { api, LoyaltyAccountView, LoyaltySettings, LoyaltySummary } from '../../api/client';
 import { Btn, Field, inputCls, Panel, toast } from '../ui';
 
 /**
@@ -153,9 +153,13 @@ export default function LoyaltyPanel() {
               </p>
             </Field>
           </div>
-          <p className="text-[11px] text-[#B26B00] mt-3 bg-[#FFF8EC] border border-[#B26B00]/30 p-2">
-            Redemption rules save now. Subscribers cashing points in for account credit
-            arrives in the next update — earning is already live.
+          <p className="text-[11px] text-[#141414]/55 mt-3 bg-[#f4f4f2] border border-[#141414]/10 p-2">
+            Redeeming turns points into a <b>reward voucher</b> for a plan — the customer enters
+            the code at the hotspot to get online. A plan costs{' '}
+            <b>{Number(s.value_per_point) > 0
+              ? `price ÷ ${s.value_per_point}`
+              : 'set a value per point'}</b>{' '}
+            points (rounded up).
           </p>
         </Panel>
       </div>
@@ -166,6 +170,8 @@ export default function LoyaltyPanel() {
           Save changes
         </Btn>
       </div>
+
+      {s.is_enabled && <RedeemForCustomer />}
 
       {/* Programme health */}
       {summary && (
@@ -192,6 +198,147 @@ export default function LoyaltyPanel() {
         </Panel>
       )}
     </div>
+  );
+}
+
+/**
+ * Redeem a walk-in customer's points for a reward voucher (staff-assisted). Look them up by
+ * phone, see what their balance can afford, redeem a plan, and read the customer the code.
+ * Also the manual grant/deduct lever. Every action is server-audited.
+ */
+function RedeemForCustomer() {
+  const [phone, setPhone] = useState('');
+  const [acct, setAcct] = useState<LoyaltyAccountView | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [code, setCode] = useState('');
+
+  const lookup = async () => {
+    const p = phone.trim();
+    if (!p || busy) return;
+    setBusy(true);
+    setCode('');
+    try {
+      setAcct(await api.loyalty.account(p));
+    } catch {
+      toast('error', 'Could not look up that number.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const redeem = async (planId: number) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const r = await api.loyalty.redeem(phone.trim(), planId);
+      setCode(r.voucher_code);
+      toast('success', `Redeemed — code ${r.voucher_code}.`);
+      await lookupSilent();
+    } catch (e) {
+      toast('error', e instanceof Error ? e.message : 'Could not redeem.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const adjust = async (sign: 1 | -1) => {
+    const raw = window.prompt(`Points to ${sign > 0 ? 'add' : 'remove'}?`);
+    const n = Math.abs(parseInt(raw || '0', 10) || 0);
+    if (!n) return;
+    const reason = window.prompt('Reason (recorded)?') || '';
+    if (!reason.trim()) {
+      toast('error', 'A reason is required.');
+      return;
+    }
+    setBusy(true);
+    try {
+      await api.loyalty.adjust(phone.trim(), sign * n, reason.trim());
+      toast('success', 'Points adjusted.');
+      await lookupSilent();
+    } catch (e) {
+      toast('error', e instanceof Error ? e.message : 'Could not adjust.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const lookupSilent = async () => {
+    try {
+      setAcct(await api.loyalty.account(phone.trim()));
+    } catch {
+      /* keep the last view */
+    }
+  };
+
+  return (
+    <Panel title="Redeem for a customer" className="mt-6">
+      <p className="text-xs text-[#141414]/60 -mt-1 mb-3">
+        Look up a subscriber by phone, then redeem their points for a reward voucher or adjust
+        their balance. Read the code to the customer — they enter it at the hotspot.
+      </p>
+      <div className="flex items-end gap-2">
+        <Field label="Customer phone">
+          <input
+            className={`${inputCls} w-48`}
+            placeholder="07XX…"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && lookup()}
+          />
+        </Field>
+        <Btn onClick={lookup} disabled={busy || !phone.trim()}>
+          {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
+          Look up
+        </Btn>
+      </div>
+
+      {code && (
+        <div className="mt-3 flex items-center gap-2 bg-[#EAF7EA] border border-[#228B22]/40 p-2.5 text-sm">
+          <Ticket className="h-4 w-4 text-[#228B22]" />
+          <span>Reward voucher: <b className="font-mono tracking-wider">{code}</b> — read it to the customer.</span>
+        </div>
+      )}
+
+      {acct && (
+        <div className="mt-4 space-y-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <Stat icon={<Award className="h-4 w-4" />} label="Balance" value={`${acct.points_balance.toLocaleString()} pts`} />
+            <Stat icon={<Gift className="h-4 w-4" />} label="Worth" value={`Ksh ${Number(acct.value_kes).toLocaleString()}`} />
+            <div className="flex gap-1.5 ml-auto">
+              <Btn onClick={() => adjust(1)} disabled={busy}>+ Points</Btn>
+              <Btn onClick={() => adjust(-1)} disabled={busy}>− Points</Btn>
+            </div>
+          </div>
+          {!acct.found && (
+            <p className="text-xs text-[#B26B00]">No account yet for this number — earning creates one on their first payment. You can still grant points with “+ Points”.</p>
+          )}
+          {acct.redeemable_plans.length > 0 ? (
+            <div className="border border-[#141414]/15">
+              <div className="px-3 py-1.5 border-b border-[#141414]/10 text-[10px] font-mono uppercase text-[#141414]/40">
+                Redeem for a plan
+              </div>
+              {acct.redeemable_plans.map((p) => (
+                <div key={p.plan_id} className="flex items-center justify-between px-3 py-2 text-sm border-b border-[#141414]/5 last:border-0">
+                  <span>
+                    <b>{p.plan_name}</b>
+                    <span className="text-[#141414]/50 text-xs"> · Ksh {Number(p.price).toLocaleString()} · {p.points_cost.toLocaleString()} pts</span>
+                  </span>
+                  <Btn
+                    variant={p.affordable ? 'green' : 'outline'}
+                    onClick={() => redeem(p.plan_id)}
+                    disabled={busy || !p.affordable}
+                  >
+                    {p.affordable ? 'Redeem' : 'Not enough'}
+                  </Btn>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-[#141414]/45">Set a value per point above to enable redemption.</p>
+          )}
+        </div>
+      )}
+    </Panel>
   );
 }
 

@@ -12,7 +12,9 @@ from rest_framework.decorators import (
 )
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
+from apps.core.permissions import IsPlatformOwner, IsPlatformStaff
 from apps.core.schema import OBJECT_REQUEST, OBJECT_RESPONSE
 from apps.core.services import audit
 from apps.core.viewsets import TenantModelViewSet, TenantReadOnlyViewSet
@@ -226,3 +228,35 @@ class SessionViewSet(TenantReadOnlyViewSet):
             )
         suspend_session.delay(session.pk, Session.Status.SUSPENDED)
         return Response({"detail": "Suspension queued"}, status=status.HTTP_202_ACCEPTED)
+
+
+@extend_schema(responses=OBJECT_RESPONSE, summary="WireGuard hub config (render only)")
+class WireGuardHubConfigView(APIView):
+    """The hub's wg-quick config, reconciled from the enrolled-router registry. READ-ONLY: it
+    RENDERS text for an operator to review and apply on the hub host — it never connects to a
+    router or the hub, so it cannot affect any live customer. Owner-only (the peer set is
+    sensitive, and the interface stanza can carry the hub key)."""
+
+    permission_classes = [IsPlatformOwner]
+
+    def get(self, request):
+        from .wireguard import hub_configured, render_hub_config
+
+        audit("wireguard_hub_config_rendered", actor=request.user)
+        return Response({
+            "hub_configured": hub_configured(),
+            "config": render_hub_config(),
+        })
+
+
+@extend_schema(responses=OBJECT_RESPONSE, summary="WireGuard per-router tunnel health")
+class WireGuardHealthView(APIView):
+    """Per-router tunnel liveness (up / stale / down), derived from the last handshake we've
+    already observed. A pure read — no network activity, nothing pushed."""
+
+    permission_classes = [IsPlatformStaff]
+
+    def get(self, request):
+        from .wireguard import tunnel_health
+
+        return Response({"routers": tunnel_health()})

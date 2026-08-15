@@ -67,6 +67,7 @@ class Command(BaseCommand):
         self._pppoe_clients(op, service_plans, routers, aps)
         self._wallet(op)
         self._ops(op, subs, routers)
+        self._loyalty_showcase(op, subs)
         self._platform_showcase()
         self._onboarding_showcase()
         self._offboarding_showcase()
@@ -523,6 +524,31 @@ class Command(BaseCommand):
                 self._plat_fee(op, base, -self.BASE_FEE, period, when)
                 self._plat_fee(op, fee, -pppoe, period, when)
         self.stdout.write(f"Platform showcase: {len(self.SHOWCASE_ISPS)} sample ISPs w/ 6mo fees")
+
+    def _loyalty_showcase(self, op, subs):
+        """Turn the loyalty programme on and give subscribers point balances, so the Loyalty
+        panel (earn + redeem) shows a working programme in the demo."""
+        from apps.loyalty.models import LoyaltyAccount, LoyaltyLedgerEntry
+        from apps.loyalty.services import settings_for
+
+        cfg = settings_for(op)
+        cfg.is_enabled = True
+        cfg.spend_per_point = 100        # 1 pt per KES 100 spent
+        cfg.points_per_threshold = 1
+        cfg.min_redeem_points = 20
+        cfg.value_per_point = Decimal("5")  # a KES-30 plan costs 6 pts
+        cfg.save()
+
+        LoyaltyAccount.objects.filter(operator=op).delete()  # idempotent on reseed
+        for sub in subs[:18]:
+            pts = self.rng.choice([0, 8, 24, 55, 120, 240])
+            acct = LoyaltyAccount.objects.create(operator=op, phone=sub.phone, points_balance=pts)
+            if pts:
+                LoyaltyLedgerEntry.objects.create(
+                    operator=op, account=acct, kind=LoyaltyLedgerEntry.Kind.EARN,
+                    points=pts, reason="Seeded balance",
+                )
+        self.stdout.write("Loyalty showcase: programme on, 18 members with points")
 
     def _risk_showcase(self):
         """Trip a few fraud/risk signals so the Risk screen shows real findings. Dedicated

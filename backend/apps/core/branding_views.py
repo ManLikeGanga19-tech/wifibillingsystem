@@ -190,14 +190,11 @@ class PublicBrandingView(PublicAPIView):
     subdomain or ?router=, exactly like the public plan list."""
 
     def get(self, request):
-        from apps.provisioning.models import Router
+        from .public import resolve_portal_operator
 
-        operator = getattr(request, "tenant", None)
-        if operator is None:
-            router_id = request.query_params.get("router", "")
-            if router_id.isdigit():
-                router = Router.objects.filter(pk=int(router_id), is_active=True).first()
-                operator = router.operator if router else None
+        # allow_default: a bare portal host (staging/single-tenant) wears the configured ISP's
+        # brand rather than the neutral default. In production this stays None → neutral.
+        operator = resolve_portal_operator(request, allow_default=True)
         if operator is None:
             # No tenant context: hand back the neutral WIFI.OS defaults so the portal
             # still renders instead of erroring.

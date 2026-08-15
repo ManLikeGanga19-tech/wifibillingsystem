@@ -306,6 +306,12 @@ def _apply_reachability(router, ok: bool, auth_failed: bool):
     router.status = Router.Status.ONLINE if ok else Router.Status.OFFLINE
     if ok:
         router.last_seen_at = timezone.now()
+        # If we reached it over the WireGuard overlay (management_host is its overlay /32),
+        # this successful contact IS the tunnel working — record it. Purely a timestamp on an
+        # already-successful read; it never touches the router or its clients.
+        if router.overlay_ip and router.management_host == router.overlay_ip:
+            router.wg_last_handshake_at = timezone.now()
+            fields.append("wg_last_handshake_at")
         if router.onboarding_required:
             router.onboarding_required = False
             fields.append("onboarding_required")
