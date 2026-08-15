@@ -5,6 +5,7 @@ completion actually pulls subscribers off the router, owner-gating, and that a d
 never leaks another tenant's records."""
 
 from datetime import timedelta
+from decimal import Decimal
 
 import pytest
 from django.utils import timezone
@@ -183,3 +184,88 @@ class TestExport:
         op = _active_op("exp-perm")
         r = _support().get(f"/api/v1/platform/tenants/{op.id}/export/")
         assert r.status_code == 403
+
+
+def _wallet(op, amount):
+    """Give a tenant held (withdrawable) balance."""
+    from apps.billing.services import adjust_wallet
+
+    adjust_wallet(op, amount=Decimal(amount), reason="seed balance", actor=UserFactory())
+
+
+def _arrears(op, amount):
+    """Make a tenant owe us `amount` in unpaid platform fees (no offsetting wallet)."""
+    from apps.billing.models import PlatformLedgerEntry
+
+    PlatformLedgerEntry.objects.create(
+        operator=op, reason=PlatformLedgerEntry.Reason.BASE_FEE,
+        amount=-Decimal(amount), memo="fees",
+    )
+
+
+class TestFinalSettlement:
+    def test_debt_netted_from_held_balance(self):
+        from apps.billing.platform_account import debt
+        from apps.billing.services import withdrawable_balance
+
+        op = _active_op("settle-ok")
+        _wallet(op, "5000")
+        _arrears(op, "3000")
+        initiate_offboarding(op, reason="leaving", actor=None, grace_days=0)
+        held, owed = withdrawable_balance(op), debt(op)  # held > owed here
+        ob = complete_offboarding(op, actor=None)
+
+        assert ob.fees_recovered == owed              # whole debt covered from the wallet
+        assert ob.net_settlement == held - owed       # remainder paid out to the ISP
+        assert ob.residual_owed == Decimal("0")
+        assert withdrawable_balance(op) == held - owed  # debt actually left the wallet
+
+    def test_shortfall_becomes_flagged_bad_debt(self):
+        from apps.billing.platform_account import debt
+        from apps.billing.services import withdrawable_balance
+        from apps.core.risk import risk_signals
+
+        op = _active_op("settle-baddebt")
+        _wallet(op, "1000")
+        _arrears(op, "9000")
+        initiate_offboarding(op, reason="leaving", actor=None, grace_days=0)
+        held, owed = withdrawable_balance(op), debt(op)  # held < owed here
+        ob = complete_offboarding(op, actor=None)
+
+        assert ob.fees_recovered == held              # only what we held could be recovered
+        assert ob.net_settlement == Decimal("0")
+        assert ob.residual_owed == owed - held        # the rest is bad debt
+        s = [f for f in risk_signals()["findings"] if f["signal"] == "offboarding_bad_debt"]
+        assert len(s) == 1 and s[0]["slug"] == "settle-baddebt"
+
+
+class TestArrearsBlocks:
+    def test_export_blocked_when_offboarding_with_arrears(self):
+        op = _active_op("arrears-block")
+        _arrears(op, "3000")
+        initiate_offboarding(op, reason="leaving", actor=None)
+        # platform export endpoint refuses
+        r = _owner().get(f"/api/v1/platform/tenants/{op.id}/export/")
+        assert r.status_code == 403
+
+    def test_export_allowed_when_offboarding_without_arrears(self):
+        op = _active_op("no-arrears")
+        initiate_offboarding(op, reason="leaving", actor=None)
+        r = _owner().get(f"/api/v1/platform/tenants/{op.id}/export/")
+        assert r.status_code == 200
+
+    def test_export_allowed_when_arrears_but_not_offboarding(self):
+        from apps.core.offboarding import export_blocked_reason
+
+        op = _active_op("arrears-only")
+        _arrears(op, "3000")
+        assert export_blocked_reason(op) is None  # only blocked DURING offboarding
+
+    def test_payout_blocked_during_offboarding(self):
+        from apps.billing.services import WalletError, request_payout
+
+        op = _active_op("no-payout")
+        _wallet(op, "5000")
+        initiate_offboarding(op, reason="leaving", actor=None)
+        with pytest.raises(WalletError):
+            request_payout(operator=op, amount=Decimal("500"), user=UserFactory())
