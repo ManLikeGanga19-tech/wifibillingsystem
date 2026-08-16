@@ -217,16 +217,21 @@ export default function MapView({ onNavigate }: { onNavigate: (tab: string) => v
       map.on('click', `${layer.id}-pt`, () =>
         navRef.current(TAB_FOR[layer.id]));
     }
-    // Where to open. If the ISP has SET a business location, that's home. Otherwise open at the
-    // DEVICE's current location — an ISP is physically at its operating area, so "where am I" is
-    // the natural first view (and we prompt them to save it as their business location). If the
-    // device won't share, fall back to the spread of their placed assets, else Kenya.
-    if (data.business_location) {
+    // Where to open. THE PINS MUST BE VISIBLE — a location you just set is useless if it opens
+    // somewhere else. So: if there are ANY placed assets, frame ALL of them (plus the device,
+    // if it'll share, so "where am I" is in shot too). Only when there's nothing placed yet do
+    // we open on the device location / business location / Kenya.
+    const hasPins = !!data.center; // center is null only when nothing is placed
+    if (hasPins) {
+      getPosition()
+        .then((c) => fitToData(map, data, [c.lng, c.lat])) // frame pins + me
+        .catch(() => fitToData(map, data));                // just the pins if no location
+    } else if (data.business_location) {
       map.flyTo({ center: [data.business_location.lng, data.business_location.lat], zoom: 13, duration: 0 });
     } else {
       getPosition()
         .then((c) => map.flyTo({ center: [c.lng, c.lat], zoom: 14, duration: 0 }))
-        .catch(() => { if (data.center) fitToData(map, data); });
+        .catch(() => {});
     }
   }, [mapReady, data]);
 
@@ -386,11 +391,19 @@ export default function MapView({ onNavigate }: { onNavigate: (tab: string) => v
   );
 }
 
-function fitToData(map: MLMap, data: MapData) {
-  const all: MapPoint[] = [...data.layers.towers, ...data.layers.clients, ...data.layers.routers];
-  if (all.length < 2) return;
+function fitToData(map: MLMap, data: MapData, extra?: [number, number]) {
+  const all: MapPoint[] = [
+    ...data.layers.towers, ...data.layers.clients, ...data.layers.routers, ...data.layers.leads,
+  ];
+  const coords: [number, number][] = all.map((p) => [p.lng, p.lat]);
+  if (extra) coords.push(extra);
+  if (coords.length === 0) return;
+  if (coords.length === 1) {
+    map.flyTo({ center: coords[0], zoom: 14, duration: 0 });
+    return;
+  }
   const b = new maplibregl.LngLatBounds();
-  all.forEach((p) => b.extend([p.lng, p.lat]));
+  coords.forEach((c) => b.extend(c));
   map.fitBounds(b, { padding: 70, maxZoom: 15, duration: 0 });
 }
 
