@@ -78,6 +78,18 @@
 	header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'"
 }
 
+# The ISP CONSOLE has the live Map (MapLibre GL). Two things the strict csp_spa blocks that
+# the map genuinely needs, so this variant adds ONLY those — nothing else is loosened, and the
+# money consoles (Platform Control) keep csp_spa:
+#   * worker-src blob:  — MapLibre spins up its render worker from a blob: URL. Without this the
+#                          map never initialises at all (not just missing tiles).
+#   * the tile hosts    — the basemap is OpenStreetMap (streets) + Esri (satellite), fetched as
+#                          images AND over the network, so both img-src and connect-src list them.
+# (If you later self-host tiles, drop the external hosts and this collapses back to 'self'.)
+(csp_console) {
+	header Content-Security-Policy "default-src 'self'; script-src 'self'; worker-src 'self' blob:; child-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://*.tile.openstreetmap.org https://server.arcgisonline.com; connect-src 'self' https://*.tile.openstreetmap.org https://server.arcgisonline.com; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'"
+}
+
 # The Django upstream, everywhere it's proxied. Retry + active health so a rolling deploy
 # (the api container restarting) never returns a hard error: Caddy HOLDS the request and
 # retries for up to lb_try_duration until the api is serving again, and the health check
@@ -175,7 +187,13 @@ docs.wifios.co.ke {
 # ---------------------------------------------------------------------------
 *.wifios.co.ke {
 	import security_headers
-	import csp_spa
+	import csp_console
+
+	# The Map's "you are here" dot + "use my location" need the browser geolocation API, which
+	# the platform-wide Permissions-Policy switches OFF (geolocation=()). Re-enable it for the
+	# ISP console ONLY, and only same-origin ((self)) — the browser still prompts the user for
+	# consent, so this just lets that prompt appear instead of a silent refusal.
+	header Permissions-Policy "camera=(), microphone=(), geolocation=(self), payment=()"
 
 	# Same-origin API: the cookie just works.
 	handle /api/* {
