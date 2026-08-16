@@ -32,6 +32,7 @@ INSTALLED_APPS = [
     "apps.billing",
     "apps.pppoe",
     "apps.loyalty",
+    "apps.maps",
     "apps.signup",
     "apps.assistant",
     "apps.developer",

@@ -11,6 +11,8 @@ class RouterSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "name",
+            "gps_lat",
+            "gps_lng",
             "management_host",
             "api_port",
             "username",

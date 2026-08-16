@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { Pencil, Plus, Trash2, UserPlus } from 'lucide-react';
 import { api, ApiError, ApiLead } from '../api/client';
+import MapPicker from './MapPicker';
 import {
   Badge, Btn, Field, FilterChips, inputCls, Panel, RefreshBtn, TableShell, tdCls, toast, useList, ViewHeader, fmtDateTime,
 } from './ui';
@@ -20,7 +21,8 @@ const NEXT: Partial<Record<ApiLead['status'], { to: ApiLead['status']; label: st
   ],
 };
 
-const BLANK = { name: '', phone: '', location: '', source: '' };
+const BLANK = { name: '', phone: '', location: '', source: '',
+  gps_lat: null as number | null, gps_lng: null as number | null };
 
 export default function LeadsView() {
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>('new');
@@ -35,7 +37,8 @@ export default function LeadsView() {
   const openNew = () => { setEditing(null); setForm({ ...BLANK }); setShowForm(true); };
   const openEdit = (l: ApiLead) => {
     setEditing(l);
-    setForm({ name: l.name, phone: l.phone, location: l.location, source: l.source });
+    setForm({ name: l.name, phone: l.phone, location: l.location, source: l.source,
+      gps_lat: l.gps_lat ? Number(l.gps_lat) : null, gps_lng: l.gps_lng ? Number(l.gps_lng) : null });
     setShowForm(true);
   };
 
@@ -104,6 +107,15 @@ export default function LeadsView() {
             <Field label="Source">
               <input value={form.source} onChange={(e) => setForm({ ...form, source: e.target.value })} className={inputCls} placeholder="referral, flyer…" />
             </Field>
+            <div className="md:col-span-5">
+              <label className="text-[11px] font-mono uppercase text-[#141414]/50 block mb-1">Location on map (for the demand heatmap)</label>
+              <MapPicker
+                lat={form.gps_lat} lng={form.gps_lng}
+                onChange={(la, ln) => setForm((f) => ({
+                  ...f, gps_lat: Number.isFinite(la) ? la : null, gps_lng: Number.isFinite(ln) ? ln : null,
+                }))}
+              />
+            </div>
             <div className="flex gap-2">
               <Btn type="submit" variant="green">Save</Btn>
               {editing && <Btn type="button" variant="outline" onClick={() => { setShowForm(false); setEditing(null); }}>Cancel</Btn>}

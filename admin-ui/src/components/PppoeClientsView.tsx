@@ -1,6 +1,7 @@
 import React, { useEffect, useState, type FormEvent } from 'react';
 import { Users, Plus, Ban, RotateCcw, Zap, Printer, X, Loader2, Wifi, WifiOff, AlertTriangle, Key, Copy, Eye, EyeOff, Trash2, RefreshCw, Upload, Download, Pencil, Save, Search, MoreHorizontal, ArrowRight } from 'lucide-react';
 import { api, ApiError, PppoeClient, PppoePlan, ApiRouter, AccessPoint, PppoeUsageSummary, PppoeChurnSummary, CapacityWarning, PppoeImportRow, PppoeImportItem, PppoeCsvPreview, PppoeImportResult } from '../api/client';
+import MapPicker from './MapPicker';
 import {
   Badge, Btn, Field, FilterChips, inputCls, Panel, RefreshBtn, TableShell, tdCls, toast, useList, ViewHeader, fmtDateTime, fmtKsh,
 } from './ui';
@@ -260,6 +261,7 @@ export default function PppoeClientsView() {
     plan: '', router: '', delivery_method: 'fibre', access_point: '', billing_day: '1',
     connection_type: 'pppoe', static_ip: '',
     pppoe_username: '', pppoe_password: '',
+    gps_lat: null as number | null, gps_lng: null as number | null,
   };
   const [form, setForm] = useState(blank);
 
@@ -293,6 +295,8 @@ export default function PppoeClientsView() {
         phone: form.phone,
         email: form.email,
         physical_address: form.physical_address,
+        gps_lat: form.gps_lat != null ? String(form.gps_lat) : null,
+        gps_lng: form.gps_lng != null ? String(form.gps_lng) : null,
         plan: Number(form.plan),
         router: Number(form.router),
         delivery_method: form.delivery_method as PppoeClient['delivery_method'],
@@ -419,6 +423,15 @@ export default function PppoeClientsView() {
             <Field label="Address" className="md:col-span-2">
               <input value={form.physical_address} onChange={(e) => setForm({ ...form, physical_address: e.target.value })} className={inputCls} />
             </Field>
+            <div className="md:col-span-4">
+              <label className="text-[11px] font-mono uppercase text-[#141414]/50 block mb-1">Home location (for the Map)</label>
+              <MapPicker
+                lat={form.gps_lat} lng={form.gps_lng}
+                onChange={(la, ln) => setForm((f) => ({
+                  ...f, gps_lat: Number.isFinite(la) ? la : null, gps_lng: Number.isFinite(ln) ? ln : null,
+                }))}
+              />
+            </div>
             {!isStatic && (
               <>
                 <Field label="PPPoE username (optional)">
@@ -592,6 +605,8 @@ function EditClientDialog({
     access_point: client.access_point ? String(client.access_point) : '',
     billing_day: String(client.billing_day),
     notes: client.notes ?? '',
+    gps_lat: client.gps_lat ? Number(client.gps_lat) : (null as number | null),
+    gps_lng: client.gps_lng ? Number(client.gps_lng) : (null as number | null),
   });
   const [busy, setBusy] = useState(false);
   const isWireless = form.delivery_method.startsWith('wireless');
@@ -615,6 +630,8 @@ function EditClientDialog({
         access_point: isWireless && form.access_point ? Number(form.access_point) : null,
         billing_day: Number(form.billing_day),
         notes: form.notes,
+        gps_lat: form.gps_lat != null ? String(form.gps_lat) : null,
+        gps_lng: form.gps_lng != null ? String(form.gps_lng) : null,
       });
       toast(
         'success',
@@ -696,6 +713,16 @@ function EditClientDialog({
           <Field label="Notes">
             <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} className={`${inputCls} h-20`} />
           </Field>
+
+          <div>
+            <label className="text-[11px] font-mono uppercase text-[#141414]/50 block mb-1">Home location (for the Map)</label>
+            <MapPicker
+              lat={form.gps_lat} lng={form.gps_lng}
+              onChange={(la, ln) => setForm((f) => ({
+                ...f, gps_lat: Number.isFinite(la) ? la : null, gps_lng: Number.isFinite(ln) ? ln : null,
+              }))}
+            />
+          </div>
 
           {(planChanged || routerChanged) && (
             <div className="border border-[#B26B00]/40 bg-[#FFF8EC] px-3 py-2 text-xs text-[#B26B00] leading-relaxed">

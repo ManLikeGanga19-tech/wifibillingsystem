@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { Router as RouterIcon, Plus, Plug, RefreshCw, Copy, Check, Loader2, X, Cpu, Pencil, Trash2 } from 'lucide-react';
 import { api, ApiError, ApiRouter, DeviceInfo } from '../api/client';
+import MapPicker from './MapPicker';
 import {
   Badge, Btn, Field, inputCls, Panel, RefreshBtn, TableShell, tdCls, toast, useList, ViewHeader, fmtDateTime,
 } from './ui';
@@ -298,6 +299,8 @@ function EditRouterModal({
     use_tls: router.use_tls,
     verify_tls: router.verify_tls,
     is_active: router.is_active,
+    gps_lat: router.gps_lat ? Number(router.gps_lat) : (null as number | null),
+    gps_lng: router.gps_lng ? Number(router.gps_lng) : (null as number | null),
   });
   const [busy, setBusy] = useState(false);
 
@@ -313,6 +316,8 @@ function EditRouterModal({
       use_tls: form.use_tls,
       verify_tls: form.verify_tls,
       is_active: form.is_active,
+      gps_lat: form.gps_lat != null ? String(form.gps_lat) : null,
+      gps_lng: form.gps_lng != null ? String(form.gps_lng) : null,
     };
     if (form.password) body.password = form.password; // set-only; blank keeps the current one
     try {
@@ -328,7 +333,7 @@ function EditRouterModal({
 
   return (
     <div className="fixed inset-0 z-50 bg-[#141414]/50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white border border-[#141414] w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-white border border-[#141414] w-full max-w-lg max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between p-4 border-b border-[#141414]">
           <h3 className="font-bold font-mono uppercase text-sm">Edit — {router.name}</h3>
           <button onClick={onClose} className="cursor-pointer"><X className="h-4 w-4" /></button>
@@ -358,6 +363,15 @@ function EditRouterModal({
           <label className="flex items-center gap-2 text-sm sm:col-span-2">
             <input type="checkbox" checked={form.is_active} onChange={(e) => setForm({ ...form, is_active: e.target.checked })} /> Active
           </label>
+          <div className="sm:col-span-2">
+            <label className="text-[11px] font-mono uppercase text-[#141414]/50 block mb-1">Site location (for the Map)</label>
+            <MapPicker
+              lat={form.gps_lat} lng={form.gps_lng}
+              onChange={(la, ln) => setForm((f) => ({
+                ...f, gps_lat: Number.isFinite(la) ? la : null, gps_lng: Number.isFinite(ln) ? ln : null,
+              }))}
+            />
+          </div>
           <div className="sm:col-span-2 flex justify-end gap-2 pt-2 border-t border-[#141414]/15">
             <Btn type="button" variant="outline" onClick={onClose}>Cancel</Btn>
             <Btn type="submit" variant="green" disabled={busy}>{busy ? 'Saving…' : 'Save changes'}</Btn>

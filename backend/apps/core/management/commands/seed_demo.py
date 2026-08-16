@@ -183,11 +183,18 @@ class Command(BaseCommand):
         from apps.provisioning.models import Router
 
         routers = []
-        for i, name in enumerate(("Kibera Site A", "Rongai Site B"), start=1):
+        # Placed near the towers (Nairobi) so the Map page has a coherent picture; one left
+        # OFFLINE to show status colouring on the map.
+        sites = [
+            ("Kibera Site A", Decimal("-1.3130"), Decimal("36.7920"), Router.Status.ONLINE),
+            ("Rongai Site B", Decimal("-1.3960"), Decimal("36.7540"), Router.Status.OFFLINE),
+        ]
+        for i, (name, lat, lng, st) in enumerate(sites, start=1):
             routers.append(Router.objects.create(
                 operator=op, name=name, management_host=f"10.88.0.{i}",
+                gps_lat=lat, gps_lng=lng,
                 provisioning_backend=Router.Backend.DUMMY,
-                status=Router.Status.ONLINE, last_seen_at=timezone.now(),
+                status=st, last_seen_at=timezone.now(),
             ))
         return routers
 
@@ -333,10 +340,18 @@ class Command(BaseCommand):
             # the demo shows both connection types side by side.
             is_static = i % 4 == 0
             static_ip = f"10.20.{i}.{self.rng.randint(2, 250)}" if is_static else None
+            # Scatter homes ~5 km around the Nairobi towers so the Map has a real spread.
+            # Leave every 7th client un-placed, so the "needs a pin" prompt has something.
+            placed = i % 7 != 0
+            gps_lat = gps_lng = None
+            if placed:
+                gps_lat = Decimal(str(round(-1.33 + self.rng.uniform(-0.05, 0.05), 6)))
+                gps_lng = Decimal(str(round(36.79 + self.rng.uniform(-0.05, 0.05), 6)))
             client = Client.objects.create(
                 operator=op, account_number=f"DEMO{i + 1:05d}", full_name=name,
                 phone=self._phone(), plan=plan, router=self.rng.choice(routers),
                 access_point=self.rng.choice(aps),
+                gps_lat=gps_lat, gps_lng=gps_lng,
                 connection_type=(
                     Client.Connection.STATIC if is_static else Client.Connection.PPPOE
                 ),
@@ -422,12 +437,21 @@ class Command(BaseCommand):
                 resolved_at=timezone.now() if st == Ticket.Status.RESOLVED else None,
             )
 
-        for _ in range(6):
+        # Leads clustered around a few Nairobi neighbourhoods, so the Map's demand HEATMAP
+        # shows real hotspots (where to expand next). A few left un-placed for the "needs a pin".
+        lead_hotspots = [(-1.300, 36.780), (-1.345, 36.815), (-1.270, 36.800)]
+        for i in range(16):
+            placed = i % 6 != 0
+            lat = lng = None
+            if placed:
+                hs = lead_hotspots[i % len(lead_hotspots)]
+                lat = Decimal(str(round(hs[0] + self.rng.uniform(-0.012, 0.012), 6)))
+                lng = Decimal(str(round(hs[1] + self.rng.uniform(-0.012, 0.012), 6)))
             Lead.objects.create(
                 operator=op, name=self._name(), phone=self._phone(),
-                location=self.rng.choice(LOCATIONS),
-                status=self.rng.choice([Lead.Status.NEW, Lead.Status.CONTACTED,
-                                        Lead.Status.CONVERTED]),
+                location=self.rng.choice(LOCATIONS), gps_lat=lat, gps_lng=lng,
+                status=self.rng.choice([Lead.Status.NEW, Lead.Status.NEW,
+                                        Lead.Status.CONTACTED, Lead.Status.CONVERTED]),
             )
 
         gear = [

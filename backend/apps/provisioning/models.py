@@ -31,6 +31,11 @@ class Router(OperatorOwnedModel):
         UNKNOWN = "unknown", "Unknown"
 
     name = models.CharField(max_length=80, help_text="Site name, e.g. 'Kibera Site A'")
+    # Where this router physically sits — set by dropping a pin on the Map. Nullable because a
+    # router can exist before anyone has placed it; the map lists un-placed routers separately
+    # rather than guessing. decimals(9,6) = ~0.1 m precision, plenty for a site.
+    gps_lat = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    gps_lng = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     management_host = models.CharField(
         max_length=100,
         blank=True,

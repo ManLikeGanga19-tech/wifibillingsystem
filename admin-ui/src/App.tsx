@@ -23,6 +23,7 @@ import {
   Eye,
   Wifi as WifiIcon,
   RadioTower,
+  Map as MapIcon,
 } from 'lucide-react';
 
 import { BandwidthProfile, Subscriber, OutboundCampaign } from './types';
@@ -49,6 +50,7 @@ import MessagesView from './components/MessagesView';
 import EmailsView from './components/EmailsView';
 import MessagingView from './components/MessagingView';
 import RoutersView from './components/RoutersView';
+import MapView from './components/MapView';
 import EquipmentView from './components/EquipmentView';
 import PppoePlansView from './components/PppoePlansView';
 import PppoeClientsView from './components/PppoeClientsView';
@@ -81,7 +83,8 @@ type TabId =
   | 'pppoe_clients'
   | 'pppoe_plans'
   | 'pppoe_invoices'
-  | 'network';
+  | 'network'
+  | 'map';
 
 /** Every section the URL is allowed to name. Anything else in the hash is somebody
  *  typing, or a stale link to a renamed page — fall back rather than render blank. */
@@ -89,7 +92,7 @@ const KNOWN_TABS: ReadonlySet<TabId> = new Set<TabId>([
   'dashboard', 'active_users', 'users', 'tickets', 'leads', 'packages', 'payments',
   'vouchers', 'expenses', 'messages', 'emails', 'campaigns', 'mikrotik', 'equipment',
   'settings', 'wallet', 'reports', 'pppoe_clients', 'pppoe_plans', 'pppoe_invoices',
-  'network',
+  'network', 'map',
 ]);
 
 interface NavItem {
@@ -100,7 +103,13 @@ interface NavItem {
 }
 
 const NAV_GROUPS: { title: string | null; items: NavItem[] }[] = [
-  { title: null, items: [{ id: 'dashboard', label: 'Dashboard', icon: TrendingUp }] },
+  {
+    title: null,
+    items: [
+      { id: 'dashboard', label: 'Dashboard', icon: TrendingUp },
+      { id: 'map', label: 'Map', icon: MapIcon },
+    ],
+  },
   {
     title: 'Users',
     items: [
@@ -643,6 +652,7 @@ export default function App() {
             {activeTab === 'pppoe_plans' && <PppoePlansView />}
             {activeTab === 'pppoe_invoices' && <PppoeInvoicesView />}
             {activeTab === 'network' && <NetworkView />}
+            {activeTab === 'map' && <MapView onNavigate={(tab) => setActiveTab(tab as TabId)} />}
           </div>
         </div>
 
