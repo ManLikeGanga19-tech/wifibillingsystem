@@ -59,8 +59,12 @@
 		X-Content-Type-Options "nosniff"
 		Referrer-Policy "strict-origin-when-cross-origin"
 
-		# We ask for none of these. Saying so means a compromised script cannot either.
-		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+		# We ask for none of these EXCEPT geolocation, which the ISP console's Map genuinely
+		# uses (the "you are here" dot, "use my location", the business-location pin). (self)
+		# = only our own origin may request it, and the browser STILL prompts the user for
+		# consent — so a compromised script can annoy, never silently locate. camera / mic /
+		# payment stay fully off. One policy, set here, so every route is unambiguous.
+		Permissions-Policy "camera=(), microphone=(), geolocation=(self), payment=()"
 
 		# Don't advertise what we run.
 		-Server
@@ -188,12 +192,6 @@ docs.wifios.co.ke {
 *.wifios.co.ke {
 	import security_headers
 	import csp_console
-
-	# The Map's "you are here" dot + "use my location" need the browser geolocation API, which
-	# the platform-wide Permissions-Policy switches OFF (geolocation=()). Re-enable it for the
-	# ISP console ONLY, and only same-origin ((self)) — the browser still prompts the user for
-	# consent, so this just lets that prompt appear instead of a silent refusal.
-	header Permissions-Policy "camera=(), microphone=(), geolocation=(self), payment=()"
 
 	# Same-origin API: the cookie just works.
 	handle /api/* {
