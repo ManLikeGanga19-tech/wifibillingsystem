@@ -775,10 +775,15 @@ export interface MapPoint {
   source?: string;
 }
 export interface MapData {
+  business_location: { lat: number; lng: number } | null;
   layers: Record<MapLayer, MapPoint[]>;
   counts: Record<MapLayer, number>;
   unplaced: Record<MapLayer, number>;
   center: { lat: number; lng: number } | null;
+}
+export interface BusinessLocation {
+  gps_lat: number | null;
+  gps_lng: number | null;
 }
 
 export interface LoyaltyRedeemablePlan {
@@ -1561,6 +1566,10 @@ export const api = {
   /** The Map page: every geolocated thing this ISP owns, tenant-scoped. */
   map: {
     points: () => request<MapData>('/map/points/'),
+    businessLocation: () => request<BusinessLocation>('/map/business-location/'),
+    setBusinessLocation: (gps_lat: number | null, gps_lng: number | null) =>
+      request<{ detail: string; gps_lat: number | null; gps_lng: number | null }>(
+        '/map/business-location/', { method: 'POST', body: JSON.stringify({ gps_lat, gps_lng }) }),
   },
 
   developer: {

@@ -95,3 +95,34 @@ class TestMapPoints:
 
     def test_requires_auth(self):
         assert APIClient().get(URL).status_code in (401, 403)
+
+
+class TestBusinessLocation:
+    URL = "/api/v1/map/business-location/"
+
+    def test_set_and_read_back(self):
+        op = OperatorFactory()
+        c = owner(op)
+        r = c.post(self.URL, {"gps_lat": "-1.29", "gps_lng": "36.81"}, format="json")
+        assert r.status_code == 200, r.content
+        op.refresh_from_db()
+        assert float(op.gps_lat) == -1.29 and float(op.gps_lng) == 36.81
+        assert c.get(self.URL).json()["gps_lat"] == -1.29
+
+    def test_business_location_is_the_map_center(self):
+        op = OperatorFactory(gps_lat=Decimal("-1.30"), gps_lng=Decimal("36.80"))
+        # a stray asset far away must NOT pull the centre off the business location
+        RouterFactory(operator=op, gps_lat=Decimal("-4.05"), gps_lng=Decimal("39.66"))
+        body = owner(op).get(URL).json()
+        assert body["business_location"] == {"lat": -1.3, "lng": 36.8}
+        assert body["center"] == {"lat": -1.3, "lng": 36.8}
+
+    def test_out_of_range_rejected(self):
+        r = owner(OperatorFactory()).post(
+            self.URL, {"gps_lat": "999", "gps_lng": "0"}, format="json")
+        assert r.status_code == 400
+
+    def test_no_business_location_falls_back_to_null_center(self):
+        body = owner(OperatorFactory()).get(URL).json()
+        assert body["business_location"] is None
+        assert body["center"] is None  # client then uses the device location

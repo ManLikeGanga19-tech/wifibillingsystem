@@ -4,9 +4,12 @@ import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import {
   MapPin, RadioTower, Router as RouterIcon, Home, UserPlus, Loader2, AlertTriangle,
-  Satellite, Map as MapGlyph, Flame,
+  Satellite, Map as MapGlyph, Flame, Building2, X,
 } from 'lucide-react';
 import { api, type MapData, type MapLayer, type MapPoint } from '../api/client';
+import { getPosition } from '../utils/geolocate';
+import MapPicker from './MapPicker';
+import { toast } from './ui';
 
 type MLMap = maplibregl.Map;
 type StyleSpecification = maplibregl.StyleSpecification;
@@ -90,6 +93,8 @@ export default function MapView({ onNavigate }: { onNavigate: (tab: string) => v
     towers: true, clients: true, routers: true, leads: true,
   });
   const [heatmap, setHeatmap] = useState(false); // leads: heatmap vs pins
+  const [showBiz, setShowBiz] = useState(false); // "set business location" modal
+  const [bizSet, setBizSet] = useState(false);   // hide the prompt after saving
 
   const navRef = useRef(onNavigate);
   navRef.current = onNavigate;
@@ -115,7 +120,9 @@ export default function MapView({ onNavigate }: { onNavigate: (tab: string) => v
     // in the field, relative to the towers/clients/ADSS around them. Client-side only; needs
     // HTTPS (staging :8443 / localhost) and the one-time browser location prompt.
     map.addControl(new maplibregl.GeolocateControl({
-      positionOptions: { enableHighAccuracy: true },
+      // A timeout + maximumAge so a device without a quick GPS fix doesn't hang or hard-fail;
+      // a recent cached position answers instantly on repeated taps.
+      positionOptions: { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 },
       trackUserLocation: true,
       showAccuracyCircle: true,
     }), 'top-right');
@@ -210,7 +217,17 @@ export default function MapView({ onNavigate }: { onNavigate: (tab: string) => v
       map.on('click', `${layer.id}-pt`, () =>
         navRef.current(TAB_FOR[layer.id]));
     }
-    fitToData(map, data);
+    // Where to open. If the ISP has SET a business location, that's home. Otherwise open at the
+    // DEVICE's current location — an ISP is physically at its operating area, so "where am I" is
+    // the natural first view (and we prompt them to save it as their business location). If the
+    // device won't share, fall back to the spread of their placed assets, else Kenya.
+    if (data.business_location) {
+      map.flyTo({ center: [data.business_location.lng, data.business_location.lat], zoom: 13, duration: 0 });
+    } else {
+      getPosition()
+        .then((c) => map.flyTo({ center: [c.lng, c.lat], zoom: 14, duration: 0 }))
+        .catch(() => { if (data.center) fitToData(map, data); });
+    }
   }, [mapReady, data]);
 
   // NB: these toggles guard on the LAYER existing, not isStyleLoaded() — the latter is
@@ -299,6 +316,32 @@ export default function MapView({ onNavigate }: { onNavigate: (tab: string) => v
         </div>
       )}
 
+      {data && !data.business_location && !bizSet && (
+        <div className="flex items-center gap-2 text-xs bg-[#EAF3FF] border border-[#2563EB]/30 text-[#1D4ED8] px-3 py-2">
+          <Building2 className="h-4 w-4 shrink-0" />
+          <span className="flex-1">
+            Set your <b>business location</b> so the map always opens at your base of operations.
+          </span>
+          <button
+            onClick={() => setShowBiz(true)}
+            className="font-bold font-mono uppercase text-[10px] border border-[#2563EB] text-[#2563EB] px-2 py-1 cursor-pointer hover:bg-[#2563EB] hover:text-white"
+          >
+            Set location
+          </button>
+        </div>
+      )}
+
+      {showBiz && (
+        <SetBusinessLocationModal
+          onClose={() => setShowBiz(false)}
+          onSaved={(lat, lng) => {
+            setShowBiz(false);
+            setBizSet(true);
+            mapRef.current?.flyTo({ center: [lng, lat], zoom: 14, duration: 0 });
+          }}
+        />
+      )}
+
       {/* Full-width map (no flex width race) with the legend as an overlay card. The map div
           carries an explicit height/width so MapLibre always has a size to render into. */}
       <div className="relative border border-[#141414] w-full">
@@ -383,4 +426,74 @@ function card(p: MapPoint, layer: { id: MapLayer; label: string }): HTMLElement 
 
 function esc(s: string): string {
   return (s || '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
+}
+
+/**
+ * Capture the ISP's business location. Opens pre-centred on the device's current position (an
+ * ISP is usually AT its base when setting this up), so it's typically one tap of "Use my
+ * location" and Save. Persists to the operator so the Map always opens here.
+ */
+function SetBusinessLocationModal({
+  onClose, onSaved,
+}: {
+  onClose: () => void;
+  onSaved: (lat: number, lng: number) => void;
+}) {
+  const [lat, setLat] = useState<number | null>(null);
+  const [lng, setLng] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  // Pre-fill with wherever the device is right now — the common case.
+  useEffect(() => {
+    let alive = true;
+    getPosition().then((c) => { if (alive && lat == null) { setLat(c.lat); setLng(c.lng); } }).catch(() => {});
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const save = async () => {
+    if (lat == null || lng == null || busy) return;
+    setBusy(true);
+    try {
+      await api.map.setBusinessLocation(lat, lng);
+      toast('success', 'Business location saved.');
+      onSaved(lat, lng);
+    } catch {
+      toast('error', 'Could not save the location.');
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-[#141414]/50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white border border-[#141414] w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-4 border-b border-[#141414]">
+          <h3 className="font-bold font-mono uppercase text-sm flex items-center gap-2">
+            <Building2 className="h-4 w-4" /> Your business location
+          </h3>
+          <button onClick={onClose} className="cursor-pointer"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="p-4">
+          <p className="text-xs text-[#141414]/60 mb-3">
+            Where your business is based — the map will always open here. It starts at your
+            current location; drag the pin or click to adjust.
+          </p>
+          <MapPicker
+            lat={lat} lng={lng}
+            onChange={(la, ln) => {
+              setLat(Number.isFinite(la) ? la : null);
+              setLng(Number.isFinite(ln) ? ln : null);
+            }}
+          />
+          <div className="flex justify-end gap-2 mt-4">
+            <button onClick={onClose} className="text-xs font-mono font-bold uppercase border border-[#141414] px-3 py-2 cursor-pointer">Cancel</button>
+            <button onClick={save} disabled={busy || lat == null}
+              className="text-xs font-mono font-bold uppercase border border-[#228B22] bg-[#228B22] text-white px-3 py-2 cursor-pointer disabled:opacity-40">
+              {busy ? 'Saving…' : 'Save location'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
