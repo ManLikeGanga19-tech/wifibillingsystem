@@ -11,8 +11,12 @@
  */
 export type Coords = { lat: number; lng: number; accuracy: number };
 
-const HIGH: PositionOptions = { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 };
-const COARSE: PositionOptions = { enableHighAccuracy: false, timeout: 15000, maximumAge: 120000 };
+// Two attempts, run in PARALLEL, first success wins (see getPosition). The coarse network fix
+// usually returns in a second or two; the high-accuracy GPS fix is slower but more precise, so
+// whichever the device can deliver first is used. Both are patient (a cold GPS can take a
+// while) and accept a recent cached position so repeat taps are instant.
+const HIGH: PositionOptions = { enableHighAccuracy: true, timeout: 20000, maximumAge: 60000 };
+const COARSE: PositionOptions = { enableHighAccuracy: false, timeout: 20000, maximumAge: 600000 };
 
 function once(opts: PositionOptions): Promise<GeolocationPosition> {
   return new Promise((resolve, reject) =>
@@ -41,7 +45,7 @@ function reason(err: unknown): string {
       : "Location is blocked for this site — open the padlock ▸ Site settings ▸ Location and set it to Allow, then reload. (Turning on the device's location isn't enough; the site permission is separate.)";
   }
   if (code === 2) return "Your device couldn't get a location fix — check that GPS/location is on, or click the map.";
-  if (code === 3) return 'Getting your location timed out — try again outdoors, or click the map.';
+  if (code === 3) return "Couldn't get a location fix in time (common on desktops or indoors) — click the map to place the pin, or try on a phone outdoors.";
   return 'Could not get your location — allow location access, or click the map.';
 }
 
@@ -53,18 +57,16 @@ export async function getPosition(): Promise<Coords> {
   if (policyBlocksGeolocation()) {
     throw new Error('Location is disabled for this site by its security policy (a server setting). Click the map to place the pin instead.');
   }
+  // Race a coarse (fast, network) and a precise (slower, GPS) fix — take whichever the device
+  // can deliver first, so a phone gets GPS precision while a desktop still gets *a* location
+  // quickly instead of both timing out one after the other.
   try {
-    const p = await once(HIGH);
+    const p = await Promise.any([once(COARSE), once(HIGH)]);
     return { lat: p.coords.latitude, lng: p.coords.longitude, accuracy: p.coords.accuracy };
-  } catch (highErr) {
-    // A hard permission denial (1) won't be fixed by retrying; a timeout (3) or unavailable (2)
-    // usually still works on the fast coarse path.
-    if ((highErr as GeolocationPositionError)?.code === 1) throw new Error(reason(highErr));
-    try {
-      const p = await once(COARSE);
-      return { lat: p.coords.latitude, lng: p.coords.longitude, accuracy: p.coords.accuracy };
-    } catch (coarseErr) {
-      throw new Error(reason(coarseErr));
-    }
+  } catch (agg) {
+    const errs = (agg as { errors?: GeolocationPositionError[] }).errors;
+    // Report the most actionable failure: denied (1) > unavailable (2) > timeout (3).
+    const best = (errs ?? []).slice().sort((a, b) => (a?.code ?? 9) - (b?.code ?? 9))[0];
+    throw new Error(reason(best ?? agg));
   }
 }
