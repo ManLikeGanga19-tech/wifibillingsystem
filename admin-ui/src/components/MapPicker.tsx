@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import * as maplibregl from 'maplibre-gl';
+import { maplibregl } from '../utils/maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { Crosshair, Loader2, X } from 'lucide-react';
 import { getPosition } from '../utils/geolocate';

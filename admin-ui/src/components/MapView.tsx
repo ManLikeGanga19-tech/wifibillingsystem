@@ -1,6 +1,6 @@
 import { createElement, useEffect, useRef, useState, type ComponentType } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import * as maplibregl from 'maplibre-gl';
+import { maplibregl } from '../utils/maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import {
   MapPin, RadioTower, Router as RouterIcon, Home, UserPlus, Loader2, AlertTriangle,

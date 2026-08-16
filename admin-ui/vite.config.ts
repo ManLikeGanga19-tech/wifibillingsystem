@@ -9,6 +9,9 @@ export default defineConfig(() => {
     // maplibre-gl ships its own web worker; Vite's dep pre-bundler mishandles it
     // ("maplibre-gl-worker.mjs does not exist"), so serve it un-bundled. It's already ESM.
     optimizeDeps: { exclude: ['maplibre-gl'] },
+    // maplibre creates its worker with { type: 'module' }; build workers as ES modules so the
+    // format matches (a classic/IIFE worker loaded as a module silently does nothing).
+    worker: { format: 'es' },
     build: {
       // Split the vendor libraries out of the app bundle so no single chunk is oversized
       // and the rarely-changing framework code caches independently of our app code. A
@@ -44,6 +47,10 @@ export default defineConfig(() => {
       proxy: {
         '/api': process.env.API_PROXY_TARGET ?? 'http://localhost:8000',
       },
+    },
+    // `vite preview` (production build) needs the same /api proxy for local prod-parity testing.
+    preview: {
+      proxy: { '/api': process.env.API_PROXY_TARGET ?? 'http://localhost:8000' },
     },
   };
 });
