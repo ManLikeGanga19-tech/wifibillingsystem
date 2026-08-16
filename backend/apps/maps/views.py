@@ -8,13 +8,21 @@ stays cheap; the frontend clusters. Records without coordinates are counted (`un
 than dropped, so nothing is silently invisible — the console can prompt to place them.
 """
 
+from decimal import Decimal, InvalidOperation
+
 from drf_spectacular.utils import extend_schema
 from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.core.permissions import RequireTenant, TenantIsOperational
-from apps.core.schema import OBJECT_RESPONSE
+from apps.core.permissions import (
+    NotBillingLocked,
+    ReadOnlyForSupport,
+    RequireTenant,
+    TenantIsOperational,
+)
+from apps.core.schema import OBJECT_REQUEST, OBJECT_RESPONSE
+from apps.core.services import audit
 from apps.core.tenancy import acting_tenant
 
 
@@ -75,14 +83,21 @@ class MapDataView(APIView):
                 "id", "gps_lat", "gps_lng", "name", "status", "phone", "source")
         ]
 
+        # The map opens on: the ISP's business location if they've set it, else the centroid of
+        # their placed assets, else nothing (the client falls back to the device location).
+        business = (
+            {"lat": float(op.gps_lat), "lng": float(op.gps_lng)}
+            if op.gps_lat is not None and op.gps_lng is not None else None
+        )
         pts = towers + clients + routers + leads
-        center = (
+        centroid = (
             {"lat": sum(p["lat"] for p in pts) / len(pts),
              "lng": sum(p["lng"] for p in pts) / len(pts)}
             if pts else None
         )
 
         return Response({
+            "business_location": business,
             "layers": {"towers": towers, "clients": clients, "routers": routers, "leads": leads},
             "counts": {"towers": len(towers), "clients": len(clients),
                        "routers": len(routers), "leads": len(leads)},
@@ -93,5 +108,51 @@ class MapDataView(APIView):
                 "routers": routers_qs.count() - len(routers),
                 "leads": leads_qs.count() - len(leads),
             },
-            "center": center,
+            # `center` = the best default viewport: business location wins, else the asset
+            # centroid. None means "use the device's current location" on the client.
+            "center": business or centroid,
+        })
+
+
+class BusinessLocationView(APIView):
+    """Where the ISP's business physically sits — the Map's home. Owner/admin sets it (usually
+    from the 'set your business location' prompt on the Map, pre-filled with their device's
+    current position). Tenant-scoped; support is read-only."""
+
+    def get_permissions(self):
+        if self.request.method in ("GET", "HEAD", "OPTIONS"):
+            return [IsAdminUser(), RequireTenant(), TenantIsOperational()]
+        return [IsAdminUser(), RequireTenant(), TenantIsOperational(),
+                ReadOnlyForSupport(), NotBillingLocked()]
+
+    @extend_schema(responses=OBJECT_RESPONSE, summary="This ISP's business location")
+    def get(self, request):
+        op = acting_tenant(request)
+        placed = op.gps_lat is not None and op.gps_lng is not None
+        return Response({
+            "gps_lat": float(op.gps_lat) if placed else None,
+            "gps_lng": float(op.gps_lng) if placed else None,
+        })
+
+    @extend_schema(request=OBJECT_REQUEST, responses=OBJECT_RESPONSE,
+                   summary="Set this ISP's business location")
+    def post(self, request):
+        op = acting_tenant(request)
+        lat, lng = request.data.get("gps_lat"), request.data.get("gps_lng")
+        if lat in (None, "") and lng in (None, ""):
+            op.gps_lat = op.gps_lng = None  # clearing it is allowed
+        else:
+            try:
+                op.gps_lat, op.gps_lng = Decimal(str(lat)), Decimal(str(lng))
+            except (TypeError, ValueError, InvalidOperation):
+                return Response({"detail": "Enter a valid latitude and longitude."}, status=400)
+            if not (-90 <= op.gps_lat <= 90 and -180 <= op.gps_lng <= 180):
+                return Response({"detail": "Those coordinates are out of range."}, status=400)
+        op.save(update_fields=["gps_lat", "gps_lng", "updated_at"])
+        audit("business_location_set", operator=op, actor=request.user, target=op,
+              gps_lat=str(op.gps_lat), gps_lng=str(op.gps_lng))
+        return Response({
+            "detail": "Business location saved.",
+            "gps_lat": float(op.gps_lat) if op.gps_lat is not None else None,
+            "gps_lng": float(op.gps_lng) if op.gps_lng is not None else None,
         })

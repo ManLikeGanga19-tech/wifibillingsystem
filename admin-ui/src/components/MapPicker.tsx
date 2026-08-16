@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { Crosshair, Loader2, X } from 'lucide-react';
+import { getPosition } from '../utils/geolocate';
 
 type MLMap = maplibregl.Map;
 type StyleSpecification = maplibregl.StyleSpecification;
@@ -91,20 +92,18 @@ export default function MapPicker({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const useMyLocation = () => {
+  const useMyLocation = async () => {
     setGeoError('');
-    if (!navigator.geolocation) { setGeoError('This device has no location service.'); return; }
     setLocating(true);
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setLocating(false);
-        const { latitude, longitude } = pos.coords;
-        mapRef.current?.flyTo({ center: [longitude, latitude], zoom: 16, duration: 0 });
-        place(latitude, longitude);
-      },
-      () => { setLocating(false); setGeoError('Could not get your location — allow location access, or click the map.'); },
-      { enableHighAccuracy: true, timeout: 10000 },
-    );
+    try {
+      const { lat, lng } = await getPosition();
+      mapRef.current?.flyTo({ center: [lng, lat], zoom: 16, duration: 0 });
+      place(lat, lng);
+    } catch (e) {
+      setGeoError(e instanceof Error ? e.message : 'Could not get your location.');
+    } finally {
+      setLocating(false);
+    }
   };
 
   const clear = () => {

@@ -87,6 +87,11 @@ class Operator(TimeStampedModel):
     referral_source = models.CharField(
         max_length=40, blank=True, help_text="How they heard about us"
     )
+    # Where this ISP's business physically sits — its office / base of operations. The Map
+    # opens here (an ISP works AT its location, so this is the natural centre), and it is what
+    # the "set your business location" prompt captures. Nullable until they place it.
+    gps_lat = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    gps_lng = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
 
     # NOTE: there are deliberately NO per-ISP Daraja/collection credentials here.
     # Customers NEVER pay an ISP directly — every shilling lands on Danamo's own
