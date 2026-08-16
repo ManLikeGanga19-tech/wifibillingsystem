@@ -382,6 +382,8 @@ export interface ApiVoucher {
 export interface ApiRouter {
   id: number;
   name: string;
+  gps_lat: string | null;
+  gps_lng: string | null;
   management_host: string;
   api_port: number;
   username: string;
@@ -434,6 +436,8 @@ export interface ApiLead {
   name: string;
   phone: string;
   location: string;
+  gps_lat: string | null;
+  gps_lng: string | null;
   source: string;
   status: 'new' | 'contacted' | 'converted' | 'lost';
   notes: string;
@@ -755,6 +759,26 @@ export interface LoyaltySummary {
   accounts: number;
   points_outstanding: number;
   top: { phone: string; points: number }[];
+}
+
+export type MapLayer = 'towers' | 'clients' | 'routers' | 'leads';
+export interface MapPoint {
+  id: number;
+  lat: number;
+  lng: number;
+  label: string;
+  status: string;
+  account?: string;
+  connection?: string;
+  phone?: string;
+  plan?: string;
+  source?: string;
+}
+export interface MapData {
+  layers: Record<MapLayer, MapPoint[]>;
+  counts: Record<MapLayer, number>;
+  unplaced: Record<MapLayer, number>;
+  center: { lat: number; lng: number } | null;
 }
 
 export interface LoyaltyRedeemablePlan {
@@ -1081,6 +1105,8 @@ export interface PppoeClient {
   phone: string;
   email: string;
   physical_address: string;
+  gps_lat: string | null;
+  gps_lng: string | null;
   plan: number;
   plan_name: string;
   router: number;
@@ -1530,6 +1556,11 @@ export const api = {
     adjust: (phone: string, points: number, reason: string) =>
       request<{ detail: string; points_balance: number }>(
         '/loyalty/adjust/', { method: 'POST', body: JSON.stringify({ phone, points, reason }) }),
+  },
+
+  /** The Map page: every geolocated thing this ISP owns, tenant-scoped. */
+  map: {
+    points: () => request<MapData>('/map/points/'),
   },
 
   developer: {

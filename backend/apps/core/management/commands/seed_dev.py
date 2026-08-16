@@ -57,6 +57,8 @@ class Command(BaseCommand):
         if created:
             self.stdout.write("Dummy router created")
 
+        self._map_geodata(operator, router)
+
         # The platform owner ALSO runs his own WISP: one login, two hats.
         # That tenant is platform-owned, so it pays no commission or fees.
         if not operator.is_platform_owned:
@@ -100,3 +102,68 @@ class Command(BaseCommand):
                 "or sign in with support@danamo.co.ke)"
             )
         self.stdout.write(self.style.SUCCESS("Seed complete."))
+
+    def _map_geodata(self, operator, router):
+        """Give the dev operator geolocated towers, routers and PPPoE clients so the Map page
+        has something real when you log in at localhost:4600. Idempotent + Nairobi-based."""
+        import random
+        from decimal import Decimal
+
+        from apps.ops.models import Lead
+        from apps.pppoe.models import Client, ServicePlan, Tower
+
+        rng = random.Random(7)
+        # Place the existing dummy router, add one more (offline, to show status colour).
+        router.gps_lat, router.gps_lng, router.status = Decimal("-1.2921"), Decimal("36.8219"), \
+            router.Status.ONLINE
+        router.save(update_fields=["gps_lat", "gps_lng", "status", "updated_at"])
+        Router.objects.get_or_create(
+            operator=operator, name="Westlands Site",
+            defaults={"management_host": "10.10.0.2", "provisioning_backend": Router.Backend.DUMMY,
+                      "gps_lat": Decimal("-1.2650"), "gps_lng": Decimal("36.8030"),
+                      "status": Router.Status.OFFLINE},
+        )
+        for name, lat, lng in [("CBD Tower", "-1.2860", "36.8230"),
+                               ("Kilimani Tower", "-1.2900", "36.7850")]:
+            Tower.objects.get_or_create(
+                operator=operator, name=name,
+                defaults={"gps_lat": Decimal(lat), "gps_lng": Decimal(lng)},
+            )
+        plan, _ = ServicePlan.objects.get_or_create(
+            operator=operator, name="Dev Home 10Mbps",
+            defaults={"price": Decimal("2500"), "download_kbps": 10240, "upload_kbps": 5120,
+                      "mikrotik_profile": "dev-home-10"},
+        )
+        if Client.objects.filter(operator=operator).count() < 12:
+            statuses = ([Client.Status.ACTIVE] * 8 + [Client.Status.SUSPENDED] * 2
+                        + [Client.Status.CANCELLED])
+            for i, st in enumerate(statuses):
+                Client.objects.get_or_create(
+                    operator=operator, account_number=f"DEV{i + 1:04d}",
+                    defaults={
+                        "full_name": f"Dev Client {i + 1}",
+                        "phone": f"2547{rng.randint(10**7, 10**8 - 1)}",
+                        "plan": plan, "router": router, "status": st,
+                        "pppoe_username": f"dev-{i + 1}", "pppoe_password": "devpass123",
+                        "billing_day": 1,
+                        "gps_lat": Decimal(str(round(-1.29 + rng.uniform(-0.03, 0.03), 6))),
+                        "gps_lng": Decimal(str(round(36.81 + rng.uniform(-0.03, 0.03), 6))),
+                    },
+                )
+        # Leads in two demand clusters, so the Map's heatmap has hotspots.
+        if Lead.objects.filter(operator=operator).count() < 10:
+            spots = [(-1.300, 36.780), (-1.270, 36.805)]
+            for i in range(12):
+                hs = spots[i % 2]
+                Lead.objects.get_or_create(
+                    operator=operator, name=f"Dev Lead {i + 1}",
+                    defaults={
+                        "phone": f"2547{rng.randint(10**7, 10**8 - 1)}",
+                        "location": "Nairobi",
+                        "status": rng.choice([Lead.Status.NEW, Lead.Status.NEW,
+                                              Lead.Status.CONTACTED]),
+                        "gps_lat": Decimal(str(round(hs[0] + rng.uniform(-0.01, 0.01), 6))),
+                        "gps_lng": Decimal(str(round(hs[1] + rng.uniform(-0.01, 0.01), 6))),
+                    },
+                )
+        self.stdout.write("Map geodata seeded for the dev operator")

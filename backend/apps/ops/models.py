@@ -69,6 +69,10 @@ class Lead(OperatorOwnedModel):
     name = models.CharField(max_length=120)
     phone = models.CharField(max_length=20, blank=True)
     location = models.CharField(max_length=120, blank=True)
+    # Where the prospect is — dropped as a pin on the Map. Nullable: a lead can be logged
+    # before anyone places it. Plotting leads reveals demand clusters (where to expand next).
+    gps_lat = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    gps_lng = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     source = models.CharField(
         max_length=60, blank=True, help_text="How they found you, e.g. referral, flyer"
     )

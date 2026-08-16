@@ -30,6 +30,7 @@ api_v1 = [
     path("billing/", include("apps.billing.urls")),
     path("pppoe/", include("apps.pppoe.urls")),
     path("loyalty/", include("apps.loyalty.urls")),
+    path("", include("apps.maps.urls")),
     path("assistant/", include("apps.assistant.urls")),
     path("developer/", include("apps.developer.urls")),
     # The 5-step ISP signup. Entirely anonymous; the draft lives on the SERVER,

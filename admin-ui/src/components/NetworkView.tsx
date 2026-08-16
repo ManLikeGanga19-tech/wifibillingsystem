@@ -1,9 +1,11 @@
 import { Fragment, useEffect, useState, type FormEvent } from 'react';
 import { Pencil, Plus, RadioTower, Trash2 } from 'lucide-react';
 import { api, ApiError, Tower, AccessPoint, ApiRouter } from '../api/client';
+import MapPicker from './MapPicker';
 import { Badge, Btn, Field, inputCls, Panel, RefreshBtn, TableShell, tdCls, toast, useList, ViewHeader } from './ui';
 
-const BLANK_TOWER = { name: '', notes: '' };
+const BLANK_TOWER = { name: '', notes: '',
+  gps_lat: null as number | null, gps_lng: null as number | null };
 const BLANK_AP = { tower: '', name: '', mode: 'ap', capacity: '', band: '', router: '' };
 
 export default function NetworkView() {
@@ -24,7 +26,8 @@ export default function NetworkView() {
   const newTower = () => { setEditingTower(null); setTower({ ...BLANK_TOWER }); setShowTower(true); };
   const editTower = (t: Tower) => {
     setEditingTower(t);
-    setTower({ name: t.name, notes: t.notes });
+    setTower({ name: t.name, notes: t.notes,
+      gps_lat: t.gps_lat ? Number(t.gps_lat) : null, gps_lng: t.gps_lng ? Number(t.gps_lng) : null });
     setShowTower(true);
   };
   const newAp = () => { setEditingAp(null); setAp({ ...BLANK_AP }); setShowAp(true); };
@@ -108,6 +111,15 @@ export default function NetworkView() {
           <form onSubmit={submitTower} className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
             <Field label="Name"><input required value={tower.name} onChange={(e) => setTower({ ...tower, name: e.target.value })} className={inputCls} placeholder="e.g. Kibera Mast" /></Field>
             <Field label="Notes" className="md:col-span-2"><input value={tower.notes} onChange={(e) => setTower({ ...tower, notes: e.target.value })} className={inputCls} /></Field>
+            <div className="md:col-span-4">
+              <label className="text-[11px] font-mono uppercase text-[#141414]/50 block mb-1">Tower location</label>
+              <MapPicker
+                lat={tower.gps_lat} lng={tower.gps_lng}
+                onChange={(la, ln) => setTower((t) => ({
+                  ...t, gps_lat: Number.isFinite(la) ? la : null, gps_lng: Number.isFinite(ln) ? ln : null,
+                }))}
+              />
+            </div>
             <div className="flex gap-2">
               <Btn type="submit" variant="green">{editingTower ? 'Save' : 'Add'}</Btn>
               {editingTower && <Btn type="button" variant="outline" onClick={() => { setShowTower(false); setEditingTower(null); }}>Cancel</Btn>}

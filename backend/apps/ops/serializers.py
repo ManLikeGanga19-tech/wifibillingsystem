@@ -73,7 +73,8 @@ class TicketSerializer(serializers.ModelSerializer):
 class LeadSerializer(serializers.ModelSerializer):
     class Meta:
         model = Lead
-        fields = ["id", "name", "phone", "location", "source", "status", "notes", "created_at"]
+        fields = ["id", "name", "phone", "location", "gps_lat", "gps_lng", "source", "status",
+                  "notes", "created_at"]
 
 
 class ExpenseSerializer(serializers.ModelSerializer):
