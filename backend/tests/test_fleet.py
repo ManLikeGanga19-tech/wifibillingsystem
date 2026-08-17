@@ -103,6 +103,62 @@ class TestFleetView:
 
 
 @pytest.mark.django_db
+class TestNearestAndDispatch:
+    def _place(self, op, name, lat, lng, minutes_ago=0):
+        tech = UserFactory(role=Role.TENANT_TECHNICIAN, operator=op, name=name, is_staff=True)
+        TechLocationPing.objects.create(
+            operator=op, technician=tech, lat=str(lat), lng=str(lng),
+            recorded_at=timezone.now() - timedelta(minutes=minutes_ago))
+        return tech
+
+    def test_nearest_ranks_live_techs_by_distance(self, op):
+        near = self._place(op, "Near", -1.30, 36.81)     # ~close to target below
+        far = self._place(op, "Far", -1.10, 36.95)       # further
+        self._place(op, "Stale", -1.301, 36.811, minutes_ago=120)   # closest but dark → excluded
+        care, _ = api_as(Role.TENANT_CARE, op)
+        body = care.get(reverse("fleet-nearest") + "?lat=-1.30&lng=36.81").data
+        ids = [t["technician_id"] for t in body["technicians"]]
+        assert ids == [near.id, far.id]                  # stale one dropped, nearest first
+        assert body["technicians"][0]["distance_km"] < body["technicians"][1]["distance_km"]
+
+    def test_nearest_needs_valid_coords_and_fleet_view(self, op):
+        care, _ = api_as(Role.TENANT_CARE, op)
+        assert care.get(reverse("fleet-nearest")).status_code == 400          # no coords
+        tech, _ = api_as(Role.TENANT_TECHNICIAN, op)   # not a dispatcher → 403
+        assert tech.get(reverse("fleet-nearest") + "?lat=-1&lng=36").status_code == 403
+
+    def test_dispatch_assigns_the_nearest_technician(self, op):
+        from apps.ops.models import Ticket
+        near = self._place(op, "Near", -1.30, 36.81)
+        self._place(op, "Far", -1.10, 36.95)
+        ticket = Ticket.objects.create(operator=op, subject="Fibre down at ODP-7")
+        care, _ = api_as(Role.TENANT_CARE, op)
+        resp = care.post(reverse("ticket-dispatch", args=[ticket.id]),
+                         {"lat": "-1.30", "lng": "36.81"}, format="json")
+        assert resp.status_code == 200
+        assert resp.data["technician_id"] == near.id
+        ticket.refresh_from_db()
+        assert ticket.assigned_to_id == near.id
+
+    def test_dispatch_needs_tickets_assign(self, op):
+        from apps.ops.models import Ticket
+        self._place(op, "Near", -1.30, 36.81)
+        ticket = Ticket.objects.create(operator=op, subject="x")
+        tech, _ = api_as(Role.TENANT_TECHNICIAN, op)   # can work, cannot assign/dispatch
+        assert tech.post(reverse("ticket-dispatch", args=[ticket.id]),
+                         {"lat": "-1.3", "lng": "36.8"}, format="json").status_code == 403
+
+    def test_dispatch_with_no_live_tech_is_a_clean_409(self, op):
+        from apps.ops.models import Ticket
+        self._place(op, "Dark", -1.30, 36.81, minutes_ago=120)   # only a stale tech
+        ticket = Ticket.objects.create(operator=op, subject="x")
+        care, _ = api_as(Role.TENANT_CARE, op)
+        resp = care.post(reverse("ticket-dispatch", args=[ticket.id]),
+                         {"lat": "-1.3", "lng": "36.8"}, format="json")
+        assert resp.status_code == 409
+
+
+@pytest.mark.django_db
 class TestPrune:
     def test_prune_deletes_pings_past_the_window(self, op, settings):
         settings.FLEET_RETENTION_HOURS = 24

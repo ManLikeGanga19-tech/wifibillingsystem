@@ -1,6 +1,9 @@
 from datetime import datetime
 
 from drf_spectacular.utils import extend_schema
+from rest_framework import status
+from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -15,7 +18,8 @@ from apps.accounts.rbac import (
     TICKETS_WORK,
 )
 from apps.core.permissions import RequireTenant, TenantIsOperational
-from apps.core.schema import OBJECT_RESPONSE
+from apps.core.schema import OBJECT_REQUEST, OBJECT_RESPONSE
+from apps.core.services import audit
 from apps.core.tenancy import acting_tenant
 from apps.core.viewsets import TenantModelViewSet
 
@@ -64,6 +68,44 @@ class TicketViewSet(StatusFilterMixin, TenantModelViewSet):
     def perform_update(self, serializer):
         self._strip_assignment(serializer)
         super().perform_update(serializer)
+
+    @extend_schema(request=OBJECT_REQUEST, responses=OBJECT_RESPONSE,
+                   summary="Assign this ticket to the nearest live technician")
+    # url_path/url_name "dispatch" for a clean /tickets/<id>/dispatch/ — but the METHOD can't be
+    # named dispatch (that's the view's own request-routing method), so it's dispatch_nearest.
+    @action(detail=True, methods=["post"], url_path="dispatch", url_name="dispatch")
+    def dispatch_nearest(self, request, pk=None):
+        """Send the CLOSEST sharing technician to this fault: given the fault's coordinate, pick
+        the nearest live tech and assign them the ticket. Assigning is tickets.assign (a technician
+        can work their own ticket but can't route work), so the dispatch action requires it even
+        though the viewset's general write is tickets.work."""
+        if not request.user.has_capability(TICKETS_ASSIGN):
+            raise PermissionDenied("You don't have permission to assign tickets.")
+        from apps.fleet.services import nearest_technicians
+
+        ticket = self.get_object()
+        try:
+            lat, lng = float(request.data.get("lat")), float(request.data.get("lng"))
+        except (TypeError, ValueError):
+            return Response({"detail": "Provide the fault location (lat, lng)."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        ranked = nearest_technicians(self.get_operator(), lat, lng, live_only=True)
+        if not ranked:
+            return Response(
+                {"detail": "No technician is sharing their location right now."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        ping, dist = ranked[0]
+        ticket.assigned_to = ping.technician
+        ticket.save(update_fields=["assigned_to"])
+        audit("ticket_dispatched", operator=self.get_operator(), actor=request.user, target=ticket,
+              technician=ping.technician_id, distance_km=round(dist, 2))
+        return Response({
+            "detail": f"Dispatched to {ping.technician.name or ping.technician.phone}.",
+            "technician_id": ping.technician_id,
+            "technician_name": ping.technician.name,
+            "distance_km": round(dist, 2),
+        })
 
 
 class LeadViewSet(StatusFilterMixin, TenantModelViewSet):

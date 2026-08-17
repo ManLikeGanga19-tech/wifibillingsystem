@@ -25,6 +25,7 @@ from apps.core.tenancy import acting_tenant
 
 from .models import TechLocationPing
 from .serializers import FleetMemberSerializer, PingSerializer
+from .services import nearest_technicians
 
 
 class FleetPingView(APIView):
@@ -70,4 +71,45 @@ class FleetView(APIView):
         return Response({
             "live_window_minutes": settings.FLEET_LIVE_MINUTES,
             "members": data,
+        })
+
+
+def _parse_coord(request):
+    """(lat, lng) from the query, or None — validated to real coordinates."""
+    try:
+        lat, lng = float(request.query_params["lat"]), float(request.query_params["lng"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+        return None
+    return lat, lng
+
+
+class FleetNearestView(APIView):
+    """Live technicians ranked by distance to a coordinate — the primitive behind "dispatch
+    nearest". Dispatchers only."""
+
+    permission_classes = [IsAuthenticated, RequireTenant, TenantIsOperational,
+                          RequireCapability(FLEET_VIEW)]
+
+    @extend_schema(responses=OBJECT_RESPONSE, summary="Live technicians nearest to lat,lng")
+    def get(self, request):
+        coord = _parse_coord(request)
+        if coord is None:
+            return Response({"detail": "Provide a valid lat and lng."}, status=400)
+        ranked = nearest_technicians(acting_tenant(request), *coord, live_only=True)
+        return Response({
+            "target": {"lat": coord[0], "lng": coord[1]},
+            "count": len(ranked),
+            "technicians": [
+                {
+                    "technician_id": ping.technician_id,
+                    "name": ping.technician.name,
+                    "phone": ping.technician.phone,
+                    "lat": str(ping.lat), "lng": str(ping.lng),
+                    "recorded_at": ping.recorded_at,
+                    "distance_km": round(dist, 2),
+                }
+                for ping, dist in ranked
+            ],
         })
