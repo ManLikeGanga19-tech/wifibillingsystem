@@ -44,7 +44,8 @@ class TestEndpointAccessByRole:
             assert client_for(Role.TENANT_TECHNICIAN, op)[0].get(reverse(name)).status_code == 200
 
     def test_money_screens_are_finance_only(self, op):
-        for name in ("transaction-list", "ledger-list", "wallet-summary"):
+        # The revenue dashboard is included: hiding its nav isn't enough — the endpoint refuses too.
+        for name in ("transaction-list", "ledger-list", "wallet-summary", "dashboard-stats"):
             url = reverse(name)
             assert client_for(Role.TENANT_CARE, op)[0].get(url).status_code == 403, name
             assert client_for(Role.TENANT_TECHNICIAN, op)[0].get(url).status_code == 403, name

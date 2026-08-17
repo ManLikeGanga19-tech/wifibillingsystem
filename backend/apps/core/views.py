@@ -9,6 +9,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.models import Subscriber
+from apps.accounts.rbac import FINANCE_VIEW
 from apps.core.live import (
     SERVICE_TYPES,
     live_connection_counts,
@@ -16,7 +17,7 @@ from apps.core.live import (
     live_connections_total,
     live_counts_by_router,
 )
-from apps.core.permissions import RequireTenant, TenantIsOperational
+from apps.core.permissions import RequireCapability, RequireTenant, TenantIsOperational
 from apps.core.schema import OBJECT_RESPONSE
 from apps.core.tenancy import acting_tenant
 from apps.notifications.models import Campaign
@@ -69,7 +70,11 @@ class DashboardStatsView(APIView):
     """KPIs + chart series for the operator dashboard. One round trip, everything
     a WISP owner needs to run the business day-to-day."""
 
-    permission_classes = [IsAdminUser, RequireTenant, TenantIsOperational]
+    # The dashboard is revenue-centric (today/7d/month takings, paying users). That's finance —
+    # Owner/Admin only. Hiding the nav from Care/Technician isn't enough: a logged-in employee
+    # could read the ISP's takings straight from this endpoint, so the server refuses it here.
+    permission_classes = [IsAdminUser, RequireTenant, TenantIsOperational,
+                          RequireCapability(FINANCE_VIEW)]
 
     def get(self, request):
         op = acting_tenant(request)
