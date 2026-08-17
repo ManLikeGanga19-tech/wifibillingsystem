@@ -25,10 +25,24 @@ from django.middleware.csrf import CsrfViewMiddleware as CSRFCheck
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import SAFE_METHODS
 from rest_framework_simplejwt.authentication import JWTAuthentication
+from rest_framework_simplejwt.exceptions import InvalidToken
+from rest_framework_simplejwt.tokens import RefreshToken
 
 ACCESS_COOKIE = "wifios_access"
 REFRESH_COOKIE = "wifios_refresh"
 ACT_AS_COOKIE = "wifios_act_as"
+
+#: The session-epoch claim stamped into every token and re-checked on every request. See
+#: User.session_version / User.revoke_sessions — bumping the user's version voids old tokens.
+SESSION_CLAIM = "sver"
+
+
+def make_refresh(user):
+    """Mint a refresh token (and thus its access token) carrying the user's current session
+    epoch. Use this EVERYWHERE we issue tokens, so every token can be revoked by a version bump."""
+    token = RefreshToken.for_user(user)
+    token[SESSION_CLAIM] = user.session_version
+    return token
 
 
 def _cookie_kwargs(max_age: int) -> dict:
@@ -110,6 +124,17 @@ class CookieJWTAuthentication(JWTAuthentication):
         user = self.get_user(validated)
         self.enforce_csrf(request)  # cookie-authenticated => must prove same-origin
         return user, validated
+
+    def get_user(self, validated_token):
+        """Reject a token whose session epoch is behind the user's current one — this is what
+        makes a role downgrade or an offboarding take effect immediately, on BOTH the cookie and
+        Bearer paths (both resolve the user through here). A token minted before session_version
+        existed carries no claim → treated as 0 → still valid for an untouched user (default 0)."""
+        user = super().get_user(validated_token)
+        token_sver = validated_token.get(SESSION_CLAIM, 0) or 0
+        if token_sver != user.session_version:
+            raise InvalidToken("Your session ended — please sign in again.")
+        return user
 
     def enforce_csrf(self, request):
         """Django's own CSRF machinery, run by hand — DRF views are csrf_exempt at

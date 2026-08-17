@@ -57,6 +57,9 @@ class MeView(APIView):
                 "is_platform_staff": user.is_platform_staff,
                 "is_read_only": user.is_read_only,
                 "can_manage_money": user.can_manage_money,
+                # The resolved capability set for this role — the console hides what the API
+                # would refuse anyway. Server stays authoritative; this is only for the UI.
+                "capabilities": user.capabilities,
                 # Home tenant (the ISP this user belongs to, if any)
                 "operator": as_dict(operator),
                 # Tenant this request is acting for (platform staff can switch)

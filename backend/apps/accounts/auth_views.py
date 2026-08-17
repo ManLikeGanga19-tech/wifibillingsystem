@@ -33,11 +33,23 @@ from apps.core.services import audit
 
 from .cookie_auth import (
     REFRESH_COOKIE,
+    SESSION_CLAIM,
     clear_auth_cookies,
+    make_refresh,
     set_auth_cookies,
 )
 
 logger = logging.getLogger(__name__)
+
+
+class SessionTokenObtainPairSerializer(TokenObtainPairSerializer):
+    """Login's token pair, carrying the session epoch so it can be revoked (see cookie_auth)."""
+
+    @classmethod
+    def get_token(cls, user):
+        token = super().get_token(user)
+        token[SESSION_CLAIM] = user.session_version
+        return token
 
 
 def resolve_identifier(raw: str) -> str:
@@ -144,7 +156,7 @@ class CookieLoginView(APIView):
             "phone": identifier,
             "password": request.data.get("password") or "",
         }
-        serializer = TokenObtainPairSerializer(data=credentials)
+        serializer = SessionTokenObtainPairSerializer(data=credentials)
         try:
             serializer.is_valid(raise_exception=True)
         except Exception:
@@ -196,7 +208,7 @@ class DemoLoginView(APIView):
             return Response(
                 {"detail": "Demo is not seeded yet."}, status=status.HTTP_404_NOT_FOUND
             )
-        refresh = RefreshToken.for_user(user)
+        refresh = make_refresh(user)
         csrf_token = get_token(request)
         resp = Response({"detail": "Welcome to the demo.", "csrf_token": csrf_token})
         return set_auth_cookies(resp, access=str(refresh.access_token), refresh=str(refresh))
@@ -239,7 +251,7 @@ class CookieRefreshView(APIView):
             return clear_auth_cookies(
                 Response({"detail": "Session expired."}, status=status.HTTP_401_UNAUTHORIZED)
             )
-        fresh = RefreshToken.for_user(user)
+        fresh = make_refresh(user)
         resp = Response({"detail": "Refreshed."})
         return set_auth_cookies(resp, access=str(fresh.access_token), refresh=str(fresh))
 
@@ -298,9 +310,13 @@ class ChangePasswordView(APIView):
 
         user.set_password(new_password)
         user.save(update_fields=["password"])
+        # Void every OTHER session this account has (a changed password should log out the phone
+        # that was left logged in). THIS session survives — the fresh tokens below carry the new
+        # epoch. Bump before minting so make_refresh reads the incremented version.
+        user.revoke_sessions()
         audit("password_changed", operator=getattr(user, "operator", None), actor=user, target=user)
 
         # Keep them signed in on THIS session, on freshly-minted tokens.
-        refresh = RefreshToken.for_user(user)
+        refresh = make_refresh(user)
         resp = Response({"detail": "Your password was changed."})
         return set_auth_cookies(resp, access=str(refresh.access_token), refresh=str(refresh))

@@ -147,6 +147,43 @@ class NotBillingLocked(BasePermission):
         return not is_locked(operator)
 
 
+class RequireCapability(BasePermission):
+    """LAYER A of RBAC: gate a view on a single capability string (see accounts/rbac.py).
+
+    Usage — instantiate with the capability the view needs:
+
+        permission_classes = [IsAuthenticated, RequireTenant, RequireCapability("network.write")]
+
+    The role -> capability map is the ONE place a role's reach is defined, so a new screen adds a
+    capability + this gate and touches nothing else. Row-level ("own tickets only") and
+    field-level ("status not amounts") scoping are separate layers (get_queryset / serializer);
+    this only answers "may this role perform this action at all".
+
+    Pass `read=<other_capability>` to require a LIGHTER capability on safe (GET/HEAD) requests than
+    on writes — e.g. RequireCapability("leads.write", read="leads.view") lets a technician read
+    leads while only Care/Admin may edit them.
+    """
+
+    def __init__(self, capability: str, read: str | None = None):
+        self.capability = capability
+        self.read_capability = read
+
+    def __call__(self):
+        # DRF instantiates permission_classes; we're already an instance, so return self.
+        return self
+
+    def has_permission(self, request, view):
+        user = request.user
+        if not (user and user.is_authenticated):
+            return False
+        lighter = self.read_capability and request.method in SAFE_METHODS
+        needed = self.read_capability if lighter else self.capability
+        if user.has_capability(needed):
+            return True
+        self.message = f"Your role does not allow this action ({needed})."
+        return False
+
+
 class CanManageMoney(BasePermission):
     """Withdrawals and payout destinations: the ISP OWNER, acting as themselves."""
 

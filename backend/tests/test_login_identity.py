@@ -138,14 +138,18 @@ class TestEmailIsUnique:
 
 
 class TestOneRoleOnTheIspSide:
-    def test_the_tenant_sub_roles_are_gone(self):
-        """They bought us nothing: a sub-role that cannot touch money, routers or
-        plans can barely do anything, while every screen and permission check had to
-        carry the branching anyway."""
+    def test_the_generic_tenant_sub_roles_stay_gone(self):
+        """The GUESS roles that bought us nothing — a sub-role that couldn't touch money,
+        routers or plans — stay dead. Their designed replacements (admin/care/technician) are
+        different: each maps to a concrete job and its reach lives in one capability map
+        (accounts/rbac.py), not scattered branching. See TestCapabilityMap in test_rbac.py."""
         values = {value for value, _ in Role.choices}
         assert "tenant_manager" not in values
         assert "tenant_support" not in values
-        assert values == {"platform_owner", "platform_support", "tenant_owner"}
+        assert values == {
+            "platform_owner", "platform_support",
+            "tenant_owner", "tenant_admin", "tenant_care", "tenant_technician",
+        }
 
     def test_an_isp_login_is_an_owner_and_may_move_its_own_money(self):
         owner = UserFactory(operator=OperatorFactory(), role=Role.TENANT_OWNER)

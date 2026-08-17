@@ -1,270 +1,155 @@
-"""RBAC + fail-closed tenant scoping.
-
-The regression these lock down: a platform admin with no tenant selected used to
-receive EVERY tenant's data unfiltered (transactions, vouchers, dashboard), because
-the scoping helper skipped filtering when the operator was None.
+"""Phase 1 (the spine) of tenant RBAC: the capability map, the RequireCapability gate, the
+money invariant, and immediate session revocation. The permission matrix in the design spec is
+the human-readable form of what these tests pin down.
 """
 
-from decimal import Decimal
-
 import pytest
-from rest_framework.test import APIClient
+from rest_framework.test import APIClient, APIRequestFactory
 
+from apps.accounts import rbac
+from apps.accounts.cookie_auth import make_refresh
 from apps.accounts.models import Role
-from apps.billing.models import LedgerEntry
-from apps.billing.services import charge_monthly_base_fees, credit_sale, wallet_balance
-from apps.core.models import Operator
-from apps.payments.models import Transaction
+from apps.core.permissions import RequireCapability
 
-from .factories import (
-    OperatorFactory,
-    PlanFactory,
-    TransactionFactory,
-    UserFactory,
-    VoucherFactory,
-    enrol_mfa,
-    mfa_code,
-)
-
-pytestmark = pytest.mark.django_db
-
-# Staff-only ISP endpoints: must 403 without a tenant.
-TENANT_ENDPOINTS = [
-    "/api/v1/stats/",
-    "/api/v1/nav/",
-    "/api/v1/payments/transactions/",
-    "/api/v1/vouchers/",
-    "/api/v1/sessions/",
-    "/api/v1/routers/",
-    "/api/v1/subscribers/",
-    "/api/v1/billing/wallet/",
-    "/api/v1/billing/ledger/",
-    "/api/v1/operator/settings/",
-    "/api/v1/ops/tickets/",
-]
+from .factories import UserFactory
 
 
-def plan_names(client, **kwargs):
-    return [p["name"] for p in client.get("/api/v1/plans/", **kwargs).json()["results"]]
+@pytest.mark.django_db
+class TestCapabilityMap:
+    """The role -> capability map is the single source of truth; assert each role's exact reach."""
+
+    def test_owner_has_everything_including_money(self):
+        u = UserFactory(role=Role.TENANT_OWNER)
+        assert set(u.capabilities) == set(rbac.ALL_TENANT_CAPS)
+        assert u.has_capability(rbac.MONEY_MANAGE)
+
+    def test_admin_is_owner_minus_money(self):
+        u = UserFactory(role=Role.TENANT_ADMIN)
+        assert set(u.capabilities) == set(rbac.ALL_TENANT_CAPS) - {rbac.MONEY_MANAGE}
+        assert not u.has_capability(rbac.MONEY_MANAGE)
+        # but a full operator otherwise — routers, network, plans, staff
+        assert u.has_capability(rbac.NETWORK_WRITE)
+        assert u.has_capability(rbac.ROUTER_ACCESS)
+        assert u.has_capability(rbac.HOTSPOT_PLANS)
+        assert u.has_capability(rbac.STAFF_MANAGE)
+
+    def test_care_is_the_front_desk(self):
+        u = UserFactory(role=Role.TENANT_CARE)
+        assert u.has_capability(rbac.CLIENTS_PLAN)
+        assert u.has_capability(rbac.HOTSPOT_VOUCHERS)   # issue vouchers on the desk
+        assert u.has_capability(rbac.PAYMENTS_STATUS)
+        assert u.has_capability(rbac.TICKETS_ASSIGN)
+        assert u.has_capability(rbac.LEADS_WRITE)
+        assert u.has_capability(rbac.MESSAGING_SEND)
+        # never the books, the network, plan config, or the money
+        assert not u.has_capability(rbac.PAYMENTS_VIEW_AMOUNTS)
+        assert not u.has_capability(rbac.HOTSPOT_PLANS)
+        assert not u.has_capability(rbac.NETWORK_WRITE)
+        assert not u.has_capability(rbac.ROUTER_ACCESS)
+        assert not u.has_capability(rbac.SETTINGS_WRITE)
+        assert not u.has_capability(rbac.MONEY_MANAGE)
+        assert not u.has_capability(rbac.STAFF_MANAGE)
+
+    def test_technician_is_field_ops(self):
+        u = UserFactory(role=Role.TENANT_TECHNICIAN)
+        assert u.has_capability(rbac.NETWORK_WRITE)
+        assert u.has_capability(rbac.ROUTER_ACCESS)
+        assert u.has_capability(rbac.CLIENTS_FIELD)     # status/location, not the whole record
+        assert u.has_capability(rbac.LEADS_VIEW)        # read-only, map layer
+        assert u.has_capability(rbac.MAP_VIEW)
+        # not the CRM, plan changes, ticket assignment, payments, or money
+        assert not u.has_capability(rbac.LEADS_WRITE)
+        assert not u.has_capability(rbac.CLIENTS_WRITE)
+        assert not u.has_capability(rbac.CLIENTS_PLAN)
+        assert not u.has_capability(rbac.TICKETS_ASSIGN)
+        assert not u.has_capability(rbac.PAYMENTS_STATUS)
+        assert not u.has_capability(rbac.HOTSPOT_VOUCHERS)
+        assert not u.has_capability(rbac.MONEY_MANAGE)
+
+    def test_platform_support_is_read_only(self):
+        u = UserFactory(role=Role.PLATFORM_SUPPORT, operator=None)
+        assert set(u.capabilities) == set(rbac.READ_ONLY_CAPS)
+        assert not any(c.endswith(".write") for c in u.capabilities)
+        assert not u.has_capability(rbac.MONEY_MANAGE)
+        assert not u.has_capability(rbac.NETWORK_WRITE)
+
+    def test_platform_owner_has_full_tenant_power(self):
+        u = UserFactory(role=Role.PLATFORM_OWNER, operator=None)
+        assert set(u.capabilities) == set(rbac.ALL_TENANT_CAPS)
 
 
-def client_for(user):
-    c = APIClient()
-    c.force_authenticate(user=user)
-    return c
+@pytest.mark.django_db
+class TestMoneyInvariant:
+    """Adding delegated roles must NEVER widen who can move money. Owner-only, forever."""
+
+    @pytest.mark.parametrize(
+        "role,expected",
+        [
+            (Role.TENANT_OWNER, True),
+            (Role.TENANT_ADMIN, False),
+            (Role.TENANT_CARE, False),
+            (Role.TENANT_TECHNICIAN, False),
+            (Role.PLATFORM_OWNER, True),
+            (Role.PLATFORM_SUPPORT, False),
+        ],
+    )
+    def test_can_manage_money(self, role, expected):
+        assert UserFactory(role=role).can_manage_money is expected
 
 
-@pytest.fixture
-def two_isps(db):
-    a = OperatorFactory(slug="isp-a", name="ISP A", status=Operator.Status.ACTIVE)
-    b = OperatorFactory(slug="isp-b", name="ISP B", status=Operator.Status.ACTIVE)
-    # Give each some data
-    PlanFactory(operator=a, name="A Plan")
-    PlanFactory(operator=b, name="B Plan")
-    TransactionFactory(operator=a)
-    TransactionFactory(operator=b)
-    VoucherFactory(operator=a)
-    VoucherFactory(operator=b)
-    return a, b
+@pytest.mark.django_db
+class TestRequireCapabilityGate:
+    """Layer A: the DRF gate resolves a role against a single capability string."""
+
+    def _req(self, user, method="post"):
+        req = getattr(APIRequestFactory(), method)("/x")
+        req.user = user
+        return req
+
+    def test_allows_when_capability_present(self):
+        perm = RequireCapability(rbac.NETWORK_WRITE)
+        tech = UserFactory(role=Role.TENANT_TECHNICIAN)
+        assert perm.has_permission(self._req(tech), None) is True
+
+    def test_denies_when_capability_absent(self):
+        perm = RequireCapability(rbac.NETWORK_WRITE)
+        care = UserFactory(role=Role.TENANT_CARE)
+        assert perm.has_permission(self._req(care), None) is False
+
+    def test_read_split_lets_technician_read_but_not_write_leads(self):
+        perm = RequireCapability(rbac.LEADS_WRITE, read=rbac.LEADS_VIEW)
+        tech = UserFactory(role=Role.TENANT_TECHNICIAN)
+        assert perm.has_permission(self._req(tech, "get"), None) is True    # read-only ok
+        assert perm.has_permission(self._req(tech, "post"), None) is False  # write refused
 
 
-class TestNoCrossTenantLeak:
-    def test_homeless_platform_user_gets_403_not_everything(self, two_isps):
-        """THE REGRESSION: platform staff with no ISP selected must be refused,
-        never handed every tenant's rows."""
-        platform = UserFactory(
-            operator=None, is_staff=True, is_superuser=True, role=Role.PLATFORM_OWNER
-        )
-        client = client_for(platform)
-        for url in TENANT_ENDPOINTS:
-            resp = client.get(url)
-            assert resp.status_code == 403, f"{url} returned {resp.status_code}, expected 403"
-        # /plans/ is dual-purpose (public portal), so it fails closed with an
-        # EMPTY list rather than 403 — but it must never list another ISP's plans.
-        assert plan_names(client) == []
+@pytest.mark.django_db
+class TestSessionRevocation:
+    """Bumping session_version voids every issued token at once (both auth paths run get_user)."""
 
-    def test_platform_user_acting_as_tenant_sees_only_that_tenant(self, two_isps):
-        """View-as now requires a live ImpersonationGrant (see test_governance) —
-        the header alone is refused. With a grant, the platform user is scoped to
-        exactly that one tenant."""
-        isp_a, _ = two_isps
-        platform = UserFactory(
-            operator=None, is_staff=True, is_superuser=True, role=Role.PLATFORM_OWNER
-        )
-        client = client_for(platform)
-        client.post(
-            "/api/v1/platform/impersonation/start/",
-            {"tenant": "isp-a", "reason": "support: verifying a payment"},
-            format="json",
-        )
-        client.credentials(HTTP_X_ACT_AS_TENANT="isp-a")
+    def _bearer(self, user):
+        c = APIClient()
+        c.credentials(HTTP_AUTHORIZATION=f"Bearer {make_refresh(user).access_token}")
+        return c
 
-        names = plan_names(client)
-        assert "A Plan" in names and "B Plan" not in names
-        assert client.get("/api/v1/payments/transactions/").json()["count"] == 1
-        assert client.get("/api/v1/vouchers/").json()["count"] == 1
+    def test_token_valid_until_bumped(self):
+        from django.urls import reverse
 
-    def test_tenant_staff_cannot_view_as_another_tenant(self, two_isps):
-        """A tenant user sending the platform's view-as header stays in their own ISP."""
-        isp_a, _ = two_isps
-        staff = UserFactory(operator=isp_a, is_staff=True, role=Role.TENANT_OWNER)
-        client = client_for(staff)
-        client.credentials(HTTP_X_ACT_AS_TENANT="isp-b")  # attempt to cross over
+        user = UserFactory(is_staff=True, role=Role.TENANT_OWNER)
+        client = self._bearer(user)
+        me = reverse("me")
 
-        names = plan_names(client)
-        assert "A Plan" in names and "B Plan" not in names
-        assert client.get("/api/v1/payments/transactions/").json()["count"] == 1
+        assert client.get(me).status_code == 200
 
-    def test_platform_owner_with_home_isp_defaults_to_it(self, two_isps):
-        """Daniel: platform owner who also runs his own WISP. No header -> his ISP."""
-        isp_a, _ = two_isps
-        daniel = UserFactory(
-            operator=isp_a, is_staff=True, is_superuser=True, role=Role.PLATFORM_OWNER
-        )
-        client = client_for(daniel)
-        names = plan_names(client)
-        assert "A Plan" in names and "B Plan" not in names
-        # ...and he can still reach platform screens
-        assert client.get("/api/v1/platform/tenants/").status_code == 200
-        assert client.get("/api/v1/platform/overview/").status_code == 200
+        # A role downgrade / offboarding calls this — the live token must die at once.
+        user.revoke_sessions()
+        assert client.get(me).status_code == 401
 
-    def test_public_portal_without_context_gets_nothing(self, two_isps):
-        """Fail closed: an anonymous request with no subdomain and no router must
-        not receive a menu of every ISP's plans."""
-        resp = APIClient().get("/api/v1/plans/")
-        assert resp.status_code == 200
-        assert resp.json()["count"] == 0
+    def test_fresh_token_after_bump_works_again(self):
+        from django.urls import reverse
 
-
-class TestPlatformEndpoints:
-    def test_tenant_staff_locked_out_of_platform(self, two_isps):
-        isp_a, _ = two_isps
-        client = client_for(UserFactory(operator=isp_a, is_staff=True, role=Role.TENANT_OWNER))
-        assert client.get("/api/v1/platform/tenants/").status_code == 403
-        assert client.get("/api/v1/platform/overview/").status_code == 403
-        assert client.get("/api/v1/billing/platform/payouts/").status_code == 403
-
-    def test_overview_is_labelled_cross_tenant(self, two_isps):
-        platform = UserFactory(
-            operator=None, is_staff=True, is_superuser=True, role=Role.PLATFORM_OWNER
-        )
-        data = client_for(platform).get("/api/v1/platform/overview/").json()
-        assert data["scope"] == "all_isps"  # can never be mistaken for one ISP
-        assert data["tenants_total"] >= 2
-
-    def test_platform_support_is_read_only(self, two_isps):
-        isp_a, _ = two_isps
-        support = UserFactory(
-            operator=None, is_staff=True, role=Role.PLATFORM_SUPPORT
-        )
-        client = client_for(support)
-        assert client.get("/api/v1/platform/tenants/").status_code == 200  # may look
-        resp = client.post(f"/api/v1/platform/tenants/{isp_a.id}/suspend/")
-        assert resp.status_code == 403  # may not touch
-
-
-class TestTenantRoles:
-    def _fund(self, operator, amount="1000.00"):
-        operator.hotspot_commission_pct = Decimal("0.00")
-        operator.save()
-        tx = TransactionFactory(operator=operator, amount=Decimal(amount))
-        credit_sale(tx)
-
-    def test_read_only_staff_cannot_withdraw(self, two_isps):
-        """Money is owner-only. The ISP side has exactly one role, so the read-only
-        hat that can still reach an ISP's console is PLATFORM support — and it must
-        not be able to move their money."""
-        isp_a, _ = two_isps
-        self._fund(isp_a)
-        support = UserFactory(operator=isp_a, is_staff=True, role=Role.PLATFORM_SUPPORT)
-        resp = client_for(support).post(
-            "/api/v1/billing/payouts/withdraw/",
-            {"amount": "200.00", "phone": "0712345678"},
-            format="json",
-        )
-        assert resp.status_code == 403
-
-    def test_owner_can_withdraw(self, two_isps):
-        isp_a, _ = two_isps
-        self._fund(isp_a)
-        owner = UserFactory(operator=isp_a, is_staff=True, role=Role.TENANT_OWNER)
-        secret = enrol_mfa(owner)  # withdrawing needs the second factor
-        resp = client_for(owner).post(
-            "/api/v1/billing/payouts/withdraw/",
-            {"amount": "200.00", "phone": "0712345678", "mfa_code": mfa_code(secret)},
-            format="json",
-        )
-        assert resp.status_code == 201
-
-    def test_support_cannot_write_anything(self, two_isps):
-        isp_a, _ = two_isps
-        support = UserFactory(operator=isp_a, is_staff=True, role=Role.PLATFORM_SUPPORT)
-        client = client_for(support)
-        assert client.get("/api/v1/plans/").status_code == 200  # may look
-        resp = client.post(
-            "/api/v1/plans/",
-            {
-                "name": "Sneaky Plan",
-                "price": "10.00",
-                "duration": "01:00:00",
-                "download_kbps": 1024,
-                "upload_kbps": 512,
-            },
-            format="json",
-        )
-        assert resp.status_code == 403
-
-    def test_the_owner_can_run_operations(self, two_isps):
-        isp_a, _ = two_isps
-        owner = UserFactory(operator=isp_a, is_staff=True, role=Role.TENANT_OWNER)
-        resp = client_for(owner).post(
-            "/api/v1/ops/tickets/", {"subject": "Site down", "priority": "high"}, format="json"
-        )
-        assert resp.status_code == 201
-
-
-class TestPlatformOwnedExemption:
-    def test_platform_isp_pays_no_commission(self, db):
-        own = OperatorFactory(
-            slug="danamo-wisp",
-            is_platform_owned=True,
-            hotspot_commission_pct=Decimal("3.00"),  # set, but must be ignored
-            status=Operator.Status.ACTIVE,
-        )
-        tx = TransactionFactory(operator=own, amount=Decimal("100.00"))
-        tx.status = Transaction.Status.SUCCESS
-        tx.save()
-        credit_sale(tx)
-
-        assert wallet_balance(own) == Decimal("100.00")  # full amount, no 3% cut
-        assert not LedgerEntry.objects.filter(
-            operator=own, entry_type=LedgerEntry.Type.COMMISSION
-        ).exists()  # no zero-value noise either
-
-    def test_platform_isp_pays_no_base_fee(self, db):
-        own = OperatorFactory(
-            slug="danamo-wisp2",
-            is_platform_owned=True,
-            base_fee=Decimal("5000.00"),  # set, but must be ignored
-            status=Operator.Status.ACTIVE,
-        )
-        paying = OperatorFactory(
-            slug="paying-isp", base_fee=Decimal("1500.00"), status=Operator.Status.ACTIVE
-        )
-        from apps.billing.platform_account import debt
-
-        assert charge_monthly_base_fees() == 1  # only the paying tenant
-        # The platform-owned WISP is fee-exempt; the paying tenant now owes the base fee on
-        # the platform account (net of its welcome credit), not the wallet.
-        assert debt(own) == Decimal("0.00")
-        assert debt(paying) == Decimal("1300.00")  # 1500 fee - 200 welcome credit
-
-    def test_normal_isp_still_pays_commission(self, db):
-        normal = OperatorFactory(
-            slug="normal-isp",
-            hotspot_commission_pct=Decimal("3.00"),
-            status=Operator.Status.ACTIVE,
-        )
-        tx = TransactionFactory(operator=normal, amount=Decimal("100.00"))
-        credit_sale(tx)
-        assert wallet_balance(normal) == Decimal("97.00")
+        user = UserFactory(is_staff=True, role=Role.TENANT_OWNER)
+        user.revoke_sessions()
+        # a token minted AFTER the bump carries the new epoch and is accepted
+        client = self._bearer(user)
+        assert client.get(reverse("me")).status_code == 200

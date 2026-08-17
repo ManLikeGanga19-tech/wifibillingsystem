@@ -28,27 +28,43 @@ class UserManager(BaseUserManager):
 class Role(models.TextChoices):
     """Who you are decides what you may do.
 
-    PLATFORM roles (Danamo Tech) act across tenants. The TENANT side has exactly ONE
-    role: the ISP owner.
+    PLATFORM roles (Danamo Tech) act across tenants. The TENANT side has an OWNER plus a
+    designed set of delegated workforce roles.
 
-    We shipped tenant_manager and tenant_support and then retired them. They were a
-    guess at what ISPs would want, and they bought us nothing: a sub-role that cannot
-    touch money, routers or plans can barely do anything, while every screen, test and
-    permission check had to carry the branching anyway. An ISP that wants a second pair
-    of hands gives them an owner login; if a real demand for delegated access shows up,
-    it comes back as a designed feature (scoped invites, audited), not as three enum
-    values nobody asked for.
+    HISTORY (read before adding a role): we once shipped generic tenant_manager and
+    tenant_support and retired them — a sub-role that cannot touch money, routers or plans
+    could barely do anything, while every screen, test and permission check carried the
+    branching anyway. The delegated roles below (admin / care / technician) are the "real
+    demand, designed feature" that retirement asked for: each maps to a concrete job, and
+    their reach lives in ONE capability map (accounts/rbac.py), not in scattered if-branches.
+    Admin differs from those dead roles because it CAN touch routers, plans and network — it is
+    a full operator minus moving money, which is a genuine, useful distinction.
     """
 
     # Platform (Danamo Tech)
     PLATFORM_OWNER = "platform_owner", "Platform owner"
     PLATFORM_SUPPORT = "platform_support", "Platform support (read-only)"
-    # Tenant (an ISP) — one role, on purpose.
-    TENANT_OWNER = "tenant_owner", "ISP owner"
+    # Tenant (an ISP): the owner, plus delegated workforce roles (see rbac.py for their reach).
+    # See rbac.py for each role's reach:
+    TENANT_OWNER = "tenant_owner", "ISP owner"                  # everything, incl. money
+    TENANT_ADMIN = "tenant_admin", "ISP administrator"          # full console except moving money
+    TENANT_CARE = "tenant_care", "Customer care"                # front desk: clients/tickets
+    TENANT_TECHNICIAN = "tenant_technician", "Technician"  # field ops: map/plant/tickets
 
     @classmethod
     def platform_roles(cls):
         return {cls.PLATFORM_OWNER, cls.PLATFORM_SUPPORT}
+
+    @classmethod
+    def tenant_roles(cls):
+        return {cls.TENANT_OWNER, cls.TENANT_ADMIN, cls.TENANT_CARE, cls.TENANT_TECHNICIAN}
+
+    @classmethod
+    def staff_manageable_roles(cls):
+        """Roles an Owner/Admin may assign when creating an employee — never a platform hat,
+        and (deliberately) never Owner: ownership transfer is its own audited action, not a
+        dropdown in the staff screen."""
+        return {cls.TENANT_ADMIN, cls.TENANT_CARE, cls.TENANT_TECHNICIAN}
 
     @classmethod
     def read_only_roles(cls):
@@ -94,6 +110,13 @@ class User(AbstractBaseUser, PermissionsMixin):
     #: buys the real owner time to see the email and shout.
     mfa_reset_at = models.DateTimeField(null=True, blank=True)
 
+    #: Monotonic session epoch. It is stamped into every issued JWT (the `sver` claim) and
+    #: checked on every request — a token whose `sver` is behind the user's current value is
+    #: rejected (401), forcing a fresh login. Bumping it (see `revoke_sessions`) instantly voids
+    #: every token that user holds: this is how a role downgrade or an offboarding takes effect
+    #: NOW instead of whenever a short-lived token happened to expire.
+    session_version = models.PositiveIntegerField(default=0)
+
     objects = UserManager()
 
     USERNAME_FIELD = "phone"
@@ -134,8 +157,33 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     @property
     def can_manage_money(self) -> bool:
-        """Withdrawals and payout decisions: owners only."""
+        """Withdrawals and payout decisions: owners only. Admin is deliberately excluded —
+        adding delegated roles never widens who can move money."""
         return self.role in (Role.PLATFORM_OWNER, Role.TENANT_OWNER)
+
+    def has_capability(self, capability: str) -> bool:
+        """Does this user's role grant `capability` (see accounts/rbac.py)? The one check
+        every RequireCapability gate and every UI guard resolves through."""
+        from .rbac import has_capability
+
+        return has_capability(self, capability)
+
+    @property
+    def capabilities(self) -> list[str]:
+        """The resolved capability set, sorted — shipped to the console via /me/ so the UI hides
+        what the API would refuse anyway."""
+        from .rbac import capabilities_for
+
+        return sorted(capabilities_for(self))
+
+    def revoke_sessions(self):
+        """Invalidate every JWT this user currently holds — NOW. Call on role change, offboarding,
+        password reset, or a forced 2FA change. Bumps session_version atomically (F-expression, so
+        concurrent requests can't lose a bump) and refreshes the in-memory copy."""
+        from django.db.models import F
+
+        type(self).objects.filter(pk=self.pk).update(session_version=F("session_version") + 1)
+        self.refresh_from_db(fields=["session_version"])
 
 
 class Subscriber(models.Model):
