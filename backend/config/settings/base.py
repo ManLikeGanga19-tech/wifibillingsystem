@@ -34,6 +34,7 @@ INSTALLED_APPS = [
     "apps.loyalty",
     "apps.maps",
     "apps.fibre",
+    "apps.fleet",
     "apps.signup",
     "apps.assistant",
     "apps.developer",
@@ -148,6 +149,9 @@ REST_FRAMEWORK = {
         "login": "10/min",
         "stk-push": "10/min",
         "voucher-redeem": "15/min",
+        # A technician's device streams location every ~45s; allow bursts on movement but bound it
+        # so a runaway client (or a stolen tech session) can't hammer the endpoint.
+        "fleet-ping": "20/min",
         # Anonymous, and answers questions about a NAMED customer — the natural place to
         # enumerate an ISP's whole base. Tight, and paired with a phone-digits check.
         "account-lookup": "10/min",
@@ -192,6 +196,12 @@ SPECTACULAR_SETTINGS = {
         "GatewayMode": "apps.core.enums.GATEWAY_MODE_CHOICES",
     },
 }
+
+# Fleet tracking (technician location). How long a breadcrumb trail is kept before the nightly
+# prune deletes it, and how fresh a ping must be to read as "live" on the dispatch map. Both
+# env-overridable so an ISP can tighten retention or widen the live window for sparse rural pings.
+FLEET_RETENTION_HOURS = int(os.getenv("FLEET_RETENTION_HOURS", "24"))
+FLEET_LIVE_MINUTES = int(os.getenv("FLEET_LIVE_MINUTES", "10"))
 
 # Celery
 CELERY_BROKER_URL = REDIS_URL
@@ -252,6 +262,12 @@ CELERY_BEAT_SCHEDULE = {
     "cancel-stale-suspended-pppoe": {
         "task": "apps.pppoe.tasks.cancel_stale_suspended_pppoe_clients",
         "schedule": crontab(minute=50, hour=6),  # after the suspend sweep
+    },
+    # Fleet tracking: delete technician location pings older than the retention window, so there
+    # is never a permanent movement archive. Nightly, off-peak.
+    "prune-location-pings": {
+        "task": "apps.fleet.tasks.prune_location_pings",
+        "schedule": crontab(minute=20, hour=3),
     },
     "remind-pppoe-expiry": {
         "task": "apps.pppoe.tasks.remind_pppoe_expiry",

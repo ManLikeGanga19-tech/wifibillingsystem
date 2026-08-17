@@ -46,6 +46,8 @@ STAFF_MANAGE = "staff.manage"
 RBAC_MANAGE = "rbac.manage"             # NON-DELEGABLE — edit role permissions, Owner only
 MAP_VIEW = "map.view"
 BUSINESS_LOCATION_WRITE = "business_location.write"
+FLEET_SHARE = "fleet.share"               # report your OWN live location (the field technician)
+FLEET_VIEW = "fleet.view"                 # see the technician fleet + dispatch (the dispatcher)
 
 #: Everything a tenant can do — the Owner's full set; every other role is a subset.
 ALL_TENANT_CAPS = frozenset({
@@ -59,6 +61,7 @@ ALL_TENANT_CAPS = frozenset({
     MESSAGING_SEND, MESSAGING_CONFIG,
     SETTINGS_WRITE, STAFF_MANAGE, RBAC_MANAGE,
     MAP_VIEW, BUSINESS_LOCATION_WRITE,
+    FLEET_SHARE, FLEET_VIEW,
 })
 
 #: Powers that stay with the Owner and can NEVER be handed to a delegated role.
@@ -83,6 +86,7 @@ _CARE = frozenset({
     TICKETS_VIEW, TICKETS_WORK, TICKETS_ASSIGN,
     PAYMENTS_STATUS,
     MESSAGING_SEND, MAP_VIEW,
+    FLEET_VIEW,                      # Care dispatches — sees the fleet, does not report
 })
 
 _TECHNICIAN = frozenset({
@@ -91,6 +95,7 @@ _TECHNICIAN = frozenset({
     TICKETS_VIEW, TICKETS_WORK,
     LEADS_VIEW,
     MAP_VIEW,
+    FLEET_SHARE,                      # the field tech reports position; does NOT see the fleet
 })
 
 #: role -> recommended capability set. Only the delegated roles are editable; Owner/platform are
@@ -120,6 +125,8 @@ CAPABILITY_CATALOG = [
     ("Network", HOTSPOT_PLANS, "Create & price plans"),
     ("Network", MAP_VIEW, "Open the map"),
     ("Network", BUSINESS_LOCATION_WRITE, "Set the business location"),
+    ("Field ops", FLEET_SHARE, "Share my location with dispatch"),
+    ("Field ops", FLEET_VIEW, "See the technician fleet + dispatch"),
     ("Tickets", TICKETS_VIEW, "See tickets"),
     ("Tickets", TICKETS_WORK, "Work / resolve tickets"),
     ("Tickets", TICKETS_ASSIGN, "Assign tickets to technicians"),
