@@ -49,6 +49,37 @@ function reason(err: unknown): string {
   return 'Could not get your location — allow location access, or click the map.';
 }
 
+/**
+ * Live-follow the device position (the map's "you are here" blue dot). Uses watchPosition with
+ * high accuracy so the dot tracks movement, but the FIRST fix comes from getPosition()'s
+ * coarse+precise race so the dot appears fast instead of waiting on a cold GPS lock. Returns a
+ * stop() to clear the watch. Errors are reported via onError with the same actionable messages.
+ */
+export function watchPosition(
+  onFix: (c: Coords) => void,
+  onError: (msg: string) => void,
+): () => void {
+  let stopped = false;
+  let watchId: number | null = null;
+
+  // Fast first fix (may be coarse) so the dot shows immediately.
+  getPosition().then((c) => { if (!stopped) onFix(c); }).catch((e) => {
+    if (!stopped) onError(e instanceof Error ? e.message : 'Could not get your location.');
+  });
+
+  if (navigator.geolocation) {
+    watchId = navigator.geolocation.watchPosition(
+      (p) => { if (!stopped) onFix({ lat: p.coords.latitude, lng: p.coords.longitude, accuracy: p.coords.accuracy }); },
+      (e) => { if (!stopped) onError(reason(e)); },
+      HIGH,
+    );
+  }
+  return () => {
+    stopped = true;
+    if (watchId != null) navigator.geolocation.clearWatch(watchId);
+  };
+}
+
 export async function getPosition(): Promise<Coords> {
   if (!window.isSecureContext) {
     throw new Error('Location only works over HTTPS — open the site with https://, not http://.');

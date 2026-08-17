@@ -4,10 +4,10 @@ import { maplibregl } from '../utils/maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import {
   MapPin, RadioTower, Router as RouterIcon, Home, UserPlus, Loader2, AlertTriangle,
-  Satellite, Map as MapGlyph, Flame, Building2, X,
+  Satellite, Map as MapGlyph, Flame, Building2, X, LocateFixed,
 } from 'lucide-react';
 import { api, type MapData, type MapLayer, type MapPoint } from '../api/client';
-import { getPosition } from '../utils/geolocate';
+import { getPosition, watchPosition } from '../utils/geolocate';
 import MapPicker from './MapPicker';
 import { toast } from './ui';
 
@@ -101,6 +101,47 @@ export default function MapView({ onNavigate }: { onNavigate: (tab: string) => v
   const [mapReady, setMapReady] = useState(false);
   const addedRef = useRef(false);
 
+  // "You are here" live dot (our own control — see the map-create effect for why not GeolocateControl).
+  const dotRef = useRef<maplibregl.Marker | null>(null);
+  const watchStopRef = useRef<(() => void) | null>(null);
+  const [locating, setLocating] = useState(false); // waiting on the first fix
+  const [tracking, setTracking] = useState(false); // dot is live and following
+
+  const stopLocate = () => {
+    watchStopRef.current?.();
+    watchStopRef.current = null;
+    dotRef.current?.remove();
+    dotRef.current = null;
+    setTracking(false);
+    setLocating(false);
+  };
+
+  const toggleLocate = () => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (tracking || locating) { stopLocate(); return; }
+    setLocating(true);
+    let first = true;
+    watchStopRef.current = watchPosition(
+      ({ lat, lng }) => {
+        setLocating(false);
+        setTracking(true);
+        if (!dotRef.current) {
+          const el = document.createElement('div');
+          el.className = 'wifios-here-dot';
+          dotRef.current = new maplibregl.Marker({ element: el }).setLngLat([lng, lat]).addTo(map);
+        } else {
+          dotRef.current.setLngLat([lng, lat]);
+        }
+        if (first) { map.flyTo({ center: [lng, lat], zoom: 15, duration: 0 }); first = false; }
+      },
+      (msg) => { stopLocate(); toast('error', msg); },
+    );
+  };
+
+  // Tear the watch down if the component unmounts mid-track.
+  useEffect(() => () => { watchStopRef.current?.(); }, []);
+
   useEffect(() => {
     api.map.points().then(setData).catch(() => setError('Could not load the map data.'));
   }, []);
@@ -115,17 +156,10 @@ export default function MapView({ onNavigate }: { onNavigate: (tab: string) => v
     });
     mapRef.current = map;
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
-    // "You are here" — a live blue dot that FOLLOWS the viewer as they move (watchPosition
-    // under the hood), with a heading arrow. This is the technician seeing where they stand
-    // in the field, relative to the towers/clients/ADSS around them. Client-side only; needs
-    // HTTPS (staging :8443 / localhost) and the one-time browser location prompt.
-    map.addControl(new maplibregl.GeolocateControl({
-      // A timeout + maximumAge so a device without a quick GPS fix doesn't hang or hard-fail;
-      // a recent cached position answers instantly on repeated taps.
-      positionOptions: { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 },
-      trackUserLocation: true,
-      showAccuracyCircle: true,
-    }), 'top-right');
+    // The "you are here" dot is driven by our own Locate button (toggleLocate) rather than
+    // MapLibre's GeolocateControl: that control fires ONE high-accuracy request, which spins
+    // forever on a desktop with no GPS. Our watchPosition() races a coarse network fix so the
+    // dot appears fast and then follows movement — the same path the form "use my location" uses.
     const ro = new ResizeObserver(() => map.resize());
     ro.observe(holder.current);
     map.on('load', () => {
@@ -297,6 +331,16 @@ export default function MapView({ onNavigate }: { onNavigate: (tab: string) => v
             <Flame className="h-3.5 w-3.5" /> Heatmap
           </button>
           <button
+            onClick={toggleLocate}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold font-mono uppercase border cursor-pointer ${
+              tracking || locating ? 'bg-[#2563EB] text-white border-[#2563EB]' : 'bg-white text-[#141414]/60 border-[#141414]/40'
+            }`}
+            title="Show where you're standing — a live dot that follows you"
+          >
+            {locating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <LocateFixed className="h-3.5 w-3.5" />}
+            {tracking ? 'Locating' : locating ? 'Finding…' : 'Locate me'}
+          </button>
+          <button
             onClick={() => setBasemap((b) => (b === 'streets' ? 'satellite' : 'streets'))}
             className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold font-mono uppercase border border-[#141414] bg-[#141414] text-white cursor-pointer"
             title="Switch between street and satellite view"
@@ -382,11 +426,30 @@ export default function MapView({ onNavigate }: { onNavigate: (tab: string) => v
             ))}
           </div>
           <p className="text-[10px] text-[#141414]/45 mt-2.5 leading-relaxed">
-            Hover a pin for details · click to open the record · tap the ◎ locate button to
-            show where you&apos;re standing.
+            Hover a pin for details · click to open the record · tap <b>Locate me</b> to show
+            where you&apos;re standing (a live blue dot that follows you).
           </p>
         </aside>
       </div>
+
+      {/* The live "you are here" dot — a blue disc with a soft radar pulse. */}
+      <style>{`
+        .wifios-here-dot {
+          width: 16px; height: 16px; border-radius: 50%;
+          background: #2563EB; border: 3px solid #fff;
+          box-shadow: 0 0 0 2px rgba(37,99,235,.45);
+        }
+        .wifios-here-dot::before {
+          content: ''; position: absolute; left: 50%; top: 50%;
+          width: 16px; height: 16px; border-radius: 50%;
+          transform: translate(-50%, -50%); background: rgba(37,99,235,.35);
+          animation: wifios-here-pulse 2s ease-out infinite;
+        }
+        @keyframes wifios-here-pulse {
+          0% { width: 16px; height: 16px; opacity: .6; }
+          100% { width: 60px; height: 60px; opacity: 0; }
+        }
+      `}</style>
     </div>
   );
 }
