@@ -24,10 +24,12 @@ import {
   Wifi as WifiIcon,
   RadioTower,
   Map as MapIcon,
+  UsersRound,
+  ShieldAlert,
 } from 'lucide-react';
 
 import { BandwidthProfile, Subscriber, OutboundCampaign } from './types';
-import { api, ApiPlan, ApiTenant, demoLogin, keepSessionFresh, logout, Me, NavCounts, setOnSessionExpired, setOnConnectionChange } from './api/client';
+import { api, ApiPlan, ApiTenant, demoLogin, keepSessionFresh, logout, Me, NavCounts, Role, Capability, can, ROLE_META, setOnSessionExpired, setOnConnectionChange } from './api/client';
 import { planToProfile, profileToPlan, campaignToUi, subscriberToUi } from './api/mappers';
 import { useHashRoute } from './utils/useHashRoute';
 import { toast, ToastHost } from './components/ui';
@@ -59,6 +61,8 @@ import NetworkView from './components/NetworkView';
 import SettingsView from './components/SettingsView';
 import WalletView from './components/WalletView';
 import ReportsView from './components/ReportsView';
+import StaffView from './components/StaffView';
+import ForcedPasswordChange from './components/ForcedPasswordChange';
 
 // ---- navigation model -------------------------------------------------------
 
@@ -84,7 +88,8 @@ type TabId =
   | 'pppoe_plans'
   | 'pppoe_invoices'
   | 'network'
-  | 'map';
+  | 'map'
+  | 'team';
 
 /** Every section the URL is allowed to name. Anything else in the hash is somebody
  *  typing, or a stale link to a renamed page — fall back rather than render blank. */
@@ -92,8 +97,43 @@ const KNOWN_TABS: ReadonlySet<TabId> = new Set<TabId>([
   'dashboard', 'active_users', 'users', 'tickets', 'leads', 'packages', 'payments',
   'vouchers', 'expenses', 'messages', 'emails', 'campaigns', 'mikrotik', 'equipment',
   'settings', 'wallet', 'reports', 'pppoe_clients', 'pppoe_plans', 'pppoe_invoices',
-  'network', 'map',
+  'network', 'map', 'team',
 ]);
+
+/** RBAC (mirrors backend accounts/rbac.py): the capability a tab needs to appear + open. null =
+ *  visible to every signed-in user. The server is authoritative; this only decides what to SHOW. */
+const TAB_CAPABILITY: Record<TabId, Capability | null> = {
+  dashboard: 'finance.view',
+  map: 'map.view',
+  active_users: 'clients.view',
+  users: 'clients.view',
+  tickets: 'tickets.view',
+  leads: 'leads.view',
+  pppoe_clients: 'clients.view',
+  pppoe_plans: 'hotspot.plans',
+  pppoe_invoices: 'finance.view',
+  network: 'network.write',
+  packages: 'hotspot.plans',
+  payments: 'payments.view_amounts',
+  reports: 'finance.view',
+  vouchers: 'hotspot.vouchers',
+  wallet: 'finance.view',
+  expenses: 'finance.view',
+  messages: 'messaging.send',
+  emails: 'messaging.send',
+  campaigns: 'messaging.send',
+  mikrotik: 'router.access',
+  equipment: 'network.write',
+  settings: 'settings.write',
+  team: 'staff.manage',
+};
+
+/** Where each role lands when the console opens — its primary workspace. Owner/Admin (and platform
+ *  staff) default to the dashboard. */
+const ROLE_HOME: Partial<Record<Role, TabId>> = {
+  tenant_care: 'tickets',
+  tenant_technician: 'map',
+};
 
 interface NavItem {
   id: TabId;
@@ -156,7 +196,10 @@ const NAV_GROUPS: { title: string | null; items: NavItem[] }[] = [
   },
   {
     title: 'Setup',
-    items: [{ id: 'settings', label: 'Settings', icon: SettingsIcon }],
+    items: [
+      { id: 'team', label: 'Team', icon: UsersRound },
+      { id: 'settings', label: 'Settings', icon: SettingsIcon },
+    ],
   },
 ];
 
@@ -173,6 +216,14 @@ function consoleOrigin(subdomain: string, devPort: string): string {
   return `${protocol}//${subdomain}.${base}${port ? `:${port}` : ''}`;
 }
 const PLATFORM_CONSOLE_URL = consoleOrigin('admin', '4800');
+
+/** Should a nav item show? Platform staff see everything (they bypass capabilities on the server
+ *  too); a tenant role sees an item only if it holds the tab's capability. */
+function navVisible(me: Me | null, cap: Capability | null): boolean {
+  if (!me) return false;
+  if (me.is_platform_staff) return true;
+  return cap === null || can(me, cap);
+}
 
 export default function App() {
   // Session lives in an httpOnly cookie we cannot read, so "am I signed in?" is a
@@ -200,6 +251,14 @@ export default function App() {
   const [profiles, setProfiles] = useState<BandwidthProfile[]>([]);
   const [campaigns, setCampaigns] = useState<OutboundCampaign[]>([]);
   const [liveSubscribers, setLiveSubscribers] = useState<Subscriber[]>([]);
+
+  // Land each role on a page it can actually use: if the current tab isn't permitted for this
+  // role (a stale link, the default 'dashboard' for a technician…), send them to their home.
+  useEffect(() => {
+    if (!me || me.is_platform_staff) return;
+    const cap = TAB_CAPABILITY[activeTab];
+    if (cap && !can(me, cap)) setActiveTab(ROLE_HOME[me.role] ?? 'dashboard');
+  }, [me, activeTab, setActiveTab]);
 
   const loadNavCounts = useCallback(() => {
     api.navCounts().then(setNavCounts).catch(() => {});
@@ -384,8 +443,17 @@ export default function App() {
     );
   }
 
+  // A new hire must set their own password before anything else — the temp password is single-use.
+  if (me && me.must_change_password) {
+    return <ForcedPasswordChange me={me} onDone={() => loadMe().catch(() => {})} />;
+  }
+
   const isPlatformStaff = !!me?.is_platform_staff;
-  const navGroups = NAV_GROUPS;
+  // Show only the sections this role can use (platform staff bypass — they read everything).
+  // The server enforces access regardless; this is purely which nav items appear.
+  const navGroups = NAV_GROUPS
+    .map((g) => ({ ...g, items: g.items.filter((it) => navVisible(me, TAB_CAPABILITY[it.id])) }))
+    .filter((g) => g.items.length > 0);
   const acting = me?.acting_operator ?? null;
   // Platform staff inside an ISP that is not their own — only reachable via an
   // audited ImpersonationGrant issued by Platform Control.
@@ -532,6 +600,20 @@ export default function App() {
               </a>
             )}
 
+            {/* Who you are, front and centre — the post-login role identity. */}
+            {me && (
+              <div className="hidden sm:flex flex-col items-end leading-tight">
+                <span className="text-[11px] font-bold truncate max-w-[9rem]">{me.name || me.phone}</span>
+                <span
+                  className="text-[9px] font-mono font-bold uppercase tracking-wider px-1.5 py-0.5 text-white mt-0.5"
+                  style={{ background: ROLE_META[me.role].color }}
+                  title={`Signed in as ${ROLE_META[me.role].label}`}
+                >
+                  {ROLE_META[me.role].label}
+                </span>
+              </div>
+            )}
+
             <div className="border-l border-[#141414] pl-3 sm:pl-4 text-right">
               <div className="text-[11px] opacity-50 uppercase truncate max-w-[10rem]">
                 {acting?.name ?? me?.operator?.name ?? 'No ISP'}
@@ -550,6 +632,20 @@ export default function App() {
             </div>
           </div>
         </header>
+
+        {/* This ISP requires 2FA and this employee hasn't enrolled yet. Money actions are
+            TOTP-gated regardless; this nudges them to secure the whole account. */}
+        {me?.must_enrol_2fa && (
+          <div className="bg-[#B22222] text-white px-4 py-1.5 text-[11px] font-mono flex items-center justify-between gap-2 shrink-0">
+            <span className="flex items-center gap-2">
+              <ShieldAlert className="h-3.5 w-3.5 shrink-0" />
+              Your ISP requires two-factor authentication — set up your authenticator to secure your account.
+            </span>
+            <button onClick={() => navigate('settings', 'security')} className="underline font-bold shrink-0 cursor-pointer">
+              Set up now
+            </button>
+          </div>
+        )}
 
         {/* Read-only roles (support) can look but not touch. Say so up front —
             otherwise every write silently 403s and looks like a broken API. */}
@@ -653,6 +749,7 @@ export default function App() {
             {activeTab === 'pppoe_invoices' && <PppoeInvoicesView />}
             {activeTab === 'network' && <NetworkView />}
             {activeTab === 'map' && <MapView onNavigate={(tab) => setActiveTab(tab as TabId)} />}
+            {activeTab === 'team' && me && <StaffView me={me} />}
           </div>
         </div>
 

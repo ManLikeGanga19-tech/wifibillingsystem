@@ -478,10 +478,39 @@ export interface ApiEquipment {
 export type Role =
   | 'platform_owner'
   | 'platform_support'
-  /** The ISP side has exactly one role. tenant_manager/tenant_support were retired:
-   *  a sub-role that cannot touch money, routers or plans can barely do anything,
-   *  while every screen had to carry the branching anyway. */
-  | 'tenant_owner';
+  /** ISP side: the owner, plus the delegated workforce roles (see backend accounts/rbac.py).
+   *  Each maps to a concrete job; reach is defined by the capability map, not by branching. */
+  | 'tenant_owner'
+  | 'tenant_admin'
+  | 'tenant_care'
+  | 'tenant_technician';
+
+/** A capability string the server grants a role (resource.action). The console hides what the
+ *  API would refuse anyway; the server stays authoritative. Kept as a widened string so a new
+ *  backend capability never breaks the build. */
+export type Capability = string;
+
+/** How each role presents in the UI: a short label + an accent colour for the badge. */
+export const ROLE_META: Record<Role, { label: string; color: string }> = {
+  platform_owner: { label: 'Platform Owner', color: '#6D28D9' },
+  platform_support: { label: 'Platform Support', color: '#6B7280' },
+  tenant_owner: { label: 'Owner', color: '#6D28D9' },
+  tenant_admin: { label: 'Administrator', color: '#2563EB' },
+  tenant_care: { label: 'Customer Care', color: '#0F766E' },
+  tenant_technician: { label: 'Technician', color: '#B26B00' },
+};
+
+export interface StaffMember {
+  id: number;
+  name: string;
+  phone: string;
+  email: string;
+  role: Role;
+  is_active: boolean;
+  must_change_password: boolean;
+  last_login: string | null;
+  date_joined: string;
+}
 
 export interface GoLiveBlocker {
   key: string;
@@ -556,10 +585,21 @@ export interface Me {
   is_platform_staff: boolean;
   is_read_only: boolean;
   can_manage_money: boolean;
+  /** The resolved capability set for this role — drives which nav items and controls show. */
+  capabilities: Capability[];
+  /** Onboarding gates the console renders full-screen before letting the user work. */
+  must_change_password: boolean;
+  must_enrol_2fa: boolean;
   /** The user's home ISP (null for platform-only staff). */
   operator: MeOperator | null;
   /** The ISP this session is currently acting for (platform staff can switch). */
   acting_operator: MeOperator | null;
+}
+
+/** Does this session hold `cap`? The single check every nav filter and control guard uses.
+ *  Server is authoritative — this only decides what to SHOW. */
+export function can(me: Me | null, cap: Capability): boolean {
+  return !!me && me.capabilities.includes(cap);
 }
 
 export interface PlatformOverview {
@@ -1403,6 +1443,22 @@ export const api = {
     request<{ detail: string }>(`/broadcasts/${id}/dismiss/`, { method: 'POST', body: '{}' }),
   /** Also the "am I signed in / which ISP am I in?" probe — only the server knows. */
   me: () => request<Me>('/me/'),
+
+  /** Employee management (Owner/Admin). The server enforces the guardrails — you may only
+   *  assign admin/care/technician, never the owner or yourself. */
+  staff: {
+    list: () => request<Paginated<StaffMember>>('/staff/').then((r) => r.results),
+    create: (data: { name: string; phone: string; email?: string; role: Role; password: string }) =>
+      request<StaffMember>('/staff/', { method: 'POST', body: JSON.stringify(data) }),
+    update: (id: number, data: Partial<Pick<StaffMember, 'name' | 'role' | 'is_active'>>) =>
+      request<StaffMember>(`/staff/${id}/`, { method: 'PATCH', body: JSON.stringify(data) }),
+    offboard: (id: number) => request<null>(`/staff/${id}/`, { method: 'DELETE' }),
+    resetPassword: (id: number, password: string) =>
+      request<{ detail: string }>(`/staff/${id}/reset-password/`, {
+        method: 'POST',
+        body: JSON.stringify({ password }),
+      }),
+  },
 
   /** Leave an ISP we were granted access to. The server clears the acting-tenant
    * cookie, so the next request is back in our own console — nothing to clean up
