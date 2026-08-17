@@ -111,6 +111,11 @@ class Operator(TimeStampedModel):
         help_text="Read-only showcase tenant: fully seeded, but the API refuses every "
         "write so anyone can explore WIFI.OS without changing data.",
     )
+    enforce_staff_2fa = models.BooleanField(
+        default=False,
+        help_text="When on, every employee of this ISP must enrol an authenticator before "
+        "using the console. Optional org-wide switch — money actions are already owner + TOTP.",
+    )
 
     # ---- SETTLEMENT: where WE pay THEM ---------------------------------------
     # This is an OUTBOX, not a collection account. It is also our KYC bar: to hold a

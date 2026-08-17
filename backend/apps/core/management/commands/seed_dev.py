@@ -101,6 +101,19 @@ class Command(BaseCommand):
                 "Platform support -> 254700000003 / admin12345 (read-only, "
                 "or sign in with support@danamo.co.ke)"
             )
+        # The delegated ISP workforce — one login per role so you can click the console as
+        # each of them. All on the same dev operator, all admin12345.
+        for phone, name, role in (
+            ("254700000004", "Amina (Admin)", Role.TENANT_ADMIN),
+            ("254700000005", "Care Desk", Role.TENANT_CARE),
+            ("254700000006", "Field Technician", Role.TENANT_TECHNICIAN),
+        ):
+            if not User.objects.filter(phone=phone).exists():
+                User.objects.create_user(
+                    phone=phone, password="admin12345", name=name,
+                    operator=operator, role=role, is_staff=True,
+                )
+                self.stdout.write(f"{role.label} -> {phone} / admin12345 (DEV ONLY)")
         self.stdout.write(self.style.SUCCESS("Seed complete."))
 
     def _map_geodata(self, operator, router):

@@ -60,12 +60,30 @@ class MeView(APIView):
                 # The resolved capability set for this role — the console hides what the API
                 # would refuse anyway. Server stays authoritative; this is only for the UI.
                 "capabilities": user.capabilities,
+                # Onboarding gates the console renders full-screen before letting staff work:
+                # a forced first-login password change, and (if the ISP enforces it) authenticator
+                # enrolment. Both are advisory signals — the change-password endpoint clears the
+                # first; money actions are TOTP-gated regardless of the second.
+                "must_change_password": user.must_change_password,
+                "must_enrol_2fa": _must_enrol_2fa(user, operator),
                 # Home tenant (the ISP this user belongs to, if any)
                 "operator": as_dict(operator),
                 # Tenant this request is acting for (platform staff can switch)
                 "acting_operator": as_dict(acting),
             }
         )
+
+
+def _must_enrol_2fa(user, operator) -> bool:
+    """When an ISP switches on org-wide 2FA, every one of its employees must enrol an
+    authenticator before working. Platform staff are exempt (not this ISP's employees)."""
+    if operator is None or not getattr(operator, "enforce_staff_2fa", False):
+        return False
+    if user.is_platform_staff:
+        return False
+    from . import mfa
+
+    return not mfa.is_enrolled(user)
 
 
 def _billing_state(op) -> dict:

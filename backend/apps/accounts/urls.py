@@ -16,10 +16,12 @@ from .mfa_views import (
     MfaSetupView,
     MfaStatusView,
 )
+from .staff_views import StaffViewSet
 from .views import MeView, SubscriberViewSet
 
 router = SimpleRouter()
 router.register("subscribers", SubscriberViewSet, basename="subscriber")
+router.register("staff", StaffViewSet, basename="staff")
 
 urlpatterns = [
     # Two-factor for the actions that move money (withdrawals, changing the payout

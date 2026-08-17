@@ -18,6 +18,7 @@ from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
 from apps.accounts.models import Role, User
+from apps.accounts.rbac import SETTINGS_WRITE
 from apps.core.phone import InvalidPhoneError, normalize_msisdn
 
 from .models import Operator, TenantLifecycleEvent
@@ -25,6 +26,7 @@ from .permissions import (
     IsPlatformOwner,
     IsPlatformStaff,
     ReadOnlyForSupport,
+    RequireCapability,
     RequireTenant,
 )
 from .public import PublicAPIView
@@ -580,6 +582,8 @@ class OperatorSettingsSerializer(serializers.ModelSerializer):
             # Text this ISP's customers payment receipts + expiry warnings. Drives
             # renewals, but costs money per SMS, so it's theirs to switch off.
             "notify_customers_sms",
+            # Org-wide security switch: require every employee to enrol an authenticator.
+            "enforce_staff_2fa",
             # Saved payout destinations (pre-fill the wallet withdraw form)
             "payout_phone",
             "payout_bank_name",
@@ -595,7 +599,9 @@ class OperatorSettingsView(APIView):
     """The ISP's own business details. Tenant-only: RequireTenant returns 403 for
     a platform user who has not selected an ISP (this used to 404 confusingly)."""
 
-    permission_classes = [IsAdminUser, RequireTenant, ReadOnlyForSupport]
+    # Business details + the org 2FA switch are an Owner/Admin settings screen — not Care/Tech.
+    permission_classes = [IsAdminUser, RequireTenant, ReadOnlyForSupport,
+                          RequireCapability(SETTINGS_WRITE)]
 
     def get(self, request):
         return Response(OperatorSettingsSerializer(acting_tenant(request)).data)

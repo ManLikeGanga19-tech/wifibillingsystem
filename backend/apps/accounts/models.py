@@ -117,6 +117,10 @@ class User(AbstractBaseUser, PermissionsMixin):
     #: NOW instead of whenever a short-lived token happened to expire.
     session_version = models.PositiveIntegerField(default=0)
 
+    #: Set when an Owner/Admin creates or resets an employee: the temp password is single-use and
+    #: the console forces a change before the employee can work. Cleared by ChangePasswordView.
+    must_change_password = models.BooleanField(default=False)
+
     objects = UserManager()
 
     USERNAME_FIELD = "phone"

@@ -309,7 +309,9 @@ class ChangePasswordView(APIView):
             return Response({"detail": " ".join(exc.messages)}, status=status.HTTP_400_BAD_REQUEST)
 
         user.set_password(new_password)
-        user.save(update_fields=["password"])
+        # Clear the forced first-login change — the employee has set their own password now.
+        user.must_change_password = False
+        user.save(update_fields=["password", "must_change_password"])
         # Void every OTHER session this account has (a changed password should log out the phone
         # that was left logged in). THIS session survives — the fresh tokens below carry the new
         # epoch. Bump before minting so make_refresh reads the incremented version.
