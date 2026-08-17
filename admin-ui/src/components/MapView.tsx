@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { api, type MapData, type MapLayer, type MapPoint, type FibreType } from '../api/client';
 import { getPosition, watchPosition } from '../utils/geolocate';
+import { navLinks } from '../utils/nav';
 import MapPicker from './MapPicker';
 import { toast } from './ui';
 
@@ -558,6 +559,12 @@ function fitToData(map: MLMap, data: MapData, extra?: [number, number]) {
   map.fitBounds(b, { padding: 70, maxZoom: 15, duration: 0 });
 }
 
+/** A "Navigate" link for the popup — opens the tech's Google Maps to this coordinate (the app on a
+ *  phone). The console record pages carry the full multi-app chooser; the popup keeps it to one tap. */
+function navHtml(p: MapPoint): string {
+  return `<a href="${navLinks(p.lat, p.lng, p.label).google}" target="_blank" rel="noreferrer" style="display:inline-block;margin-top:7px;font-size:11px;font-weight:700;color:#0E7490;text-decoration:none">Navigate &#9656;</a>`;
+}
+
 /** The hover detail card — richest for a client, so the ISP knows exactly who it is. */
 function card(p: MapPoint, layer: { id: MapLayer; label: string }): HTMLElement {
   const el = document.createElement('div');
@@ -572,18 +579,18 @@ function card(p: MapPoint, layer: { id: MapLayer; label: string }): HTMLElement 
       <div style="font-weight:700;font-size:13px;margin-bottom:3px">${esc(p.label)}</div>
       <div style="margin-bottom:5px">${chip}</div>
       ${rows([['Account', p.account], ['Plan', p.plan], ['Phone', p.phone], ['Type', p.connection]])}
-      <div style="font-size:10px;color:#999;margin-top:5px">Click to open this client</div>`;
+      <div style="font-size:10px;color:#999;margin-top:5px">Click to open this client</div>${navHtml(p)}`;
   } else if (layer.id === 'leads') {
     el.innerHTML = `
       <div style="font-weight:700;font-size:13px;margin-bottom:3px">${esc(p.label)}</div>
       <div style="margin-bottom:5px">${chip}</div>
       ${rows([['Phone', p.phone], ['Source', p.source]])}
-      <div style="font-size:10px;color:#999;margin-top:5px">A prospect — click to open in Leads</div>`;
+      <div style="font-size:10px;color:#999;margin-top:5px">A prospect — click to open in Leads</div>${navHtml(p)}`;
   } else {
     el.innerHTML = `
       <div style="font-weight:700;font-size:13px;margin-bottom:3px">${esc(p.label)}</div>
       <div>${chip}</div>
-      <div style="font-size:10px;color:#999;margin-top:5px">Click to open in ${layer.id === 'routers' ? 'MikroTik' : 'Network'}</div>`;
+      <div style="font-size:10px;color:#999;margin-top:5px">Click to open in ${layer.id === 'routers' ? 'MikroTik' : 'Network'}</div>${navHtml(p)}`;
   }
   return el;
 }
@@ -602,7 +609,7 @@ function fibreCard(p: MapPoint): HTMLElement {
     <div style="font-size:11px;color:#555;margin-bottom:5px">${esc(typeLabel)} · ${chip}</div>
     <table style="font-size:11px;color:#333;border-collapse:collapse">
       <tr><td style="color:#888;padding-right:8px">Capacity</td><td>${cap}</td></tr>
-    </table>`;
+    </table>${navHtml(p)}`;
   return el;
 }
 

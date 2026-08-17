@@ -7,6 +7,7 @@ import {
   Badge, Btn, Field, inputCls, Panel, RefreshBtn, TableShell, tdCls, toast, useList, ViewHeader,
 } from './ui';
 import MapPicker from './MapPicker';
+import NavigateButton from './NavigateButton';
 
 const TYPES: { v: FibreType; l: string }[] = [
   { v: 'olt_pop', l: 'OLT / POP' }, { v: 'cabinet', l: 'Cabinet (FDT)' },
@@ -239,6 +240,7 @@ export default function FibrePlantView() {
             <td className={`${tdCls} font-mono text-[11px]`}>{p.gps_lat && p.gps_lng ? `${Number(p.gps_lat).toFixed(4)}, ${Number(p.gps_lng).toFixed(4)}` : <span className="text-[#B26B00]">needs a pin</span>}</td>
             <td className={tdCls}>
               <div className="flex gap-1.5">
+                <NavigateButton lat={p.gps_lat ? Number(p.gps_lat) : null} lng={p.gps_lng ? Number(p.gps_lng) : null} label={p.label} compact />
                 <Btn variant="outline" onClick={() => showBlast(p)} title="Who's affected if this fails"><Zap className="h-3.5 w-3.5" /></Btn>
                 {p.is_active ? (
                   <>
