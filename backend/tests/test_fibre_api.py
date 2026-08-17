@@ -122,6 +122,29 @@ class TestBlastRadius:
 
 
 @pytest.mark.django_db
+class TestFibreOnTheMap:
+    def test_points_and_spans_appear_on_the_map(self, op):
+        a = pt(op, FibrePoint.Type.OLT_POP, "OLT", gps_lat="-1.290000", gps_lng="36.820000")
+        b = pt(op, FibrePoint.Type.ODP, "ODP-7", port_capacity=16,
+               gps_lat="-1.300000", gps_lng="36.830000")
+        FibreSpan.objects.create(operator=op, from_point=a, to_point=b, cable_type="adss")
+        body = api_as(Role.TENANT_TECHNICIAN, op).get(reverse("map-points")).data
+        assert body["counts"]["fibre"] == 2
+        assert {p["label"] for p in body["layers"]["fibre"]} == {"OLT", "ODP-7"}
+        assert len(body["fibre_spans"]) == 1
+        seg = body["fibre_spans"][0]
+        assert seg["cable_type"] == "adss" and "from_lat" in seg and "to_lat" in seg
+
+    def test_a_span_with_an_unplaced_endpoint_is_not_drawn(self, op):
+        a = pt(op, FibrePoint.Type.OLT_POP, "OLT", gps_lat="-1.290000", gps_lng="36.820000")
+        b = pt(op, FibrePoint.Type.ODP, "ODP")   # no coords
+        FibreSpan.objects.create(operator=op, from_point=a, to_point=b)
+        body = api_as(Role.TENANT_TECHNICIAN, op).get(reverse("map-points")).data
+        assert body["fibre_spans"] == []          # can't draw a line to an unplaced point
+        assert body["unplaced"]["fibre"] == 1     # the ODP is counted, not dropped
+
+
+@pytest.mark.django_db
 class TestFibreApiRbac:
     def test_care_cannot_touch_the_plant_but_technician_can(self, op):
         care = api_as(Role.TENANT_CARE, op)

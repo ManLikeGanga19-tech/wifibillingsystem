@@ -822,7 +822,10 @@ export interface LoyaltySummary {
   top: { phone: string; points: number }[];
 }
 
-export type MapLayer = 'towers' | 'clients' | 'routers' | 'leads';
+export type MapLayer = 'towers' | 'clients' | 'routers' | 'leads' | 'fibre';
+/** The 8 fibre-plant point types (mirrors backend FibrePoint.Type). */
+export type FibreType =
+  | 'olt_pop' | 'cabinet' | 'splice_closure' | 'splitter' | 'odp' | 'pole' | 'handhole' | 'other';
 export interface MapPoint {
   id: number;
   lat: number;
@@ -834,10 +837,26 @@ export interface MapPoint {
   phone?: string;
   plan?: string;
   source?: string;
+  // fibre points carry their type + capacity
+  ptype?: FibreType;
+  capacity?: number;
+  used?: number;
+  free?: number | null;
+}
+/** A fibre span drawn as a line between its two placed endpoints. */
+export interface FibreSpanSeg {
+  id: number;
+  cable_type: 'adss' | 'buried' | 'drop';
+  status: string;
+  from_lat: number;
+  from_lng: number;
+  to_lat: number;
+  to_lng: number;
 }
 export interface MapData {
   business_location: { lat: number; lng: number } | null;
   layers: Record<MapLayer, MapPoint[]>;
+  fibre_spans: FibreSpanSeg[];
   counts: Record<MapLayer, number>;
   unplaced: Record<MapLayer, number>;
   center: { lat: number; lng: number } | null;

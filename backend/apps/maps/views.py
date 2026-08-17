@@ -42,6 +42,9 @@ class MapDataView(APIView):
     @extend_schema(responses=OBJECT_RESPONSE,
                    summary="Tenant map points (towers, clients, routers, leads)")
     def get(self, request):
+        from django.db.models import Count, Q
+
+        from apps.fibre.models import FibrePoint, FibreSpan
         from apps.ops.models import Lead
         from apps.pppoe.models import Client, Tower
         from apps.provisioning.models import Router
@@ -86,13 +89,53 @@ class MapDataView(APIView):
                 "id", "gps_lat", "gps_lng", "name", "status", "phone", "source")
         ]
 
+        # ---- fibre outside-plant: points (nodes) + spans (the drawn route) --------------
+        # Capacity 'used' is annotated once (customer drops on an ODP; downstream cables on a
+        # splitter/cabinet), so the whole plant is a couple of queries, not N.
+        fibre_qs = FibrePoint.objects.filter(operator=op, is_active=True).annotate(
+            anno_clients=Count("fibre_clients", distinct=True),
+            anno_downstream=Count("spans_out", filter=Q(spans_out__is_active=True), distinct=True),
+        )
+
+        def _used(p):
+            if p.type == FibrePoint.Type.ODP:
+                return p.anno_clients
+            if p.type in (FibrePoint.Type.SPLITTER, FibrePoint.Type.CABINET):
+                return p.anno_downstream
+            return 0
+
+        fibre = []
+        for p in _has_coords(fibre_qs):
+            used = _used(p)
+            fibre.append({
+                "id": p.id, "lat": float(p.gps_lat), "lng": float(p.gps_lng),
+                "label": p.label, "status": p.status, "ptype": p.type,
+                "capacity": p.port_capacity,
+                "used": used,
+                "free": (max(p.port_capacity - used, 0) if p.port_capacity else None),
+            })
+
+        # Spans are LINES: a segment is drawn only when BOTH its endpoints are placed.
+        spans_qs = (
+            FibreSpan.objects.filter(operator=op, is_active=True)
+            .select_related("from_point", "to_point")
+        )
+        fibre_spans = [
+            {"id": s.id, "cable_type": s.cable_type, "status": s.status,
+             "from_lat": float(s.from_point.gps_lat), "from_lng": float(s.from_point.gps_lng),
+             "to_lat": float(s.to_point.gps_lat), "to_lng": float(s.to_point.gps_lng)}
+            for s in spans_qs
+            if s.from_point.gps_lat is not None and s.from_point.gps_lng is not None
+            and s.to_point.gps_lat is not None and s.to_point.gps_lng is not None
+        ]
+
         # The map opens on: the ISP's business location if they've set it, else the centroid of
         # their placed assets, else nothing (the client falls back to the device location).
         business = (
             {"lat": float(op.gps_lat), "lng": float(op.gps_lng)}
             if op.gps_lat is not None and op.gps_lng is not None else None
         )
-        pts = towers + clients + routers + leads
+        pts = towers + clients + routers + leads + fibre
         centroid = (
             {"lat": sum(p["lat"] for p in pts) / len(pts),
              "lng": sum(p["lng"] for p in pts) / len(pts)}
@@ -101,15 +144,20 @@ class MapDataView(APIView):
 
         return Response({
             "business_location": business,
-            "layers": {"towers": towers, "clients": clients, "routers": routers, "leads": leads},
+            "layers": {"towers": towers, "clients": clients, "routers": routers,
+                       "leads": leads, "fibre": fibre},
+            # Span segments are lines, not pins — a separate structure the client draws under the
+            # point layers.
+            "fibre_spans": fibre_spans,
             "counts": {"towers": len(towers), "clients": len(clients),
-                       "routers": len(routers), "leads": len(leads)},
+                       "routers": len(routers), "leads": len(leads), "fibre": len(fibre)},
             # placed vs total, so the UI can say "12 of 40 routers need a pin"
             "unplaced": {
                 "towers": towers_qs.count() - len(towers),
                 "clients": clients_qs.count() - len(clients),
                 "routers": routers_qs.count() - len(routers),
                 "leads": leads_qs.count() - len(leads),
+                "fibre": fibre_qs.count() - len(fibre),
             },
             # `center` = the best default viewport: business location wins, else the asset
             # centroid. None means "use the device's current location" on the client.

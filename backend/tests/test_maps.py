@@ -45,7 +45,7 @@ class TestMapPoints:
                             gps_lat=Decimal("-1.33"), gps_lng=Decimal("36.82"))
 
         body = owner(op).get(URL).json()
-        assert body["counts"] == {"towers": 1, "clients": 1, "routers": 1, "leads": 1}
+        assert body["counts"] == {"towers": 1, "clients": 1, "routers": 1, "leads": 1, "fibre": 0}
         assert body["center"] is not None
         assert body["layers"]["clients"][0]["status"]  # carries status for colouring
         assert body["layers"]["leads"][0]["label"] == "Prospect"
@@ -91,7 +91,7 @@ class TestMapPoints:
     def test_empty_operator_has_null_center(self):
         body = owner(OperatorFactory()).get(URL).json()
         assert body["center"] is None
-        assert body["counts"] == {"towers": 0, "clients": 0, "routers": 0, "leads": 0}
+        assert body["counts"] == {"towers": 0, "clients": 0, "routers": 0, "leads": 0, "fibre": 0}
 
     def test_requires_auth(self):
         assert APIClient().get(URL).status_code in (401, 403)

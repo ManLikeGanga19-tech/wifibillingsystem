@@ -5,8 +5,9 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import {
   MapPin, RadioTower, Router as RouterIcon, Home, UserPlus, Loader2, AlertTriangle,
   Satellite, Map as MapGlyph, Flame, Building2, X, LocateFixed,
+  Waypoints, Server, Box, GitMerge, Split, CircleDot, Milestone, Circle,
 } from 'lucide-react';
-import { api, type MapData, type MapLayer, type MapPoint } from '../api/client';
+import { api, type MapData, type MapLayer, type MapPoint, type FibreType } from '../api/client';
 import { getPosition, watchPosition } from '../utils/geolocate';
 import MapPicker from './MapPicker';
 import { toast } from './ui';
@@ -18,6 +19,7 @@ type IconType = ComponentType<{ className?: string; size?: number; color?: strin
 const WORLD_CENTER: [number, number] = [37.9, 0.2];
 const TAB_FOR: Record<MapLayer, string> = {
   towers: 'network', clients: 'pppoe_clients', routers: 'mikrotik', leads: 'leads',
+  fibre: 'network',   // no dedicated fibre page yet (P4); fibre pins are hover-only for now
 };
 // `heat` layers plot as a demand HEATMAP as well as pins (leads → where to expand next).
 const LAYERS: { id: MapLayer; label: string; color: string; Icon: IconType; heat?: boolean }[] = [
@@ -25,7 +27,21 @@ const LAYERS: { id: MapLayer; label: string; color: string; Icon: IconType; heat
   { id: 'clients', label: 'Clients', color: '#2563EB', Icon: Home },
   { id: 'routers', label: 'Routers', color: '#0F766E', Icon: RouterIcon },
   { id: 'leads', label: 'Leads', color: '#DB2777', Icon: UserPlus, heat: true },
+  // Fibre is rendered by a DEDICATED block (per-type icons, no clustering, plus span lines), not
+  // the generic loop — but it's in LAYERS so it gets a toolbar toggle, a legend row and a count.
+  { id: 'fibre', label: 'Fibre', color: '#0E7490', Icon: Waypoints },
 ];
+
+// A lucide icon per fibre-plant type, so an ODP reads differently from a pole at a glance.
+const FIBRE_TYPE_ICON: Record<FibreType, IconType> = {
+  olt_pop: Server, cabinet: Box, splice_closure: GitMerge, splitter: Split,
+  odp: CircleDot, pole: Milestone, handhole: Circle, other: Circle,
+};
+const FIBRE_TYPES = Object.keys(FIBRE_TYPE_ICON) as FibreType[];
+const FIBRE_TYPE_LABEL: Record<FibreType, string> = {
+  olt_pop: 'OLT / POP', cabinet: 'Cabinet (FDT)', splice_closure: 'Splice closure',
+  splitter: 'Splitter', odp: 'ODP', pole: 'Pole', handhole: 'Handhole', other: 'Other',
+};
 
 const STATUS_KEY: { label: string; color: string }[] = [
   { label: 'Active / online', color: '#228B22' },
@@ -90,7 +106,7 @@ export default function MapView({ onNavigate }: { onNavigate: (tab: string) => v
   const [error, setError] = useState('');
   const [basemap, setBasemap] = useState<'streets' | 'satellite'>('streets');
   const [visible, setVisible] = useState<Record<MapLayer, boolean>>({
-    towers: true, clients: true, routers: true, leads: true,
+    towers: true, clients: true, routers: true, leads: true, fibre: true,
   });
   const [heatmap, setHeatmap] = useState(false); // leads: heatmap vs pins
   const [showBiz, setShowBiz] = useState(false); // "set business location" modal
@@ -177,6 +193,7 @@ export default function MapView({ onNavigate }: { onNavigate: (tab: string) => v
 
     const hover = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 16 });
     for (const layer of LAYERS) {
+      if (layer.id === 'fibre') continue;   // rendered by the dedicated fibre block below
       const features = (data.layers[layer.id] || []).map((pt) => ({
         type: 'Feature' as const,
         geometry: { type: 'Point' as const, coordinates: [pt.lng, pt.lat] },
@@ -251,6 +268,70 @@ export default function MapView({ onNavigate }: { onNavigate: (tab: string) => v
       map.on('click', `${layer.id}-pt`, () =>
         navRef.current(TAB_FOR[layer.id]));
     }
+
+    // ---- FIBRE PLANT: span lines (under the pins) + type-icon points ---------------------------
+    // Spans FIRST so the route sits beneath every pin. Both are plain GeoJSON, so they ride the
+    // same worker the other layers do — verified in a production build, not just dev.
+    const spanFeatures = (data.fibre_spans || []).map((s) => ({
+      type: 'Feature' as const,
+      geometry: { type: 'LineString' as const, coordinates: [[s.from_lng, s.from_lat], [s.to_lng, s.to_lat]] },
+      properties: { id: s.id, status: s.status, cable_type: s.cable_type },
+    }));
+    map.addSource('fibre-spans', { type: 'geojson', data: { type: 'FeatureCollection', features: spanFeatures } });
+    // Insert below the first pin layer that exists, so cables never cover the discs.
+    const firstPin = ['towers-cluster', 'clients-cluster', 'routers-cluster', 'leads-pt']
+      .find((id) => map.getLayer(id));
+    map.addLayer({
+      id: 'fibre-spans-line', type: 'line', source: 'fibre-spans',
+      layout: { visibility: visible.fibre ? 'visible' : 'none', 'line-cap': 'round' },
+      paint: {
+        'line-color': ['match', ['get', 'status'],
+          'down', '#B22222', 'needs_attention', '#B26B00', '#0E7490'],
+        'line-width': ['interpolate', ['linear'], ['zoom'], 8, 1.5, 15, 3.5],
+        'line-opacity': 0.85,
+      },
+    }, firstPin);
+
+    const fibreFeatures = (data.layers.fibre || []).map((pt) => ({
+      type: 'Feature' as const,
+      geometry: { type: 'Point' as const, coordinates: [pt.lng, pt.lat] },
+      properties: { ...pt, statusColor: statusColor(pt.status), layer: 'fibre' },
+    }));
+    // No clustering: spans connect to SPECIFIC points, so points must stay individually visible.
+    map.addSource('fibre', { type: 'geojson', data: { type: 'FeatureCollection', features: fibreFeatures } });
+    map.addLayer({
+      id: 'fibre-pt', type: 'circle', source: 'fibre',
+      layout: { visibility: visible.fibre ? 'visible' : 'none' },
+      paint: {
+        'circle-radius': 12, 'circle-color': ['get', 'statusColor'],
+        'circle-stroke-width': 2.5, 'circle-stroke-color': '#fff',
+      },
+    });
+    // One icon per type, chosen by the point's `ptype`, with 'other' as the fallback.
+    Promise.all(FIBRE_TYPES.map((t) => addLucideIcon(map, `fibre-${t}`, FIBRE_TYPE_ICON[t])))
+      .then(() => {
+        if (!map.getSource('fibre') || map.getLayer('fibre-icon')) return;
+        map.addLayer({
+          id: 'fibre-icon', type: 'symbol', source: 'fibre',
+          layout: {
+            visibility: visible.fibre ? 'visible' : 'none',
+            'icon-image': ['match', ['get', 'ptype'],
+              ...FIBRE_TYPES.flatMap((t) => [t, `fibre-${t}`]),
+              'fibre-other'] as unknown as string,
+            'icon-size': 0.5, 'icon-allow-overlap': true,
+          },
+        });
+      }).catch(() => {});
+    map.on('mousemove', 'fibre-pt', (e) => {
+      const f = e.features?.[0];
+      if (!f) return;
+      map.getCanvas().style.cursor = 'pointer';
+      hover.setLngLat((f.geometry as GeoJSON.Point).coordinates as [number, number])
+        .setDOMContent(fibreCard(f.properties as unknown as MapPoint))
+        .addTo(map);
+    });
+    map.on('mouseleave', 'fibre-pt', () => { map.getCanvas().style.cursor = ''; hover.remove(); });
+
     // Where to open. THE PINS MUST BE VISIBLE — a location you just set is useless if it opens
     // somewhere else. So: if there are ANY placed assets, frame ALL of them (plus the device,
     // if it'll share, so "where am I" is in shot too). Only when there's nothing placed yet do
@@ -291,6 +372,11 @@ export default function MapView({ onNavigate }: { onNavigate: (tab: string) => v
       };
       set('heat', on && asHeat);
       for (const sfx of ['cluster', 'pt', 'icon']) set(sfx, on && !asHeat);
+    }
+    // The fibre span lines follow the fibre toggle too (the loop only covers the -pt/-icon/-cluster
+    // suffixes; the line layer is 'fibre-spans-line').
+    if (map.getLayer('fibre-spans-line')) {
+      map.setLayoutProperty('fibre-spans-line', 'visibility', visible.fibre ? 'visible' : 'none');
     }
   }, [visible, heatmap, mapReady]);
 
@@ -456,7 +542,8 @@ export default function MapView({ onNavigate }: { onNavigate: (tab: string) => v
 
 function fitToData(map: MLMap, data: MapData, extra?: [number, number]) {
   const all: MapPoint[] = [
-    ...data.layers.towers, ...data.layers.clients, ...data.layers.routers, ...data.layers.leads,
+    ...data.layers.towers, ...data.layers.clients, ...data.layers.routers,
+    ...data.layers.leads, ...data.layers.fibre,
   ];
   const coords: [number, number][] = all.map((p) => [p.lng, p.lat]);
   if (extra) coords.push(extra);
@@ -497,6 +584,24 @@ function card(p: MapPoint, layer: { id: MapLayer; label: string }): HTMLElement 
       <div>${chip}</div>
       <div style="font-size:10px;color:#999;margin-top:5px">Click to open in ${layer.id === 'routers' ? 'MikroTik' : 'Network'}</div>`;
   }
+  return el;
+}
+
+/** The fibre-plant hover card — type, status, and live port capacity (used / total, free). */
+function fibreCard(p: MapPoint): HTMLElement {
+  const el = document.createElement('div');
+  el.style.cssText = 'font-family:sans-serif;min-width:170px';
+  const chip = `<span style="display:inline-block;padding:1px 6px;border-radius:9px;font-size:10px;font-weight:700;text-transform:uppercase;color:#fff;background:${statusColor(p.status)}">${esc(p.status)}</span>`;
+  const typeLabel = FIBRE_TYPE_LABEL[(p.ptype ?? 'other') as FibreType] ?? esc(p.ptype || '');
+  const cap = p.capacity
+    ? `${p.used ?? 0} / ${p.capacity} ports${p.free != null ? ` · ${p.free} free` : ''}`
+    : '—';
+  el.innerHTML = `
+    <div style="font-weight:700;font-size:13px;margin-bottom:3px">${esc(p.label)}</div>
+    <div style="font-size:11px;color:#555;margin-bottom:5px">${esc(typeLabel)} · ${chip}</div>
+    <table style="font-size:11px;color:#333;border-collapse:collapse">
+      <tr><td style="color:#888;padding-right:8px">Capacity</td><td>${cap}</td></tr>
+    </table>`;
   return el;
 }
 
