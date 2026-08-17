@@ -145,6 +145,24 @@ class TestFibreOnTheMap:
 
 
 @pytest.mark.django_db
+class TestClientOdpLink:
+    def test_technician_can_set_serving_odp_and_it_counts_toward_capacity(self, op):
+        router = RouterFactory(operator=op)
+        odp = pt(op, FibrePoint.Type.ODP, "ODP-7", port_capacity=16)
+        client = PppoeClientFactory(operator=op, router=router, delivery_method="fibre")
+        tech = api_as(Role.TENANT_TECHNICIAN, op)   # clients.field + fibre_point is field-editable
+
+        resp = tech.patch(reverse("pppoe-client-detail", args=[client.id]),
+                          {"fibre_point": odp.id}, format="json")
+        assert resp.status_code == 200
+        client.refresh_from_db()
+        assert client.fibre_point_id == odp.id
+
+        got = tech.get(reverse("fibre-point-detail", args=[odp.id])).data
+        assert got["used"] == 1 and got["free"] == 15   # the drop now occupies a port
+
+
+@pytest.mark.django_db
 class TestFibreApiRbac:
     def test_care_cannot_touch_the_plant_but_technician_can(self, op):
         care = api_as(Role.TENANT_CARE, op)

@@ -1,6 +1,6 @@
 import React, { useEffect, useState, type FormEvent } from 'react';
 import { Users, Plus, Ban, RotateCcw, Zap, Printer, X, Loader2, Wifi, WifiOff, AlertTriangle, Key, Copy, Eye, EyeOff, Trash2, RefreshCw, Upload, Download, Pencil, Save, Search, MoreHorizontal, ArrowRight } from 'lucide-react';
-import { api, ApiError, PppoeClient, PppoePlan, ApiRouter, AccessPoint, PppoeUsageSummary, PppoeChurnSummary, CapacityWarning, PppoeImportRow, PppoeImportItem, PppoeCsvPreview, PppoeImportResult } from '../api/client';
+import { api, ApiError, PppoeClient, PppoePlan, ApiRouter, AccessPoint, FibrePoint, PppoeUsageSummary, PppoeChurnSummary, CapacityWarning, PppoeImportRow, PppoeImportItem, PppoeCsvPreview, PppoeImportResult } from '../api/client';
 import MapPicker from './MapPicker';
 import {
   Badge, Btn, Field, FilterChips, inputCls, Panel, RefreshBtn, TableShell, tdCls, toast, useList, ViewHeader, fmtDateTime, fmtKsh,
@@ -240,6 +240,8 @@ export default function PppoeClientsView() {
   const [plans, setPlans] = useState<PppoePlan[]>([]);
   const [routers, setRouters] = useState<ApiRouter[]>([]);
   const [aps, setAps] = useState<AccessPoint[]>([]);
+  // ODPs/splitters a fibre customer can hang off (for the "serving ODP" picker).
+  const [fibrePoints, setFibrePoints] = useState<FibrePoint[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [sheetFor, setSheetFor] = useState<PppoeClient | null>(null);
   const [credsFor, setCredsFor] = useState<PppoeClient | null>(null);
@@ -258,7 +260,7 @@ export default function PppoeClientsView() {
   };
   const blank = {
     full_name: '', phone: '', email: '', physical_address: '',
-    plan: '', router: '', delivery_method: 'fibre', access_point: '', billing_day: '1',
+    plan: '', router: '', delivery_method: 'fibre', access_point: '', fibre_point: '', billing_day: '1',
     connection_type: 'pppoe', static_ip: '',
     pppoe_username: '', pppoe_password: '',
     gps_lat: null as number | null, gps_lng: null as number | null,
@@ -269,6 +271,9 @@ export default function PppoeClientsView() {
     api.pppoe.plans.list().then((r) => setPlans(r.results.filter((p) => p.is_active))).catch(() => {});
     api.routers.list().then((r) => setRouters(r.results)).catch(() => {});
     api.pppoe.accessPoints.list().then((r) => setAps(r.results)).catch(() => {});
+    api.fibre.points.list()
+      .then((r) => setFibrePoints(r.results.filter((p) => p.is_active && ['odp', 'splitter', 'cabinet'].includes(p.type))))
+      .catch(() => {});
   }, []);
 
   // Auto-refresh so a client that just connected flips to "live" on its own. The backend
@@ -280,6 +285,7 @@ export default function PppoeClientsView() {
   }, [reload]);
 
   const isWireless = form.delivery_method.startsWith('wireless');
+  const isFibre = form.delivery_method === 'fibre';
   const isStatic = form.connection_type === 'static';
 
   // When the chosen sector is full the server answers 409 with a warning; we surface it as
@@ -301,6 +307,7 @@ export default function PppoeClientsView() {
         router: Number(form.router),
         delivery_method: form.delivery_method as PppoeClient['delivery_method'],
         access_point: isWireless && form.access_point ? Number(form.access_point) : null,
+        fibre_point: isFibre && form.fibre_point ? Number(form.fibre_point) : null,
         billing_day: Number(form.billing_day),
         connection_type: form.connection_type as PppoeClient['connection_type'],
         // Static clients enforce by IP (no login); PPPoE clients get a secret (blank = auto).
@@ -414,6 +421,14 @@ export default function PppoeClientsView() {
                 <select value={form.access_point} onChange={(e) => setForm({ ...form, access_point: e.target.value })} className={inputCls}>
                   <option value="">Unassigned</option>
                   {aps.map((ap) => <option key={ap.id} value={ap.id}>{ap.tower_name} / {ap.name}</option>)}
+                </select>
+              </Field>
+            )}
+            {isFibre && (
+              <Field label="Serving ODP (blast-radius)">
+                <select value={form.fibre_point} onChange={(e) => setForm({ ...form, fibre_point: e.target.value })} className={inputCls}>
+                  <option value="">Unassigned</option>
+                  {fibrePoints.map((fp) => <option key={fp.id} value={fp.id}>{fp.label} · {fp.type_display}</option>)}
                 </select>
               </Field>
             )}
@@ -549,6 +564,7 @@ export default function PppoeClientsView() {
       )}
       {editFor && (
         <EditClientDialog
+          fibrePoints={fibrePoints}
           client={editFor}
           plans={plans}
           routers={routers}
@@ -584,12 +600,13 @@ export default function PppoeClientsView() {
  * never disagree. The password lives in Credentials (it has to re-push), linked from here.
  */
 function EditClientDialog({
-  client, plans, routers, aps, onClose, onSaved, onOpenCredentials,
+  client, plans, routers, aps, fibrePoints, onClose, onSaved, onOpenCredentials,
 }: {
   client: PppoeClient;
   plans: PppoePlan[];
   routers: ApiRouter[];
   aps: AccessPoint[];
+  fibrePoints: FibrePoint[];
   onClose: () => void;
   onSaved: () => void;
   onOpenCredentials: (c: PppoeClient) => void;
@@ -603,6 +620,7 @@ function EditClientDialog({
     router: String(client.router),
     delivery_method: client.delivery_method,
     access_point: client.access_point ? String(client.access_point) : '',
+    fibre_point: client.fibre_point ? String(client.fibre_point) : '',
     billing_day: String(client.billing_day),
     notes: client.notes ?? '',
     gps_lat: client.gps_lat ? Number(client.gps_lat) : (null as number | null),
@@ -610,6 +628,7 @@ function EditClientDialog({
   });
   const [busy, setBusy] = useState(false);
   const isWireless = form.delivery_method.startsWith('wireless');
+  const isFibre = form.delivery_method === 'fibre';
 
   const planChanged = Number(form.plan) !== client.plan;
   const routerChanged = Number(form.router) !== client.router;
@@ -628,6 +647,7 @@ function EditClientDialog({
         router: Number(form.router),
         delivery_method: form.delivery_method as PppoeClient['delivery_method'],
         access_point: isWireless && form.access_point ? Number(form.access_point) : null,
+        fibre_point: isFibre && form.fibre_point ? Number(form.fibre_point) : null,
         billing_day: Number(form.billing_day),
         notes: form.notes,
         gps_lat: form.gps_lat != null ? String(form.gps_lat) : null,
@@ -700,6 +720,14 @@ function EditClientDialog({
                 <select value={form.access_point} onChange={(e) => setForm({ ...form, access_point: e.target.value })} className={inputCls}>
                   <option value="">Unassigned</option>
                   {aps.map((ap) => <option key={ap.id} value={ap.id}>{ap.tower_name} / {ap.name}</option>)}
+                </select>
+              </Field>
+            )}
+            {isFibre && (
+              <Field label="Serving ODP (blast-radius)">
+                <select value={form.fibre_point} onChange={(e) => setForm({ ...form, fibre_point: e.target.value })} className={inputCls}>
+                  <option value="">Unassigned</option>
+                  {fibrePoints.map((fp) => <option key={fp.id} value={fp.id}>{fp.label} · {fp.type_display}</option>)}
                 </select>
               </Field>
             )}

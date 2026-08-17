@@ -2,6 +2,7 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from apps.core.serializer_fields import TenantPrimaryKeyRelatedField
+from apps.fibre.models import FibrePoint
 from apps.ops.models import Equipment
 from apps.provisioning.models import Router
 
@@ -64,6 +65,12 @@ class ClientSerializer(serializers.ModelSerializer):
     cpe_equipment = TenantPrimaryKeyRelatedField(
         queryset=Equipment.objects.all(), required=False, allow_null=True
     )
+    # The ODP/splitter feeding a FIBRE customer — powers blast-radius and ODP port usage.
+    fibre_point = TenantPrimaryKeyRelatedField(
+        queryset=FibrePoint.objects.all(), required=False, allow_null=True
+    )
+    fibre_point_label = serializers.CharField(
+        source="fibre_point.label", read_only=True, default="")
     # Credentials the CPE dials with. Writable ON CREATE (optional — blank auto-generates a
     # strong one); a plain edit can't change them (see ClientViewSet.perform_update), so the
     # DB never silently desyncs from the router — resets go through reset_password, which
@@ -136,6 +143,7 @@ class ClientSerializer(serializers.ModelSerializer):
             "gps_lat", "gps_lng", "plan", "plan_name", "router", "connection_type",
             "pppoe_username", "pppoe_password", "static_ip",
             "delivery_method", "access_point", "cpe_equipment",
+            "fibre_point", "fibre_point_label",
             "status", "billing_day", "balance", "next_due_date",
             "next_billing_date", "next_due_is_projected", "installed_at", "notes",
             "created_at",

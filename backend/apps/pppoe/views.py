@@ -209,7 +209,7 @@ class ClientViewSet(TenantModelViewSet):
     #: is and whether they're on — never rename them, move their plan, or change billing. Anything
     #: else in the payload is dropped rather than rejected, so a full edit form still saves the two
     #: fields the tech is allowed to touch.
-    TECH_EDITABLE_FIELDS = {"status", "gps_lat", "gps_lng"}
+    TECH_EDITABLE_FIELDS = {"status", "gps_lat", "gps_lng", "fibre_point"}
 
     def perform_update(self, serializer):
         user = self.request.user
@@ -233,7 +233,7 @@ class ClientViewSet(TenantModelViewSet):
         # on the old router) and nobody could tell which was true.
         # Serializers hand back model instances for FKs; the service works in *_id so it can
         # compare cheaply against the old values.
-        FK_FIELDS = {"plan", "router", "access_point", "cpe_equipment"}
+        FK_FIELDS = {"plan", "router", "access_point", "cpe_equipment", "fibre_point"}
         changes = {}
         for field, value in data.items():
             if field in FK_FIELDS:

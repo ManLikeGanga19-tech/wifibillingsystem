@@ -27,6 +27,7 @@ import {
   UsersRound,
   ShieldAlert,
   ShieldCheck,
+  Waypoints,
 } from 'lucide-react';
 
 import { BandwidthProfile, Subscriber, OutboundCampaign } from './types';
@@ -64,6 +65,7 @@ import WalletView from './components/WalletView';
 import ReportsView from './components/ReportsView';
 import StaffView from './components/StaffView';
 import AccessControlView from './components/AccessControlView';
+import FibrePlantView from './components/FibrePlantView';
 import ForcedPasswordChange from './components/ForcedPasswordChange';
 
 // ---- navigation model -------------------------------------------------------
@@ -90,6 +92,7 @@ type TabId =
   | 'pppoe_plans'
   | 'pppoe_invoices'
   | 'network'
+  | 'fibre_plant'
   | 'map'
   | 'team'
   | 'access';
@@ -100,7 +103,7 @@ const KNOWN_TABS: ReadonlySet<TabId> = new Set<TabId>([
   'dashboard', 'active_users', 'users', 'tickets', 'leads', 'packages', 'payments',
   'vouchers', 'expenses', 'messages', 'emails', 'campaigns', 'mikrotik', 'equipment',
   'settings', 'wallet', 'reports', 'pppoe_clients', 'pppoe_plans', 'pppoe_invoices',
-  'network', 'map', 'team', 'access',
+  'network', 'fibre_plant', 'map', 'team', 'access',
 ]);
 
 /** RBAC (mirrors backend accounts/rbac.py): the capability a tab needs to appear + open. null =
@@ -116,6 +119,7 @@ const TAB_CAPABILITY: Record<TabId, Capability | null> = {
   pppoe_plans: 'hotspot.plans',
   pppoe_invoices: 'finance.view',
   network: 'network.write',
+  fibre_plant: 'fibre.write',
   packages: 'hotspot.plans',
   payments: 'payments.view_amounts',
   reports: 'finance.view',
@@ -170,6 +174,7 @@ const NAV_GROUPS: { title: string | null; items: NavItem[] }[] = [
       { id: 'pppoe_plans', label: 'Broadband Plans', icon: Gauge },
       { id: 'pppoe_invoices', label: 'Invoices', icon: Receipt },
       { id: 'network', label: 'Network', icon: RadioTower },
+      { id: 'fibre_plant', label: 'Fibre Plant', icon: Waypoints },
     ],
   },
   {
@@ -753,6 +758,7 @@ export default function App() {
             {activeTab === 'pppoe_plans' && <PppoePlansView />}
             {activeTab === 'pppoe_invoices' && <PppoeInvoicesView />}
             {activeTab === 'network' && <NetworkView />}
+            {activeTab === 'fibre_plant' && <FibrePlantView />}
             {activeTab === 'map' && <MapView onNavigate={(tab) => setActiveTab(tab as TabId)} />}
             {activeTab === 'team' && me && <StaffView me={me} />}
             {activeTab === 'access' && <AccessControlView />}

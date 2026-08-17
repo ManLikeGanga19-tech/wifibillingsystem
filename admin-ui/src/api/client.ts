@@ -866,6 +866,52 @@ export interface BusinessLocation {
   gps_lng: number | null;
 }
 
+// ---- Fibre plant (console CRUD) -----------------------------------------------
+export type PlantStatus = 'ok' | 'needs_attention' | 'down';
+export interface FibrePoint {
+  id: number;
+  type: FibreType;
+  type_display: string;
+  label: string;
+  gps_lat: string | null;
+  gps_lng: string | null;
+  status: PlantStatus;
+  port_capacity: number;
+  splitter_ratio: string;
+  notes: string;
+  is_active: boolean;
+  used: number;
+  free: number | null;
+  created_at: string;
+}
+export interface FibreSpan {
+  id: number;
+  from_point: number;
+  to_point: number;
+  from_label: string;
+  to_label: string;
+  cable_type: 'adss' | 'buried' | 'drop';
+  fibre_count: number;
+  length_m: number | null;
+  status: PlantStatus;
+  notes: string;
+  is_active: boolean;
+  created_at: string;
+}
+export interface AffectedClient {
+  id: number;
+  full_name: string;
+  account_number: string;
+  phone: string;
+  status: string;
+  plan: string;
+}
+export interface BlastRadius {
+  point: { id: number; label: string; status: string };
+  count: number;
+  clients: AffectedClient[];
+}
+
 export interface LoyaltyRedeemablePlan {
   plan_id: number;
   plan_name: string;
@@ -1202,6 +1248,9 @@ export interface PppoeClient {
   delivery_method: 'fibre' | 'ethernet' | 'wireless_ptp' | 'wireless_ptmp';
   access_point: number | null;
   cpe_equipment: number | null;
+  /** For fibre customers: the ODP/splitter that feeds them (blast-radius). */
+  fibre_point: number | null;
+  fibre_point_label?: string;
   status: 'pending_install' | 'active' | 'suspended' | 'cancelled' | 'disabled';
   billing_day: number;
   balance: string;
@@ -1498,6 +1547,29 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ password }),
       }),
+  },
+
+  /** Fibre outside-plant CRUD (fibre.write). Points, spans, and a point's blast radius. */
+  fibre: {
+    points: {
+      list: () => request<Paginated<FibrePoint>>('/fibre/points/'),
+      create: (data: Partial<FibrePoint>) =>
+        request<FibrePoint>('/fibre/points/', { method: 'POST', body: JSON.stringify(data) }),
+      update: (id: number, data: Partial<FibrePoint>) =>
+        request<FibrePoint>(`/fibre/points/${id}/`, { method: 'PATCH', body: JSON.stringify(data) }),
+      remove: (id: number) => request<null>(`/fibre/points/${id}/`, { method: 'DELETE' }),
+      restore: (id: number) =>
+        request<FibrePoint>(`/fibre/points/${id}/restore/`, { method: 'POST', body: '{}' }),
+      affected: (id: number) => request<BlastRadius>(`/fibre/points/${id}/affected/`),
+    },
+    spans: {
+      list: () => request<Paginated<FibreSpan>>('/fibre/spans/'),
+      create: (data: Partial<FibreSpan>) =>
+        request<FibreSpan>('/fibre/spans/', { method: 'POST', body: JSON.stringify(data) }),
+      update: (id: number, data: Partial<FibreSpan>) =>
+        request<FibreSpan>(`/fibre/spans/${id}/`, { method: 'PATCH', body: JSON.stringify(data) }),
+      remove: (id: number) => request<null>(`/fibre/spans/${id}/`, { method: 'DELETE' }),
+    },
   },
 
   /** Access Control (Owner only): edit what each delegated role may do. */

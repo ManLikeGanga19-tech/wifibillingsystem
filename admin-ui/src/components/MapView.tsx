@@ -19,7 +19,7 @@ type IconType = ComponentType<{ className?: string; size?: number; color?: strin
 const WORLD_CENTER: [number, number] = [37.9, 0.2];
 const TAB_FOR: Record<MapLayer, string> = {
   towers: 'network', clients: 'pppoe_clients', routers: 'mikrotik', leads: 'leads',
-  fibre: 'network',   // no dedicated fibre page yet (P4); fibre pins are hover-only for now
+  fibre: 'fibre_plant',
 };
 // `heat` layers plot as a demand HEATMAP as well as pins (leads → where to expand next).
 const LAYERS: { id: MapLayer; label: string; color: string; Icon: IconType; heat?: boolean }[] = [
@@ -331,6 +331,7 @@ export default function MapView({ onNavigate }: { onNavigate: (tab: string) => v
         .addTo(map);
     });
     map.on('mouseleave', 'fibre-pt', () => { map.getCanvas().style.cursor = ''; hover.remove(); });
+    map.on('click', 'fibre-pt', () => navRef.current(TAB_FOR.fibre));
 
     // Where to open. THE PINS MUST BE VISIBLE — a location you just set is useless if it opens
     // somewhere else. So: if there are ANY placed assets, frame ALL of them (plus the device,
