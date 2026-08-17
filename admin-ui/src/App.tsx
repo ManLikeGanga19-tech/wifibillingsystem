@@ -763,8 +763,13 @@ export default function App() {
             {activeTab === 'pppoe_plans' && <PppoePlansView />}
             {activeTab === 'pppoe_invoices' && <PppoeInvoicesView />}
             {activeTab === 'network' && <NetworkView />}
-            {activeTab === 'fibre_plant' && <FibrePlantView />}
-            {activeTab === 'map' && <MapView onNavigate={(tab) => setActiveTab(tab as TabId)} />}
+            {activeTab === 'fibre_plant' && <FibrePlantView canDispatch={can(me, 'fleet.view')} />}
+            {activeTab === 'map' && (
+              <MapView
+                onNavigate={(tab) => setActiveTab(tab as TabId)}
+                canViewFleet={can(me, 'fleet.view')}
+              />
+            )}
             {activeTab === 'team' && me && <StaffView me={me} />}
             {activeTab === 'access' && <AccessControlView />}
           </div>

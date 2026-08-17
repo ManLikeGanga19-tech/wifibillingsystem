@@ -5,9 +5,9 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import {
   MapPin, RadioTower, Router as RouterIcon, Home, UserPlus, Loader2, AlertTriangle,
   Satellite, Map as MapGlyph, Flame, Building2, X, LocateFixed,
-  Waypoints, Server, Box, GitMerge, Split, CircleDot, Milestone, Circle,
+  Waypoints, Server, Box, GitMerge, Split, CircleDot, Milestone, Circle, HardHat,
 } from 'lucide-react';
-import { api, type MapData, type MapLayer, type MapPoint, type FibreType } from '../api/client';
+import { api, type MapData, type MapLayer, type MapPoint, type FibreType, type FleetData } from '../api/client';
 import { getPosition, watchPosition } from '../utils/geolocate';
 import { navLinks } from '../utils/nav';
 import MapPicker from './MapPicker';
@@ -100,16 +100,20 @@ async function addLucideIcon(map: MLMap, id: string, Icon: IconType) {
   if (!map.hasImage(id)) map.addImage(id, c.getContext('2d')!.getImageData(0, 0, 44, 44), { pixelRatio: 2 });
 }
 
-export default function MapView({ onNavigate }: { onNavigate: (tab: string) => void }) {
+export default function MapView(
+  { onNavigate, canViewFleet = false }: { onNavigate: (tab: string) => void; canViewFleet?: boolean },
+) {
   const holder = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MLMap | null>(null);
   const [data, setData] = useState<MapData | null>(null);
+  const [fleet, setFleet] = useState<FleetData | null>(null);   // live technician positions (dispatchers)
   const [error, setError] = useState('');
   const [basemap, setBasemap] = useState<'streets' | 'satellite'>('streets');
   const [visible, setVisible] = useState<Record<MapLayer, boolean>>({
     towers: true, clients: true, routers: true, leads: true, fibre: true,
   });
   const [heatmap, setHeatmap] = useState(false); // leads: heatmap vs pins
+  const [showFleet, setShowFleet] = useState(true); // dispatchers: live technician layer on/off
   const [showBiz, setShowBiz] = useState(false); // "set business location" modal
   const [bizSet, setBizSet] = useState(false);   // hide the prompt after saving
 
@@ -162,6 +166,17 @@ export default function MapView({ onNavigate }: { onNavigate: (tab: string) => v
   useEffect(() => {
     api.map.points().then(setData).catch(() => setError('Could not load the map data.'));
   }, []);
+
+  // Dispatchers (fleet.view) poll the live technician fleet. Silent — a failed poll never
+  // disturbs the map. Every 20s so dots track movement without hammering the server.
+  useEffect(() => {
+    if (!canViewFleet) return;
+    let alive = true;
+    const load = () => api.fleet.list().then((f) => { if (alive) setFleet(f); }).catch(() => {});
+    load();
+    const id = window.setInterval(load, 20_000);
+    return () => { alive = false; window.clearInterval(id); };
+  }, [canViewFleet]);
 
   // Create the map ONCE, decoupled from data. Keying this on [] (not [data]) is what makes it
   // StrictMode-safe: the fast local data fetch can otherwise resolve mid-probe and race the
@@ -382,6 +397,67 @@ export default function MapView({ onNavigate }: { onNavigate: (tab: string) => v
     }
   }, [visible, heatmap, mapReady]);
 
+  // ---- LIVE TECHNICIAN FLEET (dispatchers only) ---------------------------------------------
+  // Added once, its data refreshed by the poll effect above; a hard-hat pin coloured live/stale.
+  const fleetAddedRef = useRef(false);
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady || !canViewFleet || fleetAddedRef.current) return;
+    fleetAddedRef.current = true;
+    const hover = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 16 });
+    map.addSource('fleet', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    map.addLayer({
+      id: 'fleet-pt', type: 'circle', source: 'fleet',
+      paint: {
+        'circle-radius': 13,
+        'circle-color': ['case', ['get', 'is_live'], '#059669', '#94A3B8'],
+        'circle-stroke-width': 3, 'circle-stroke-color': '#fff',
+      },
+    });
+    addLucideIcon(map, 'icon-fleet', HardHat).then(() => {
+      if (map.getSource('fleet') && !map.getLayer('fleet-icon')) {
+        map.addLayer({
+          id: 'fleet-icon', type: 'symbol', source: 'fleet',
+          layout: { 'icon-image': 'icon-fleet', 'icon-size': 0.55, 'icon-allow-overlap': true },
+        });
+      }
+    }).catch(() => {});
+    map.on('mousemove', 'fleet-pt', (e) => {
+      const f = e.features?.[0];
+      if (!f) return;
+      map.getCanvas().style.cursor = 'pointer';
+      hover.setLngLat((f.geometry as GeoJSON.Point).coordinates as [number, number])
+        .setDOMContent(fleetCard(f.properties as unknown as FleetProps))
+        .addTo(map);
+    });
+    map.on('mouseleave', 'fleet-pt', () => { map.getCanvas().style.cursor = ''; hover.remove(); });
+  }, [mapReady, canViewFleet]);
+
+  // Push fleet data into the source whenever a poll returns OR the source has just been added
+  // (mapReady in the deps closes the race where the first poll lands before the layer exists).
+  useEffect(() => {
+    const map = mapRef.current;
+    const src = map?.getSource('fleet') as maplibregl.GeoJSONSource | undefined;
+    if (!src || !fleet) return;
+    src.setData({
+      type: 'FeatureCollection',
+      features: fleet.members.map((m) => ({
+        type: 'Feature' as const,
+        geometry: { type: 'Point' as const, coordinates: [Number(m.lng), Number(m.lat)] },
+        properties: { ...m },
+      })),
+    });
+  }, [fleet, mapReady, canViewFleet]);
+
+  // Fleet visibility toggle.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    for (const id of ['fleet-pt', 'fleet-icon']) {
+      if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', showFleet ? 'visible' : 'none');
+    }
+  }, [showFleet, fleet, mapReady]);
+
   const totalUnplaced = data
     ? Object.values(data.unplaced).reduce<number>((a, b) => a + Number(b), 0)
     : 0;
@@ -418,6 +494,17 @@ export default function MapView({ onNavigate }: { onNavigate: (tab: string) => v
           >
             <Flame className="h-3.5 w-3.5" /> Heatmap
           </button>
+          {canViewFleet && (
+            <button
+              onClick={() => setShowFleet((v) => !v)}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold font-mono uppercase border cursor-pointer ${
+                showFleet ? 'bg-[#059669] text-white border-[#059669]' : 'bg-white text-[#141414]/60 border-[#141414]/40'
+              }`}
+              title="Show your technicians' live positions"
+            >
+              <HardHat className="h-3.5 w-3.5" /> Technicians {fleet ? fleet.members.length : ''}
+            </button>
+          )}
           <button
             onClick={toggleLocate}
             className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold font-mono uppercase border cursor-pointer ${
@@ -502,6 +589,15 @@ export default function MapView({ onNavigate }: { onNavigate: (tab: string) => v
                 <span className="ml-auto text-[#141414]/40">{data ? data.counts[l.id] : ''}</span>
               </div>
             ))}
+            {canViewFleet && (
+              <div className="flex items-center gap-2 text-xs pt-1 border-t border-[#141414]/10">
+                <span className="w-6 h-6 rounded-full flex items-center justify-center text-white shrink-0" style={{ background: '#059669' }}>
+                  <HardHat className="h-3.5 w-3.5" />
+                </span>
+                <span className="font-bold">Technicians</span>
+                <span className="ml-auto text-[#141414]/40">{fleet ? fleet.members.length : ''}</span>
+              </div>
+            )}
           </div>
           <p className="text-[10px] font-mono uppercase tracking-wider text-[#141414]/40 mt-3 mb-1.5">Dot colour = status</p>
           <div className="space-y-1">
@@ -615,6 +711,25 @@ function fibreCard(p: MapPoint): HTMLElement {
 
 function esc(s: string): string {
   return (s || '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
+}
+
+type FleetProps = { name: string; is_live: boolean; recorded_at: string };
+function timeAgo(iso: string): string {
+  const secs = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  if (secs < 60) return 'just now';
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins} min ago`;
+  return `${Math.floor(mins / 60)}h ago`;
+}
+/** The hover card for a technician's live dot. */
+function fleetCard(m: FleetProps): HTMLElement {
+  const el = document.createElement('div');
+  el.style.cssText = 'font-family:sans-serif;min-width:150px';
+  const color = m.is_live ? '#059669' : '#94A3B8';
+  el.innerHTML = `
+    <div style="font-weight:700;font-size:13px;margin-bottom:3px">${esc(m.name || 'Technician')}</div>
+    <div style="font-size:11px;color:#555"><span style="color:${color};font-weight:700">${m.is_live ? 'LIVE' : 'STALE'}</span> · seen ${esc(timeAgo(m.recorded_at))}</div>`;
+  return el;
 }
 
 /**

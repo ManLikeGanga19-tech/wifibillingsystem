@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react';
-import { Waypoints, Plus, Pencil, Trash2, RotateCcw, Zap, X, Cable } from 'lucide-react';
+import { Waypoints, Plus, Pencil, Trash2, RotateCcw, Zap, X, Cable, Send, Loader2, HardHat } from 'lucide-react';
 import {
-  api, ApiError, type FibrePoint, type FibreSpan, type FibreType, type BlastRadius,
+  api, ApiError, type FibrePoint, type FibreSpan, type FibreType, type BlastRadius, type NearestTech,
 } from '../api/client';
 import {
   Badge, Btn, Field, inputCls, Panel, RefreshBtn, TableShell, tdCls, toast, useList, ViewHeader,
@@ -33,7 +33,7 @@ const BLANK_SPAN = {
   from_point: '', to_point: '', cable_type: 'adss', fibre_count: '', length_m: '', status: 'ok', notes: '',
 };
 
-export default function FibrePlantView() {
+export default function FibrePlantView({ canDispatch = false }: { canDispatch?: boolean }) {
   const points = useList(() => api.fibre.points.list());
   const spans = useList(() => api.fibre.spans.list());
   const [showPoint, setShowPoint] = useState(false);
@@ -43,6 +43,9 @@ export default function FibrePlantView() {
   const [point, setPoint] = useState({ ...BLANK_POINT });
   const [span, setSpan] = useState({ ...BLANK_SPAN });
   const [blast, setBlast] = useState<BlastRadius | null>(null);
+  const [blastPoint, setBlastPoint] = useState<FibrePoint | null>(null);   // the point the modal is about
+  const [nearest, setNearest] = useState<NearestTech[] | null>(null);      // dispatch: closest live techs
+  const [dispatching, setDispatching] = useState(false);
 
   const reloadAll = () => { points.reload(); spans.reload(); };
 
@@ -87,8 +90,37 @@ export default function FibrePlantView() {
     catch (err) { toast('error', err instanceof ApiError ? err.message : 'Could not restore.'); }
   };
   const showBlast = async (p: FibrePoint) => {
+    setBlastPoint(p);
+    setNearest(null);
     try { setBlast(await api.fibre.points.affected(p.id)); }
     catch (err) { toast('error', err instanceof ApiError ? err.message : 'Could not load affected customers.'); }
+    // Dispatchers also get "who's closest to this fault" — a lookup on the point's coordinate.
+    if (canDispatch && p.gps_lat && p.gps_lng) {
+      api.fleet.nearest(Number(p.gps_lat), Number(p.gps_lng))
+        .then((r) => setNearest(r.technicians)).catch(() => setNearest([]));
+    }
+  };
+
+  const closeBlast = () => { setBlast(null); setBlastPoint(null); setNearest(null); };
+
+  const dispatchNearest = async () => {
+    if (!blastPoint?.gps_lat || !blastPoint?.gps_lng) return;
+    const lat = Number(blastPoint.gps_lat), lng = Number(blastPoint.gps_lng);
+    setDispatching(true);
+    try {
+      // One click: raise a ticket for the fault, then assign the nearest live technician to it.
+      const ticket = await api.tickets.create({ subject: `Fibre fault: ${blastPoint.label}` });
+      const res = await api.fleet.dispatch(ticket.id, lat, lng);
+      toast('success', `${res.detail} — ${res.distance_km} km away.`);
+      closeBlast();
+    } catch (err) {
+      const msg = err instanceof ApiError
+        ? (err.status === 409 ? 'No technician is sharing their location right now.' : err.message)
+        : 'Could not dispatch.';
+      toast('error', msg);
+    } finally {
+      setDispatching(false);
+    }
   };
 
   // ---- spans -------------------------------------------------------------------
@@ -284,11 +316,11 @@ export default function FibrePlantView() {
 
       {/* ---- blast-radius modal ---- */}
       {blast && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#141414]/40 p-4" onClick={() => setBlast(null)}>
-          <div className="bg-white border border-[#141414] w-full max-w-lg max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#141414]/40 p-4" onClick={closeBlast}>
+          <div className="bg-white border border-[#141414] w-full max-w-lg max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-[#141414] px-4 py-3">
               <h3 className="font-mono font-bold uppercase text-sm flex items-center gap-2"><Zap className="h-4 w-4 text-[#B26B00]" /> Blast radius — {blast.point.label}</h3>
-              <button onClick={() => setBlast(null)} className="cursor-pointer"><X className="h-4 w-4" /></button>
+              <button onClick={closeBlast} className="cursor-pointer"><X className="h-4 w-4" /></button>
             </div>
             <div className="p-4">
               <p className="text-sm text-[#141414]/70 mb-3">
@@ -309,6 +341,39 @@ export default function FibrePlantView() {
                     ))}
                   </tbody>
                 </table>
+              )}
+
+              {/* Dispatch: closest live technicians to this fault (dispatchers only). */}
+              {canDispatch && (
+                <div className="mt-4 pt-3 border-t border-[#141414]/15">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[11px] font-mono uppercase tracking-wider text-[#141414]/50 flex items-center gap-1.5"><HardHat className="h-3.5 w-3.5" /> Nearest technicians</span>
+                    {blastPoint?.gps_lat && blastPoint?.gps_lng ? (
+                      <Btn variant="green" onClick={dispatchNearest} disabled={dispatching || !(nearest && nearest.length)}>
+                        {dispatching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                        Dispatch nearest
+                      </Btn>
+                    ) : (
+                      <span className="text-[11px] text-[#B26B00] font-mono">this point needs a pin to dispatch</span>
+                    )}
+                  </div>
+                  {nearest === null ? (
+                    <p className="text-xs text-[#141414]/40 font-mono"><Loader2 className="h-3 w-3 animate-spin inline mr-1" /> finding…</p>
+                  ) : nearest.length === 0 ? (
+                    <p className="text-xs text-[#141414]/50">No technician is sharing their location right now.</p>
+                  ) : (
+                    <div className="space-y-1">
+                      {nearest.slice(0, 5).map((t, i) => (
+                        <div key={t.technician_id} className="flex items-center gap-2 text-xs">
+                          <span className="font-mono text-[#141414]/40 w-4">{i + 1}.</span>
+                          <span className="font-medium">{t.name || t.phone}</span>
+                          <span className="font-mono text-[#059669]">{t.distance_km} km</span>
+                          <span className="ml-auto"><NavigateButton lat={Number(t.lat)} lng={Number(t.lng)} label={t.name} compact /></span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           </div>
