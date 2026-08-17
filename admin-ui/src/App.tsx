@@ -66,6 +66,7 @@ import ReportsView from './components/ReportsView';
 import StaffView from './components/StaffView';
 import AccessControlView from './components/AccessControlView';
 import FibrePlantView from './components/FibrePlantView';
+import LocationSharing from './components/LocationSharing';
 import ForcedPasswordChange from './components/ForcedPasswordChange';
 
 // ---- navigation model -------------------------------------------------------
@@ -656,6 +657,10 @@ export default function App() {
             </button>
           </div>
         )}
+
+        {/* Field technicians share their live location for dispatch while signed in. Auto-on for
+            the technician role, with an always-visible indicator (see LocationSharing). */}
+        <LocationSharing active={me?.role === 'tenant_technician'} />
 
         {/* Read-only roles (support) can look but not touch. Say so up front —
             otherwise every write silently 403s and looks like a broken API. */}

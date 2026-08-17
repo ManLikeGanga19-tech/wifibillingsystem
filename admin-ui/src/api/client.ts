@@ -912,6 +912,37 @@ export interface BlastRadius {
   clients: AffectedClient[];
 }
 
+// ---- Fleet tracking -----------------------------------------------------------
+export interface FleetMember {
+  technician_id: number;
+  name: string;
+  phone: string;
+  lat: string;
+  lng: string;
+  accuracy: number | null;
+  heading: string | null;
+  recorded_at: string;
+  is_live: boolean;
+}
+export interface FleetData {
+  live_window_minutes: number;
+  members: FleetMember[];
+}
+export interface NearestTech {
+  technician_id: number;
+  name: string;
+  phone: string;
+  lat: string;
+  lng: string;
+  recorded_at: string;
+  distance_km: number;
+}
+export interface NearestData {
+  target: { lat: number; lng: number };
+  count: number;
+  technicians: NearestTech[];
+}
+
 export interface LoyaltyRedeemablePlan {
   plan_id: number;
   plan_name: string;
@@ -1570,6 +1601,20 @@ export const api = {
         request<FibreSpan>(`/fibre/spans/${id}/`, { method: 'PATCH', body: JSON.stringify(data) }),
       remove: (id: number) => request<null>(`/fibre/spans/${id}/`, { method: 'DELETE' }),
     },
+  },
+
+  /** Fleet tracking. A technician reports their own position; a dispatcher sees the fleet. */
+  fleet: {
+    ping: (data: { lat: string; lng: string; accuracy?: number; heading?: number }) =>
+      request<{ detail: string }>('/fleet/ping/', { method: 'POST', body: JSON.stringify(data) }),
+    list: () => request<FleetData>('/fleet/'),
+    nearest: (lat: number, lng: number) =>
+      request<NearestData>(`/fleet/nearest/?lat=${lat}&lng=${lng}`),
+    dispatch: (ticketId: number, lat: number, lng: number) =>
+      request<{ detail: string; technician_id: number; technician_name: string; distance_km: number }>(
+        `/ops/tickets/${ticketId}/dispatch/`,
+        { method: 'POST', body: JSON.stringify({ lat, lng }) },
+      ),
   },
 
   /** Access Control (Owner only): edit what each delegated role may do. */
