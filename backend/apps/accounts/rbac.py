@@ -29,7 +29,8 @@ HOTSPOT_VOUCHERS = "hotspot.vouchers"
 HOTSPOT_PLANS = "hotspot.plans"
 LEADS_VIEW = "leads.view"
 LEADS_WRITE = "leads.write"
-NETWORK_WRITE = "network.write"
+NETWORK_WRITE = "network.write"           # towers, APs, radio plant
+FIBRE_WRITE = "fibre.write"               # fibre outside-plant (points & spans)
 ROUTER_ACCESS = "router.access"
 TICKETS_VIEW = "tickets.view"
 TICKETS_WORK = "tickets.work"
@@ -51,7 +52,7 @@ ALL_TENANT_CAPS = frozenset({
     CLIENTS_VIEW, CLIENTS_WRITE, CLIENTS_PLAN, CLIENTS_FIELD,
     HOTSPOT_VOUCHERS, HOTSPOT_PLANS,
     LEADS_VIEW, LEADS_WRITE,
-    NETWORK_WRITE, ROUTER_ACCESS,
+    NETWORK_WRITE, FIBRE_WRITE, ROUTER_ACCESS,
     TICKETS_VIEW, TICKETS_WORK, TICKETS_ASSIGN,
     PAYMENTS_VIEW_AMOUNTS, PAYMENTS_STATUS,
     FINANCE_VIEW, MONEY_MANAGE,
@@ -86,7 +87,7 @@ _CARE = frozenset({
 
 _TECHNICIAN = frozenset({
     CLIENTS_VIEW, CLIENTS_FIELD,
-    NETWORK_WRITE, ROUTER_ACCESS,
+    NETWORK_WRITE, FIBRE_WRITE, ROUTER_ACCESS,   # fibre bundled with radio plant by default
     TICKETS_VIEW, TICKETS_WORK,
     LEADS_VIEW,
     MAP_VIEW,
@@ -113,7 +114,8 @@ CAPABILITY_CATALOG = [
     ("Customers", HOTSPOT_VOUCHERS, "Issue hotspot vouchers"),
     ("Customers", LEADS_VIEW, "See leads"),
     ("Customers", LEADS_WRITE, "Manage leads (CRM)"),
-    ("Network", NETWORK_WRITE, "Towers, access points & plant"),
+    ("Network", NETWORK_WRITE, "Towers, access points & radio plant"),
+    ("Network", FIBRE_WRITE, "Fibre plant (points & spans)"),
     ("Network", ROUTER_ACCESS, "Router access & provisioning"),
     ("Network", HOTSPOT_PLANS, "Create & price plans"),
     ("Network", MAP_VIEW, "Open the map"),

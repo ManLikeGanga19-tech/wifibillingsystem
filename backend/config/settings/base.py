@@ -33,6 +33,7 @@ INSTALLED_APPS = [
     "apps.pppoe",
     "apps.loyalty",
     "apps.maps",
+    "apps.fibre",
     "apps.signup",
     "apps.assistant",
     "apps.developer",

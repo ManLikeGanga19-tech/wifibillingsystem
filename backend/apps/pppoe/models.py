@@ -169,6 +169,14 @@ class Client(OperatorOwnedModel):
     access_point = models.ForeignKey(
         AccessPoint, null=True, blank=True, on_delete=models.SET_NULL, related_name="clients"
     )
+    # FIBRE customers hang off the ODP/splitter that feeds them — the parallel to access_point on
+    # the wireless side. Drives blast-radius ("who's offline if this point fails") and ODP port
+    # usage. Nullable + SET_NULL: only fibre clients set it, and losing the point never deletes
+    # the customer. A hybrid ISP uses access_point for radio clients and fibre_point for fibre.
+    fibre_point = models.ForeignKey(
+        "fibre.FibrePoint", null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="fibre_clients",
+    )
     cpe_equipment = models.ForeignKey(
         "ops.Equipment",
         null=True,
