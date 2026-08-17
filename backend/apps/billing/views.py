@@ -11,10 +11,12 @@ from rest_framework.views import APIView
 
 from apps.accounts import mfa
 from apps.accounts.mfa import MfaError, MfaRequired
+from apps.accounts.rbac import FINANCE_VIEW
 from apps.core.permissions import (
     CanManageMoney,
     IsPlatformOwner,
     IsPlatformStaff,
+    RequireCapability,
     RequireTenant,
     TenantCanTransact,
     TenantIsOperational,
@@ -39,7 +41,10 @@ from .services import (
 class WalletSummaryView(APIView):
     """ISP wallet: balance + this month's earnings picture. Tenant-only."""
 
-    permission_classes = [IsAdminUser, RequireTenant, TenantIsOperational]
+    # The wallet balance is financial data — Owner/Admin. Withdrawing from it is a separate,
+    # owner-only (CanManageMoney) action elsewhere.
+    permission_classes = [IsAdminUser, RequireTenant, TenantIsOperational,
+                          RequireCapability(FINANCE_VIEW)]
 
     def get(self, request):
         operator = acting_tenant(request)
@@ -67,14 +72,17 @@ class WalletSummaryView(APIView):
 
 
 class LedgerViewSet(TenantReadOnlyViewSet):
+    read_capability = FINANCE_VIEW       # the books — Owner/Admin
     serializer_class = LedgerEntrySerializer
     queryset = LedgerEntry.objects.order_by("-created_at")
 
 
 class MyPayoutsViewSet(TenantReadOnlyViewSet):
     """Withdrawals are money movement: ISP OWNER only (a manager runs ops but
-    cannot move cash out; support is read-only)."""
+    cannot move cash out; support is read-only). Reading the payout HISTORY is finance.view
+    (Owner/Admin); actually withdrawing is CanManageMoney (owner + TOTP) on a separate view."""
 
+    read_capability = FINANCE_VIEW
     serializer_class = PayoutSerializer
     queryset = Payout.objects.order_by("-created_at")
     permission_classes = [

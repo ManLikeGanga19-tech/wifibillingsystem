@@ -5,6 +5,15 @@ from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.accounts.rbac import (
+    FINANCE_VIEW,
+    LEADS_VIEW,
+    LEADS_WRITE,
+    NETWORK_WRITE,
+    TICKETS_ASSIGN,
+    TICKETS_VIEW,
+    TICKETS_WORK,
+)
 from apps.core.permissions import RequireTenant, TenantIsOperational
 from apps.core.schema import OBJECT_RESPONSE
 from apps.core.tenancy import acting_tenant
@@ -26,21 +35,56 @@ class StatusFilterMixin:
 class TicketViewSet(StatusFilterMixin, TenantModelViewSet):
     serializer_class = TicketSerializer
     queryset = Ticket.objects.select_related("subscriber").order_by("-created_at")
+    read_capability = TICKETS_VIEW
+    write_capability = TICKETS_WORK          # Owner/Admin/Care/Technician may all work a ticket
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = self.request.user
+        # LAYER B row-scoping: a technician sees ONLY the tickets assigned to them. The proxy for
+        # "technician" is "can view but cannot assign" — the only tenant role in that shape.
+        # Platform staff bypass capabilities and keep the full support view.
+        if (not user.is_platform_staff
+                and user.has_capability(TICKETS_VIEW)
+                and not user.has_capability(TICKETS_ASSIGN)):
+            qs = qs.filter(assigned_to=user)
+        return qs
+
+    def _strip_assignment(self, serializer):
+        # Handing a ticket to a technician is tickets.assign (Care/Admin/Owner). A technician
+        # working their own ticket may change its status but never re-route it — drop assigned_to.
+        user = self.request.user
+        if "assigned_to" in serializer.validated_data and not user.has_capability(TICKETS_ASSIGN):
+            serializer.validated_data.pop("assigned_to")
+
+    def perform_create(self, serializer):
+        self._strip_assignment(serializer)
+        super().perform_create(serializer)
+
+    def perform_update(self, serializer):
+        self._strip_assignment(serializer)
+        super().perform_update(serializer)
 
 
 class LeadViewSet(StatusFilterMixin, TenantModelViewSet):
     serializer_class = LeadSerializer
     queryset = Lead.objects.order_by("-created_at")
+    read_capability = LEADS_VIEW             # technician: read-only (map layer)
+    write_capability = LEADS_WRITE           # the CRM — Care/Admin/Owner
 
 
 class ExpenseViewSet(TenantModelViewSet):
     serializer_class = ExpenseSerializer
     queryset = Expense.objects.select_related("router").order_by("-date", "-created_at")
+    read_capability = FINANCE_VIEW           # the books — Owner/Admin
+    write_capability = FINANCE_VIEW
 
 
 class EquipmentViewSet(StatusFilterMixin, TenantModelViewSet):
     serializer_class = EquipmentSerializer
     queryset = Equipment.objects.select_related("router").order_by("-created_at")
+    read_capability = NETWORK_WRITE          # CPE / plant inventory — Owner/Admin/Technician
+    write_capability = NETWORK_WRITE
 
 
 class PlatformFeesView(APIView):

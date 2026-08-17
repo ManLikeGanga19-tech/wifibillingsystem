@@ -6,9 +6,11 @@ from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.accounts.rbac import HOTSPOT_VOUCHERS, SETTINGS_WRITE
 from apps.core.permissions import (
     NotBillingLocked,
     ReadOnlyForSupport,
+    RequireCapability,
     RequireTenant,
     TenantIsOperational,
 )
@@ -43,8 +45,10 @@ def _as_dict(row: LoyaltySettings) -> dict:
 class LoyaltySettingsView(APIView):
     """Read and update this ISP's loyalty programme."""
 
+    # Programme CONFIG is a settings screen — Owner/Admin (not the front desk, not the field).
     permission_classes = [
         IsAdminUser, RequireTenant, TenantIsOperational, ReadOnlyForSupport, NotBillingLocked,
+        RequireCapability(SETTINGS_WRITE),
     ]
 
     @extend_schema(responses=OBJECT_RESPONSE, summary="This ISP's loyalty programme settings")
@@ -71,7 +75,8 @@ class LoyaltySettingsView(APIView):
 class LoyaltySummaryView(APIView):
     """Programme health: how many subscribers are enrolled, points outstanding, top holders."""
 
-    permission_classes = [IsAdminUser, RequireTenant, TenantIsOperational]
+    permission_classes = [IsAdminUser, RequireTenant, TenantIsOperational,
+                          RequireCapability(HOTSPOT_VOUCHERS)]
 
     @extend_schema(responses=OBJECT_RESPONSE, summary="Loyalty programme summary + top holders")
     def get(self, request):
@@ -82,7 +87,8 @@ class LoyaltyAccountView(APIView):
     """Look up ONE subscriber's points — balance, what it's worth, which plans it can redeem,
     and recent activity. The screen staff use before redeeming for a walk-in customer."""
 
-    permission_classes = [IsAdminUser, RequireTenant, TenantIsOperational]
+    permission_classes = [IsAdminUser, RequireTenant, TenantIsOperational,
+                          RequireCapability(HOTSPOT_VOUCHERS)]
 
     @extend_schema(responses=OBJECT_RESPONSE, summary="One subscriber's loyalty account")
     def get(self, request):
@@ -132,6 +138,7 @@ class LoyaltyRedeemView(APIView):
 
     permission_classes = [
         IsAdminUser, RequireTenant, TenantIsOperational, ReadOnlyForSupport, NotBillingLocked,
+        RequireCapability(HOTSPOT_VOUCHERS),   # the loyalty/voucher desk — Care/Admin/Owner
     ]
 
     @extend_schema(request=OBJECT_REQUEST, responses=OBJECT_RESPONSE,
@@ -167,6 +174,7 @@ class LoyaltyAdjustView(APIView):
 
     permission_classes = [
         IsAdminUser, RequireTenant, TenantIsOperational, ReadOnlyForSupport, NotBillingLocked,
+        RequireCapability(HOTSPOT_VOUCHERS),   # the loyalty/voucher desk — Care/Admin/Owner
     ]
 
     @extend_schema(request=OBJECT_REQUEST, responses=OBJECT_RESPONSE,

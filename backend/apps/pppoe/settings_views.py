@@ -12,9 +12,11 @@ from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.accounts.rbac import SETTINGS_WRITE
 from apps.core.permissions import (
     NotBillingLocked,
     ReadOnlyForSupport,
+    RequireCapability,
     RequireTenant,
     TenantIsOperational,
 )
@@ -104,6 +106,7 @@ class PppoeSettingsView(APIView):
 
     permission_classes = [
         IsAdminUser, RequireTenant, TenantIsOperational, ReadOnlyForSupport, NotBillingLocked,
+        RequireCapability(SETTINGS_WRITE),   # settings screen — Owner/Admin
     ]
 
     @extend_schema(responses=OBJECT_RESPONSE, summary="This ISP's PPPoE lifecycle settings")

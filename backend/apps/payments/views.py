@@ -17,6 +17,7 @@ from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
+from apps.accounts.rbac import PAYMENTS_VIEW_AMOUNTS
 from apps.core.permissions import (
     IsPlatformOwner,
     IsPlatformStaff,
@@ -390,6 +391,7 @@ class PaymentSearchView(APIView):
 class TransactionViewSet(TenantReadOnlyViewSet):
     """Admin UI: live transaction feed (tenant-scoped)."""
 
+    read_capability = PAYMENTS_VIEW_AMOUNTS   # the money feed — Owner/Admin (Care sees status only)
     serializer_class = TransactionAdminSerializer
     queryset = Transaction.objects.select_related("plan", "session").order_by("-created_at")
 

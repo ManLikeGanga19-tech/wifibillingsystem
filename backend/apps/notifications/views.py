@@ -3,6 +3,7 @@ from rest_framework import mixins, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
+from apps.accounts.rbac import MESSAGING_SEND
 from apps.core.tenancy import acting_tenant
 from apps.core.viewsets import TenantReadOnlyViewSet, TenantScopedMixin
 
@@ -22,6 +23,8 @@ class CampaignViewSet(
 
     serializer_class = CampaignSerializer
     queryset = Campaign.objects.order_by("-created_at")
+    read_capability = MESSAGING_SEND     # sending to customers — Owner/Admin/Care
+    write_capability = MESSAGING_SEND
 
     def perform_create(self, serializer):
         super().perform_create(serializer)
@@ -57,6 +60,7 @@ class CampaignViewSet(
 
 
 class MessageViewSet(TenantReadOnlyViewSet):
+    read_capability = MESSAGING_SEND     # the sent-message log
     serializer_class = MessageSerializer
     queryset = Message.objects.order_by("-created_at")
 

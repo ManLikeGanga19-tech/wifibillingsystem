@@ -15,9 +15,11 @@ from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.accounts.rbac import BUSINESS_LOCATION_WRITE, MAP_VIEW
 from apps.core.permissions import (
     NotBillingLocked,
     ReadOnlyForSupport,
+    RequireCapability,
     RequireTenant,
     TenantIsOperational,
 )
@@ -34,7 +36,8 @@ class MapDataView(APIView):
     """All of this ISP's map points in one call, grouped by layer, plus how many of each still
     need a pin, plus a sensible centre for the initial viewport."""
 
-    permission_classes = [IsAdminUser, RequireTenant, TenantIsOperational]
+    permission_classes = [IsAdminUser, RequireTenant, TenantIsOperational,
+                          RequireCapability(MAP_VIEW)]
 
     @extend_schema(responses=OBJECT_RESPONSE,
                    summary="Tenant map points (towers, clients, routers, leads)")
@@ -121,9 +124,12 @@ class BusinessLocationView(APIView):
 
     def get_permissions(self):
         if self.request.method in ("GET", "HEAD", "OPTIONS"):
-            return [IsAdminUser(), RequireTenant(), TenantIsOperational()]
+            return [IsAdminUser(), RequireTenant(), TenantIsOperational(),
+                    RequireCapability(MAP_VIEW)]
+        # Setting the base of operations is an Owner/Admin decision, not the front desk or field.
         return [IsAdminUser(), RequireTenant(), TenantIsOperational(),
-                ReadOnlyForSupport(), NotBillingLocked()]
+                ReadOnlyForSupport(), NotBillingLocked(),
+                RequireCapability(BUSINESS_LOCATION_WRITE)]
 
     @extend_schema(responses=OBJECT_RESPONSE, summary="This ISP's business location")
     def get(self, request):

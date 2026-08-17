@@ -14,6 +14,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.accounts.rbac import ROUTER_ACCESS
 from apps.core.permissions import IsPlatformOwner, IsPlatformStaff
 from apps.core.schema import OBJECT_REQUEST, OBJECT_RESPONSE
 from apps.core.services import audit
@@ -29,6 +30,8 @@ from .tasks import suspend_session, sync_router
 class RouterViewSet(TenantModelViewSet):
     serializer_class = RouterSerializer
     queryset = Router.objects.all()
+    read_capability = ROUTER_ACCESS      # MikroTik access — Owner/Admin/Technician
+    write_capability = ROUTER_ACCESS
 
     @action(detail=True, methods=["get"])
     def setup_script(self, request, pk=None):
@@ -204,6 +207,7 @@ def router_enroll(request):
 
 
 class SessionViewSet(TenantReadOnlyViewSet):
+    read_capability = ROUTER_ACCESS      # live sessions are a network diagnostic
     serializer_class = SessionSerializer
     queryset = (
         Session.objects.select_related("plan", "router", "subscriber")

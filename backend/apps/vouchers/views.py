@@ -4,6 +4,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 
+from apps.accounts.rbac import HOTSPOT_VOUCHERS
 from apps.core.public import PublicAPIView
 from apps.core.schema import OBJECT_REQUEST, OBJECT_RESPONSE
 from apps.core.viewsets import TenantReadOnlyViewSet
@@ -16,6 +17,10 @@ from .services import VoucherError, generate_batch, redeem
 
 
 class VoucherViewSet(TenantReadOnlyViewSet):
+    # The whole voucher desk — read the batch, and the write ACTIONS (generate a batch, SMS a
+    # code) — is Care/Admin/Owner. Not the technician.
+    read_capability = HOTSPOT_VOUCHERS
+    write_capability = HOTSPOT_VOUCHERS
     serializer_class = VoucherSerializer
     queryset = Voucher.objects.select_related("plan").order_by("-created_at")
 

@@ -126,6 +126,7 @@ class SubscriberViewSet(TenantReadOnlyViewSet):
     queryset that forgot to filter. Every list inheriting the same base is the control.
     """
 
+    read_capability = "clients.view"     # customers are visible to the whole console
     serializer_class = SubscriberSerializer
     queryset = Subscriber.objects.all()
 

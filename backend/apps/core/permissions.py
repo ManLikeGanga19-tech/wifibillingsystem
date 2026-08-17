@@ -184,6 +184,37 @@ class RequireCapability(BasePermission):
         return False
 
 
+class HasViewsetCapability(BasePermission):
+    """LAYER A on the tenant viewsets: enforce the capability a viewset DECLARES, by method.
+
+    A viewset sets `read_capability` (list/retrieve) and/or `write_capability` (create/update/
+    delete) as class attributes; either may be a single capability string or an iterable of them
+    (ANY-of — e.g. a client is writable by clients.write OR clients.field OR clients.plan, with the
+    narrower ones field-scoped in the serializer). A `None` capability means "not gated here", so a
+    viewset that hasn't opted in behaves exactly as before.
+
+    Platform staff BYPASS this gate: platform support must still read every tenant's data for
+    support, and its writes are already refused by ReadOnlyForSupport. Platform owner has full
+    power. Keeping them out of the capability map preserves today's platform behaviour unchanged.
+    """
+
+    def has_permission(self, request, view):
+        user = request.user
+        if not (user and user.is_authenticated):
+            return False
+        if user.is_platform_staff:
+            return True
+        attr = "read_capability" if request.method in SAFE_METHODS else "write_capability"
+        needed = getattr(view, attr, None)
+        if needed is None:
+            return True
+        caps = (needed,) if isinstance(needed, str) else tuple(needed)
+        if any(user.has_capability(c) for c in caps):
+            return True
+        self.message = "Your role does not allow this action here."
+        return False
+
+
 class CanManageMoney(BasePermission):
     """Withdrawals and payout destinations: the ISP OWNER, acting as themselves."""
 

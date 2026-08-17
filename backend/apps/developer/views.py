@@ -7,6 +7,7 @@ from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.accounts.rbac import SETTINGS_WRITE
 from apps.core.permissions import RequireTenant, TenantIsOperational
 from apps.core.schema import OBJECT_RESPONSE
 from apps.core.services import audit
@@ -30,6 +31,8 @@ class ApiTokenViewSet(
     list that should have its own hand-rolled filter.
     """
 
+    read_capability = SETTINGS_WRITE     # developer/API access — Owner/Admin
+    write_capability = SETTINGS_WRITE
     serializer_class = ApiTokenSerializer
     queryset = ApiToken.objects.all()
 
@@ -70,6 +73,8 @@ class ApiTokenViewSet(
 class WebhookViewSet(TenantModelViewSet):
     """CRUD over an ISP's outbound webhooks."""
 
+    read_capability = SETTINGS_WRITE     # integration settings — Owner/Admin
+    write_capability = SETTINGS_WRITE
     serializer_class = WebhookSerializer
     queryset = Webhook.objects.all()
 

@@ -17,6 +17,15 @@ from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle
 from rest_framework.views import APIView
 
+from apps.accounts.rbac import (
+    CLIENTS_FIELD,
+    CLIENTS_PLAN,
+    CLIENTS_VIEW,
+    CLIENTS_WRITE,
+    FINANCE_VIEW,
+    HOTSPOT_PLANS,
+    NETWORK_WRITE,
+)
 from apps.core.permissions import RequireTenant, TenantCanTransact, TenantIsOperational
 from apps.core.public import PublicAPIView
 from apps.core.schema import OBJECT_REQUEST, OBJECT_RESPONSE
@@ -48,11 +57,17 @@ from .services import (
 class ServicePlanViewSet(TenantModelViewSet):
     serializer_class = ServicePlanSerializer
     queryset = ServicePlan.objects.all()
+    # Anyone who assigns a plan to a client must be able to read the list (Care/Admin/Owner);
+    # only plan CONFIG (pricing) is an Admin/Owner job.
+    read_capability = CLIENTS_PLAN
+    write_capability = HOTSPOT_PLANS
 
 
 class TowerViewSet(TenantModelViewSet):
     serializer_class = TowerSerializer
     queryset = Tower.objects.all()
+    read_capability = NETWORK_WRITE      # network plant — Owner/Admin/Technician
+    write_capability = NETWORK_WRITE
 
     def get_queryset(self):
         # super() applies the tenant filter (TenantScopedMixin) — never bypass it
@@ -64,6 +79,8 @@ class TowerViewSet(TenantModelViewSet):
 class AccessPointViewSet(TenantModelViewSet):
     serializer_class = AccessPointSerializer
     queryset = AccessPoint.objects.all()
+    read_capability = NETWORK_WRITE
+    write_capability = NETWORK_WRITE
 
     def get_queryset(self):
         # super() applies the tenant filter (TenantScopedMixin) — never bypass it
@@ -89,6 +106,17 @@ class ClientViewSet(TenantModelViewSet):
     #: anyone on, because that would mean money flowing through our paybill for a
     #: business we have not checked.
     MONEY_ACTIONS = {"provision", "restore", "import_run", "import_csv"}
+
+    #: RBAC. Reading a client is for the whole console (clients.view). Writing splits: creating or
+    #: removing a customer, and bulk import, are an office job (clients.write — Care/Admin/Owner);
+    #: editing in place and the field-ops actions (provision/suspend/restore/reset) also admit the
+    #: TECHNICIAN via clients.field, whose edits are then narrowed to status+location below.
+    read_capability = CLIENTS_VIEW
+    TECH_ACTIONS = {"update", "partial_update", "provision", "suspend", "restore", "reset_password"}
+
+    @property
+    def write_capability(self):
+        return (CLIENTS_WRITE, CLIENTS_FIELD) if self.action in self.TECH_ACTIONS else CLIENTS_WRITE
 
     def get_permissions(self):
         perms = super().get_permissions()
@@ -177,7 +205,23 @@ class ClientViewSet(TenantModelViewSet):
         )
         serializer.instance = client
 
+    #: A field TECHNICIAN (clients.field but not clients.write) may only correct where a customer
+    #: is and whether they're on — never rename them, move their plan, or change billing. Anything
+    #: else in the payload is dropped rather than rejected, so a full edit form still saves the two
+    #: fields the tech is allowed to touch.
+    TECH_EDITABLE_FIELDS = {"status", "gps_lat", "gps_lng"}
+
     def perform_update(self, serializer):
+        user = self.request.user
+        if not user.has_capability(CLIENTS_WRITE) and user.has_capability(CLIENTS_FIELD):
+            for field in list(serializer.validated_data):
+                if field not in self.TECH_EDITABLE_FIELDS:
+                    serializer.validated_data.pop(field)
+        # A plan change is a billing decision (clients.plan); strip it from anyone who lacks that
+        # capability so an edit can't reprice a customer sideways.
+        if "plan" in serializer.validated_data and not user.has_capability(CLIENTS_PLAN):
+            serializer.validated_data.pop("plan")
+
         # Credentials are set at create and changed only via reset_password (which re-pushes
         # to the router). A plain edit must never change them here, or the DB password would
         # silently diverge from the one on the MikroTik.
@@ -425,6 +469,7 @@ class ClientViewSet(TenantModelViewSet):
 class InvoiceViewSet(TenantReadOnlyViewSet):
     serializer_class = InvoiceSerializer
     queryset = Invoice.objects.select_related("client").order_by("-issued_at")
+    read_capability = FINANCE_VIEW      # invoices carry amounts — Owner/Admin
 
     def get_queryset(self):
         qs = super().get_queryset()

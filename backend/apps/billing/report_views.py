@@ -10,7 +10,8 @@ from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.core.permissions import RequireTenant, TenantIsOperational
+from apps.accounts.rbac import FINANCE_VIEW
+from apps.core.permissions import RequireCapability, RequireTenant, TenantIsOperational
 from apps.core.schema import OBJECT_RESPONSE
 from apps.core.tenancy import acting_tenant
 
@@ -18,7 +19,9 @@ from . import reports
 
 
 class _ReportBase(APIView):
-    permission_classes = [IsAdminUser, RequireTenant, TenantIsOperational]
+    # Revenue + CSV exports are the books — Owner/Admin only (Care/Technician can't read them).
+    permission_classes = [IsAdminUser, RequireTenant, TenantIsOperational,
+                          RequireCapability(FINANCE_VIEW)]
 
 
 @extend_schema(responses=OBJECT_RESPONSE,
