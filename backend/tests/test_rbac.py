@@ -23,10 +23,12 @@ class TestCapabilityMap:
         assert set(u.capabilities) == set(rbac.ALL_TENANT_CAPS)
         assert u.has_capability(rbac.MONEY_MANAGE)
 
-    def test_admin_is_owner_minus_money(self):
+    def test_admin_is_owner_minus_non_delegable(self):
         u = UserFactory(role=Role.TENANT_ADMIN)
-        assert set(u.capabilities) == set(rbac.ALL_TENANT_CAPS) - {rbac.MONEY_MANAGE}
+        # Admin gets everything EXCEPT the two non-delegable powers (move money, edit permissions).
+        assert set(u.capabilities) == set(rbac.ALL_TENANT_CAPS) - rbac.NON_DELEGABLE
         assert not u.has_capability(rbac.MONEY_MANAGE)
+        assert not u.has_capability(rbac.RBAC_MANAGE)
         # but a full operator otherwise — routers, network, plans, staff
         assert u.has_capability(rbac.NETWORK_WRITE)
         assert u.has_capability(rbac.ROUTER_ACCESS)

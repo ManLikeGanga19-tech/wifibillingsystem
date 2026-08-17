@@ -512,6 +512,27 @@ export interface StaffMember {
   date_joined: string;
 }
 
+/** Access Control (owner-only): the editable role→capability model. */
+export interface CapabilityCatalogEntry {
+  group: string;
+  capability: Capability;
+  label: string;
+}
+export interface RoleState {
+  role: Role;
+  label: string;
+  capabilities: Capability[];
+  default_capabilities: Capability[];
+  /** true once the owner has customised this role away from the recommended defaults. */
+  is_custom: boolean;
+}
+export interface AccessControlData {
+  catalog: CapabilityCatalogEntry[];
+  roles: RoleState[];
+  /** Powers that can never be granted to a delegated role (money.manage, rbac.manage). */
+  non_delegable: Capability[];
+}
+
 export interface GoLiveBlocker {
   key: string;
   label: string;
@@ -1458,6 +1479,14 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ password }),
       }),
+  },
+
+  /** Access Control (Owner only): edit what each delegated role may do. */
+  rbac: {
+    get: () => request<AccessControlData>('/rbac/'),
+    setRole: (role: Role, capabilities: Capability[]) =>
+      request<RoleState>(`/rbac/${role}/`, { method: 'PUT', body: JSON.stringify({ capabilities }) }),
+    resetRole: (role: Role) => request<RoleState>(`/rbac/${role}/`, { method: 'DELETE' }),
   },
 
   /** Leave an ISP we were granted access to. The server clears the acting-tenant

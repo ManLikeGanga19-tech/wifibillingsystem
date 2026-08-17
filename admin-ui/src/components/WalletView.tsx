@@ -16,7 +16,7 @@ const ENTRY_LABEL: Record<ApiLedgerEntry['entry_type'], { label: string; color: 
   adjustment: { label: 'Adjustment', color: 'gray' },
 };
 
-export default function WalletView() {
+export default function WalletView({ canWithdraw }: { canWithdraw: boolean }) {
   const [summary, setSummary] = useState<WalletSummary | null>(null);
   const [ledger, setLedger] = useState<ApiLedgerEntry[] | null>(null);
   const [payouts, setPayouts] = useState<ApiPayout[]>([]);
@@ -157,7 +157,12 @@ export default function WalletView() {
       )}
 
       <Panel title="Withdraw earnings">
-        {!settlement?.has_account ? (
+        {!canWithdraw ? (
+          <p className="text-xs font-mono text-[#141414]/70 max-w-md">
+            Withdrawals are the ISP owner's to make. You can see the balance and history here,
+            but moving money out is owner-only.
+          </p>
+        ) : !settlement?.has_account ? (
           <p className="text-xs font-mono text-[#141414]/70 max-w-md">
             Add your payout account in <b>Settings → Payments</b> first — every withdrawal
             goes there. Changing it later needs a code we email you.
@@ -185,7 +190,7 @@ export default function WalletView() {
 
         {/* Transfer-cost breakdown — the ISP sees exactly what they'll receive and where the
             cost goes, before they commit. */}
-        {quote && Number(quote.amount) > 0 && (
+        {canWithdraw && quote && Number(quote.amount) > 0 && (
           <div className="mt-3 max-w-md border border-[#141414]/20 bg-[#f4f4f2] p-3 text-xs font-mono">
             <div className="flex justify-between py-0.5">
               <span className="text-[#141414]/60">Withdraw</span>

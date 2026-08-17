@@ -16,6 +16,7 @@ from .mfa_views import (
     MfaSetupView,
     MfaStatusView,
 )
+from .rbac_views import AccessControlView, RoleCapabilitiesView
 from .staff_views import StaffViewSet
 from .views import MeView, SubscriberViewSet
 
@@ -43,5 +44,8 @@ urlpatterns = [
     path("auth/token/", TokenObtainPairView.as_view(), name="token-obtain"),
     path("auth/token/refresh/", TokenRefreshView.as_view(), name="token-refresh"),
     path("me/", MeView.as_view(), name="me"),
+    # Access Control — the Owner edits what each delegated role may do (rbac.manage, owner-only).
+    path("rbac/", AccessControlView.as_view(), name="rbac-access-control"),
+    path("rbac/<str:role>/", RoleCapabilitiesView.as_view(), name="rbac-role"),
     *router.urls,
 ]

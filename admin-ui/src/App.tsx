@@ -26,6 +26,7 @@ import {
   Map as MapIcon,
   UsersRound,
   ShieldAlert,
+  ShieldCheck,
 } from 'lucide-react';
 
 import { BandwidthProfile, Subscriber, OutboundCampaign } from './types';
@@ -62,6 +63,7 @@ import SettingsView from './components/SettingsView';
 import WalletView from './components/WalletView';
 import ReportsView from './components/ReportsView';
 import StaffView from './components/StaffView';
+import AccessControlView from './components/AccessControlView';
 import ForcedPasswordChange from './components/ForcedPasswordChange';
 
 // ---- navigation model -------------------------------------------------------
@@ -89,7 +91,8 @@ type TabId =
   | 'pppoe_invoices'
   | 'network'
   | 'map'
-  | 'team';
+  | 'team'
+  | 'access';
 
 /** Every section the URL is allowed to name. Anything else in the hash is somebody
  *  typing, or a stale link to a renamed page — fall back rather than render blank. */
@@ -97,7 +100,7 @@ const KNOWN_TABS: ReadonlySet<TabId> = new Set<TabId>([
   'dashboard', 'active_users', 'users', 'tickets', 'leads', 'packages', 'payments',
   'vouchers', 'expenses', 'messages', 'emails', 'campaigns', 'mikrotik', 'equipment',
   'settings', 'wallet', 'reports', 'pppoe_clients', 'pppoe_plans', 'pppoe_invoices',
-  'network', 'map', 'team',
+  'network', 'map', 'team', 'access',
 ]);
 
 /** RBAC (mirrors backend accounts/rbac.py): the capability a tab needs to appear + open. null =
@@ -126,6 +129,7 @@ const TAB_CAPABILITY: Record<TabId, Capability | null> = {
   equipment: 'network.write',
   settings: 'settings.write',
   team: 'staff.manage',
+  access: 'rbac.manage',
 };
 
 /** Where each role lands when the console opens — its primary workspace. Owner/Admin (and platform
@@ -198,6 +202,7 @@ const NAV_GROUPS: { title: string | null; items: NavItem[] }[] = [
     title: 'Setup',
     items: [
       { id: 'team', label: 'Team', icon: UsersRound },
+      { id: 'access', label: 'Access Control', icon: ShieldCheck },
       { id: 'settings', label: 'Settings', icon: SettingsIcon },
     ],
   },
@@ -742,7 +747,7 @@ export default function App() {
                 onSectionChange={(id) => navigate('settings', id)}
               />
             )}
-            {activeTab === 'wallet' && <WalletView />}
+            {activeTab === 'wallet' && <WalletView canWithdraw={!!me?.can_manage_money} />}
             {activeTab === 'reports' && <ReportsView />}
             {activeTab === 'pppoe_clients' && <PppoeClientsView />}
             {activeTab === 'pppoe_plans' && <PppoePlansView />}
@@ -750,6 +755,7 @@ export default function App() {
             {activeTab === 'network' && <NetworkView />}
             {activeTab === 'map' && <MapView onNavigate={(tab) => setActiveTab(tab as TabId)} />}
             {activeTab === 'team' && me && <StaffView me={me} />}
+            {activeTab === 'access' && <AccessControlView />}
           </div>
         </div>
 

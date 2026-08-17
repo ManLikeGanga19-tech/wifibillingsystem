@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 from django.db import models
 from django.db.models.functions import Lower
@@ -188,6 +189,30 @@ class User(AbstractBaseUser, PermissionsMixin):
 
         type(self).objects.filter(pk=self.pk).update(session_version=F("session_version") + 1)
         self.refresh_from_db(fields=["session_version"])
+
+
+class OperatorRoleConfig(models.Model):
+    """An Owner's per-tenant override of what a delegated role (admin/care/technician) may do,
+    set on the Access Control page. Absent = use the recommended defaults (rbac.ROLE_CAPABILITIES).
+    Only ASSIGNABLE_CAPS are ever honoured — money.manage / rbac.manage stay with the Owner, which
+    capabilities_for() enforces regardless of what's stored here."""
+
+    operator = models.ForeignKey(Operator, on_delete=models.CASCADE, related_name="role_configs")
+    role = models.CharField(max_length=20, choices=Role.choices)
+    #: The exact capability strings this role holds at this tenant (a list of rbac.* constants).
+    capabilities = models.JSONField(default=list)
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["operator", "role"], name="uniq_operator_role_config")
+        ]
+
+    def __str__(self):
+        return f"{self.operator_id}:{self.role} ({len(self.capabilities)} caps)"
 
 
 class Subscriber(models.Model):
