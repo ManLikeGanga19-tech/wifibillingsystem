@@ -1,6 +1,6 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { LifeBuoy, Plus } from 'lucide-react';
-import { api, ApiTicket } from '../api/client';
+import { api, ApiTicket, TicketAssignee } from '../api/client';
 import {
   Badge, Btn, Field, FilterChips, inputCls, Panel, RefreshBtn, TableShell, tdCls, toast, useList, ViewHeader, fmtDateTime,
 } from './ui';
@@ -24,16 +24,32 @@ const NEXT_STATUS: Partial<Record<ApiTicket['status'], { to: ApiTicket['status']
   resolved: { to: 'closed', label: 'Close' },
 };
 
-export default function TicketsView() {
+export default function TicketsView({ canAssign = false }: { canAssign?: boolean }) {
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>('open');
   const [showForm, setShowForm] = useState(false);
   const [subject, setSubject] = useState('');
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState<ApiTicket['priority']>('normal');
+  const [assignees, setAssignees] = useState<TicketAssignee[]>([]);
   const { rows, count, error, refreshing, reload } = useList(
     () => api.tickets.list(filter === 'all' ? '' : `?status=${filter}`),
     [filter]
   );
+
+  // Dispatchers (tickets.assign) get the technician list for the "assign to" picker.
+  useEffect(() => {
+    if (canAssign) api.tickets.assignees().then(setAssignees).catch(() => {});
+  }, [canAssign]);
+
+  const assign = async (t: ApiTicket, userId: number | null) => {
+    try {
+      await api.tickets.update(t.id, { assigned_to: userId });
+      toast('success', userId ? 'Ticket assigned.' : 'Ticket unassigned.');
+      reload();
+    } catch {
+      toast('error', 'Failed to assign the ticket.');
+    }
+  };
 
   const create = async (e: FormEvent) => {
     e.preventDefault();
@@ -95,7 +111,7 @@ export default function TicketsView() {
       <FilterChips options={FILTERS} value={filter} onChange={setFilter} right={<span className="text-[11px] font-mono text-[#141414]/50">{count} tickets</span>} />
 
       <TableShell
-        headers={['#', 'Subject', 'Client', 'Priority', 'Status', 'Created', '']}
+        headers={['#', 'Subject', 'Client', 'Priority', 'Status', 'Assigned to', 'Created', '']}
         loading={rows === null}
         error={error}
         empty="No tickets here — that's a good thing."
@@ -110,6 +126,20 @@ export default function TicketsView() {
             <td className={`${tdCls} font-mono`}>{t.subscriber_phone || '—'}</td>
             <td className={tdCls}><Badge color={PRIORITY_COLOR[t.priority]}>{t.priority}</Badge></td>
             <td className={tdCls}><Badge color={STATUS_COLOR[t.status]}>{t.status.replace('_', ' ')}</Badge></td>
+            <td className={tdCls}>
+              {canAssign ? (
+                <select
+                  value={t.assigned_to ?? ''}
+                  onChange={(e) => assign(t, e.target.value ? Number(e.target.value) : null)}
+                  className="border border-[#141414]/30 px-1.5 py-1 text-xs bg-white cursor-pointer max-w-[9rem]"
+                >
+                  <option value="">Unassigned</option>
+                  {assignees.map((a) => <option key={a.id} value={a.id}>{a.name || a.phone}</option>)}
+                </select>
+              ) : (
+                <span className="text-xs">{t.assigned_to_name || '—'}</span>
+              )}
+            </td>
             <td className={`${tdCls} font-mono whitespace-nowrap`}>{fmtDateTime(t.created_at)}</td>
             <td className={tdCls}>
               {NEXT_STATUS[t.status] && (

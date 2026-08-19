@@ -427,8 +427,14 @@ export interface ApiTicket {
   status: 'open' | 'in_progress' | 'resolved' | 'closed';
   priority: 'low' | 'normal' | 'high' | 'urgent';
   assigned_to: number | null;
+  assigned_to_name: string;
   created_at: string;
   resolved_at: string | null;
+}
+export interface TicketAssignee {
+  id: number;
+  name: string;
+  phone: string;
 }
 
 export interface ApiLead {
@@ -2061,7 +2067,11 @@ export const api = {
     deviceInfo: (id: number) => request<DeviceInfo>(`/routers/${id}/device_info/`),
   },
 
-  tickets: crud<ApiTicket>('/ops/tickets'),
+  tickets: {
+    ...crud<ApiTicket>('/ops/tickets'),
+    /** The technicians a ticket can be assigned to (tickets.assign). */
+    assignees: () => request<TicketAssignee[]>('/ops/tickets/assignees/'),
+  },
   leads: crud<ApiLead>('/ops/leads'),
   expenses: {
     ...crud<ApiExpense>('/ops/expenses'),

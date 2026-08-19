@@ -731,7 +731,7 @@ export default function App() {
             {activeTab === 'dashboard' && <LiveDashboard onNavigate={(tab) => setActiveTab(tab as TabId)} />}
             {activeTab === 'active_users' && <ActiveUsersView />}
             {activeTab === 'users' && <UsersView />}
-            {activeTab === 'tickets' && <TicketsView />}
+            {activeTab === 'tickets' && <TicketsView canAssign={can(me, 'tickets.assign')} />}
             {activeTab === 'leads' && <LeadsView />}
             {activeTab === 'packages' && (
               <PlanConfigurator

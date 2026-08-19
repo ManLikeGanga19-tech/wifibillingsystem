@@ -33,6 +33,7 @@ class TicketSerializer(serializers.ModelSerializer):
     assigned_to = TenantPrimaryKeyRelatedField(
         queryset=User.objects.filter(is_staff=True), required=False, allow_null=True
     )
+    assigned_to_name = serializers.CharField(source="assigned_to.name", read_only=True, default="")
 
     class Meta:
         model = Ticket
@@ -45,6 +46,7 @@ class TicketSerializer(serializers.ModelSerializer):
             "status",
             "priority",
             "assigned_to",
+            "assigned_to_name",
             "created_at",
             "resolved_at",
         ]

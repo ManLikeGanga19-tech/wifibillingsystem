@@ -80,6 +80,26 @@ class TestTicketRowScoping:
         care_api, _ = client_for(Role.TENANT_CARE, op)
         assert len(rows(care_api.get(reverse("ticket-list")))) == 2
 
+    def test_dispatcher_assigns_a_ticket_from_the_assignees_list(self, op):
+        from apps.ops.models import Ticket
+        tech = UserFactory(role=Role.TENANT_TECHNICIAN, operator=op, is_staff=True, name="Otieno")
+        ticket = Ticket.objects.create(operator=op, subject="No internet")
+        care = client_for(Role.TENANT_CARE, op)[0]
+
+        # the "assign to" picker lists the tenant's technicians (dispatchers only)
+        assignees = care.get(reverse("ticket-assignees")).data
+        assert tech.id in [a["id"] for a in assignees]
+
+        # ...and assigning routes it to that technician
+        resp = care.patch(reverse("ticket-detail", args=[ticket.id]), {"assigned_to": tech.id})
+        assert resp.status_code == 200
+        ticket.refresh_from_db()
+        assert ticket.assigned_to_id == tech.id
+
+    def test_technician_cannot_list_assignees(self, op):
+        tech = client_for(Role.TENANT_TECHNICIAN, op)[0]
+        assert tech.get(reverse("ticket-assignees")).status_code == 403
+
     def test_technician_may_work_a_ticket_but_not_reassign_it(self, op):
         tech_api, tech_user = client_for(Role.TENANT_TECHNICIAN, op)
         other = UserFactory(role=Role.TENANT_TECHNICIAN, operator=op, is_staff=True)

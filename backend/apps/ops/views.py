@@ -69,6 +69,24 @@ class TicketViewSet(StatusFilterMixin, TenantModelViewSet):
         self._strip_assignment(serializer)
         super().perform_update(serializer)
 
+    @extend_schema(responses=OBJECT_RESPONSE, summary="Technicians a ticket can be assigned to")
+    @action(detail=False, methods=["get"])
+    def assignees(self, request):
+        """The tenant's technicians, for the 'assign to' picker. Dispatchers only (tickets.assign) —
+        the plain ticket list is open to technicians, but who to route work to is not their call."""
+        if not request.user.has_capability(TICKETS_ASSIGN):
+            raise PermissionDenied("You don't have permission to assign tickets.")
+        from apps.accounts.models import Role, User
+
+        techs = (
+            User.objects.filter(
+                operator=self.get_operator(), is_active=True, role=Role.TENANT_TECHNICIAN
+            )
+            .order_by("name", "phone")
+            .values("id", "name", "phone")
+        )
+        return Response(list(techs))
+
     @extend_schema(request=OBJECT_REQUEST, responses=OBJECT_RESPONSE,
                    summary="Assign this ticket to the nearest live technician")
     # url_path/url_name "dispatch" for a clean /tickets/<id>/dispatch/ — but the METHOD can't be
