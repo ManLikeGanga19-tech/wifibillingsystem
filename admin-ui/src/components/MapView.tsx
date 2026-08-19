@@ -7,7 +7,7 @@ import {
   Satellite, Map as MapGlyph, Flame, Building2, X, LocateFixed,
   Waypoints, Server, Box, GitMerge, Split, CircleDot, Milestone, Circle, HardHat,
 } from 'lucide-react';
-import { api, type MapData, type MapLayer, type MapPoint, type FibreType, type FleetData } from '../api/client';
+import { api, ApiError, type MapData, type MapLayer, type MapPoint, type FibreType, type FleetData } from '../api/client';
 import { getPosition, watchPosition } from '../utils/geolocate';
 import { navLinks } from '../utils/nav';
 import MapPicker from './MapPicker';
@@ -101,7 +101,8 @@ async function addLucideIcon(map: MLMap, id: string, Icon: IconType) {
 }
 
 export default function MapView(
-  { onNavigate, canViewFleet = false }: { onNavigate: (tab: string) => void; canViewFleet?: boolean },
+  { onNavigate, canViewFleet = false, canSetBusinessLocation = false }:
+  { onNavigate: (tab: string) => void; canViewFleet?: boolean; canSetBusinessLocation?: boolean },
 ) {
   const holder = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MLMap | null>(null);
@@ -540,7 +541,7 @@ export default function MapView(
         </div>
       )}
 
-      {data && !data.business_location && !bizSet && (
+      {canSetBusinessLocation && data && !data.business_location && !bizSet && (
         <div className="flex items-center gap-2 text-xs bg-[#EAF3FF] border border-[#2563EB]/30 text-[#1D4ED8] px-3 py-2">
           <Building2 className="h-4 w-4 shrink-0" />
           <span className="flex-1">
@@ -762,8 +763,9 @@ function SetBusinessLocationModal({
       await api.map.setBusinessLocation(lat, lng);
       toast('success', 'Business location saved.');
       onSaved(lat, lng);
-    } catch {
-      toast('error', 'Could not save the location.');
+    } catch (err) {
+      // Surface the real reason (permission, validation, connection) rather than a generic message.
+      toast('error', err instanceof ApiError ? err.message : 'Could not save the location — check your connection.');
       setBusy(false);
     }
   };

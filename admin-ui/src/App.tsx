@@ -768,6 +768,7 @@ export default function App() {
               <MapView
                 onNavigate={(tab) => setActiveTab(tab as TabId)}
                 canViewFleet={can(me, 'fleet.view')}
+                canSetBusinessLocation={can(me, 'business_location.write')}
               />
             )}
             {activeTab === 'team' && me && <StaffView me={me} />}
