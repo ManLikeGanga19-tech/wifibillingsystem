@@ -159,6 +159,52 @@ class TestNearestAndDispatch:
 
 
 @pytest.mark.django_db
+class TestTechnicianJob:
+    def test_dispatch_stamps_the_fault_location_and_notifies_the_tech(self, op):
+        from apps.notifications.models import Message
+        from apps.ops.models import Ticket
+        tech = UserFactory(role=Role.TENANT_TECHNICIAN, operator=op, name="Otieno", is_staff=True)
+        TechLocationPing.objects.create(operator=op, technician=tech, lat="-1.30", lng="36.81")
+        ticket = Ticket.objects.create(operator=op, subject="Fibre down")
+        care, _ = api_as(Role.TENANT_CARE, op)
+
+        resp = care.post(reverse("ticket-dispatch", args=[ticket.id]),
+                         {"lat": "-1.30", "lng": "36.81"}, format="json")
+        assert resp.status_code == 200
+        ticket.refresh_from_db()
+        assert str(ticket.gps_lat) == "-1.300000"          # the tech can navigate to it
+        # the technician got an SMS with the job
+        msg = Message.objects.filter(operator=op, to_phone=tech.phone).first()
+        assert msg is not None and "Fibre down" in msg.body and "maps" in msg.body.lower()
+
+    def test_manual_assign_notifies_and_bypasses_the_customer_sms_toggle(self, op):
+        from apps.notifications.models import Message
+        from apps.ops.models import Ticket
+        op.notify_customers_sms = False       # customer SMS off — staff alerts still go
+        op.save(update_fields=["notify_customers_sms"])
+        tech = UserFactory(role=Role.TENANT_TECHNICIAN, operator=op, is_staff=True)
+        ticket = Ticket.objects.create(operator=op, subject="No internet")
+        care, _ = api_as(Role.TENANT_CARE, op)
+
+        resp = care.patch(reverse("ticket-detail", args=[ticket.id]), {"assigned_to": tech.id})
+        assert resp.status_code == 200
+        assert Message.objects.filter(operator=op, to_phone=tech.phone).exists()
+
+    def test_ticket_badge_is_scoped_to_the_technician(self, op):
+        from apps.ops.models import Ticket
+        tech = UserFactory(role=Role.TENANT_TECHNICIAN, operator=op, is_staff=True)
+        Ticket.objects.create(operator=op, subject="mine", assigned_to=tech)
+        Ticket.objects.create(operator=op, subject="someone else's")   # open, not theirs
+
+        tech_api = APIClient()
+        tech_api.force_authenticate(user=tech)
+        assert tech_api.get(reverse("nav-counts")).data["tickets"] == 1     # only their assigned
+        # a dispatcher's badge counts the whole ISP's open tickets
+        care, _ = api_as(Role.TENANT_CARE, op)
+        assert care.get(reverse("nav-counts")).data["tickets"] == 2
+
+
+@pytest.mark.django_db
 class TestPrune:
     def test_prune_deletes_pings_past_the_window(self, op, settings):
         settings.FLEET_RETENTION_HOURS = 24

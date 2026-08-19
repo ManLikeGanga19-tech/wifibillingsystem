@@ -4,6 +4,8 @@ import { api, ApiTicket, TicketAssignee } from '../api/client';
 import {
   Badge, Btn, Field, FilterChips, inputCls, Panel, RefreshBtn, TableShell, tdCls, toast, useList, ViewHeader, fmtDateTime,
 } from './ui';
+import MapPicker from './MapPicker';
+import NavigateButton from './NavigateButton';
 
 const FILTERS = ['open', 'all', 'in_progress', 'resolved', 'closed'] as const;
 const STATUS_COLOR: Record<ApiTicket['status'], 'green' | 'gray' | 'amber' | 'blue' | 'red'> = {
@@ -30,6 +32,7 @@ export default function TicketsView({ canAssign = false }: { canAssign?: boolean
   const [subject, setSubject] = useState('');
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState<ApiTicket['priority']>('normal');
+  const [gps, setGps] = useState<{ lat: number | null; lng: number | null }>({ lat: null, lng: null });
   const [assignees, setAssignees] = useState<TicketAssignee[]>([]);
   const { rows, count, error, refreshing, reload } = useList(
     () => api.tickets.list(filter === 'all' ? '' : `?status=${filter}`),
@@ -54,10 +57,15 @@ export default function TicketsView({ canAssign = false }: { canAssign?: boolean
   const create = async (e: FormEvent) => {
     e.preventDefault();
     try {
-      await api.tickets.create({ subject, description, priority });
+      await api.tickets.create({
+        subject, description, priority,
+        gps_lat: gps.lat != null ? String(gps.lat) : null,
+        gps_lng: gps.lng != null ? String(gps.lng) : null,
+      });
       toast('success', 'Ticket created.');
       setSubject('');
       setDescription('');
+      setGps({ lat: null, lng: null });
       setShowForm(false);
       reload();
     } catch {
@@ -104,6 +112,15 @@ export default function TicketsView({ canAssign = false }: { canAssign?: boolean
             <Field label="Details (optional)" className="md:col-span-4">
               <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} className={inputCls} />
             </Field>
+            <div className="md:col-span-4">
+              <label className="text-[11px] font-mono uppercase text-[#141414]/50 block mb-1">Job location (optional) — pin it so the technician can navigate there</label>
+              <MapPicker
+                lat={gps.lat} lng={gps.lng}
+                onChange={(la, ln) => setGps({
+                  lat: Number.isFinite(la) ? la : null, lng: Number.isFinite(ln) ? ln : null,
+                })}
+              />
+            </div>
           </form>
         </Panel>
       )}
@@ -142,9 +159,14 @@ export default function TicketsView({ canAssign = false }: { canAssign?: boolean
             </td>
             <td className={`${tdCls} font-mono whitespace-nowrap`}>{fmtDateTime(t.created_at)}</td>
             <td className={tdCls}>
-              {NEXT_STATUS[t.status] && (
-                <Btn variant="outline" onClick={() => advance(t)}>{NEXT_STATUS[t.status]!.label}</Btn>
-              )}
+              <div className="flex items-center gap-1.5">
+                {t.gps_lat && t.gps_lng && (
+                  <NavigateButton lat={Number(t.gps_lat)} lng={Number(t.gps_lng)} label={t.subject} compact />
+                )}
+                {NEXT_STATUS[t.status] && (
+                  <Btn variant="outline" onClick={() => advance(t)}>{NEXT_STATUS[t.status]!.label}</Btn>
+                )}
+              </div>
             </td>
           </tr>
         ))}

@@ -95,18 +95,21 @@ def send_operator_alert(operator, body: str, *, settings=None) -> int:
     return queued
 
 
-def send_sms(operator, to_phone: str, body: str, *, category=Message.Category.OTHER):
-    """Queue one transactional SMS to a customer. Returns the Message, or None if it
-    was suppressed (no number, or the ISP switched customer SMS off).
+def send_sms(operator, to_phone: str, body: str, *, category=Message.Category.OTHER, staff=False):
+    """Queue one transactional SMS. Returns the Message, or None if it was suppressed
+    (no number, or — for customer messages — the ISP switched customer SMS off).
+
+    `staff=True` marks an OPERATIONAL message to the ISP's own staff (e.g. a technician
+    told they've been assigned a job). Those are not gated by the customer-SMS toggle —
+    that switch is about what the ISP sends its CUSTOMERS, not its own field crew.
 
     The actual send goes out on COMMIT — never inside the transaction that triggered
-    it. Sending mid-transaction risks an SMS for a payment that then rolls back, which
-    is a customer told they're online when they aren't.
+    it. Sending mid-transaction risks an SMS for a change that then rolls back.
     """
     to_phone = (to_phone or "").strip()
     if not to_phone or not to_phone.isdigit():
         return None
-    if not getattr(operator, "notify_customers_sms", True):
+    if not staff and not getattr(operator, "notify_customers_sms", True):
         return None
 
     msg = Message.objects.create(
@@ -347,3 +350,23 @@ def notify_voucher(voucher, phone: str) -> bool:
     if body:
         return send_sms(op, phone, body, category=Message.Category.PAYMENT) is not None
     return False
+
+
+# --- field ops -------------------------------------------------------------------------
+
+
+def notify_ticket_assigned(ticket) -> bool:
+    """Tell the assigned technician they've got a job — by SMS to their login number, with a maps
+    link to the site if the ticket carries one. Best-effort and staff-category, so it isn't gated
+    by the customer-SMS toggle (this is the ISP dispatching its own crew, not messaging a customer).
+    """
+    tech = ticket.assigned_to
+    if tech is None or not (tech.phone or "").strip():
+        return False
+    parts = [f"New job assigned: {ticket.subject}"]
+    if ticket.gps_lat is not None and ticket.gps_lng is not None:
+        parts.append(
+            "Navigate: https://www.google.com/maps/dir/?api=1"
+            f"&destination={ticket.gps_lat},{ticket.gps_lng}"
+        )
+    return send_sms(ticket.operator, tech.phone, " — ".join(parts), staff=True) is not None

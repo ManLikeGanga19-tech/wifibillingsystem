@@ -41,6 +41,8 @@ class TicketSerializer(serializers.ModelSerializer):
             "id",
             "subject",
             "description",
+            "gps_lat",
+            "gps_lng",
             "subscriber",
             "subscriber_phone",
             "status",

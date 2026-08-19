@@ -67,7 +67,13 @@ class TicketViewSet(StatusFilterMixin, TenantModelViewSet):
 
     def perform_update(self, serializer):
         self._strip_assignment(serializer)
+        before = self.get_object().assigned_to_id
         super().perform_update(serializer)
+        ticket = serializer.instance
+        # Newly (re)assigned to someone → tell that technician they've got a job.
+        if ticket.assigned_to_id and ticket.assigned_to_id != before:
+            from apps.notifications.services import notify_ticket_assigned
+            notify_ticket_assigned(ticket)
 
     @extend_schema(responses=OBJECT_RESPONSE, summary="Technicians a ticket can be assigned to")
     @action(detail=False, methods=["get"])
@@ -115,9 +121,13 @@ class TicketViewSet(StatusFilterMixin, TenantModelViewSet):
             )
         ping, dist = ranked[0]
         ticket.assigned_to = ping.technician
-        ticket.save(update_fields=["assigned_to"])
+        # Stamp the fault location onto the ticket so the tech can navigate straight to it.
+        ticket.gps_lat, ticket.gps_lng = lat, lng
+        ticket.save(update_fields=["assigned_to", "gps_lat", "gps_lng"])
         audit("ticket_dispatched", operator=self.get_operator(), actor=request.user, target=ticket,
               technician=ping.technician_id, distance_km=round(dist, 2))
+        from apps.notifications.services import notify_ticket_assigned
+        notify_ticket_assigned(ticket)
         return Response({
             "detail": f"Dispatched to {ping.technician.name or ping.technician.phone}.",
             "technician_id": ping.technician_id,

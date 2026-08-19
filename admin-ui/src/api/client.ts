@@ -422,6 +422,9 @@ export interface ApiTicket {
   id: number;
   subject: string;
   description: string;
+  /** Where the job is — lets an assigned technician navigate to it. */
+  gps_lat: string | null;
+  gps_lng: string | null;
   subscriber: number | null;
   subscriber_phone: string;
   status: 'open' | 'in_progress' | 'resolved' | 'closed';

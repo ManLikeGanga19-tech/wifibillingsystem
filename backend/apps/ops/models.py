@@ -23,6 +23,11 @@ class Ticket(OperatorOwnedModel):
 
     subject = models.CharField(max_length=200)
     description = models.TextField(blank=True)
+    # Where the job is — so an assigned technician can navigate straight to it. Auto-filled from
+    # the fault when a ticket is raised by dispatch (e.g. the fibre point's coordinate), or pinned
+    # by the dispatcher on the ticket form. Nullable: not every ticket is a site visit.
+    gps_lat = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    gps_lng = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     subscriber = models.ForeignKey(
         "accounts.Subscriber",
         null=True,

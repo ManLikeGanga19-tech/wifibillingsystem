@@ -9,7 +9,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.models import Subscriber
-from apps.accounts.rbac import FINANCE_VIEW
+from apps.accounts.rbac import FINANCE_VIEW, TICKETS_ASSIGN, TICKETS_VIEW
 from apps.core.live import (
     SERVICE_TYPES,
     live_connection_counts,
@@ -42,15 +42,22 @@ class NavCountsView(APIView):
 
     def get(self, request):
         op = acting_tenant(request)
+        # A technician's ticket list is row-scoped to what's assigned to them, so their badge must
+        # be too — otherwise it counts the whole ISP's open tickets and never matches their list.
+        # The proxy for "technician" is "can view tickets but cannot assign them".
+        tickets_qs = _scoped(Ticket.objects.filter(status__in=Ticket.OPEN_STATUSES), op)
+        user = request.user
+        if (not user.is_platform_staff
+                and user.has_capability(TICKETS_VIEW)
+                and not user.has_capability(TICKETS_ASSIGN)):
+            tickets_qs = tickets_qs.filter(assigned_to=user)
         return Response(
             {
                 # Everyone online now, across ALL service types (hotspot + PPPoE + future
                 # static/dynamic/Ruijie), not just hotspot sessions.
                 "active_users": live_connections_total(op),
                 "users": _scoped(Subscriber.objects.all(), op).count(),
-                "tickets": _scoped(
-                    Ticket.objects.filter(status__in=Ticket.OPEN_STATUSES), op
-                ).count(),
+                "tickets": tickets_qs.count(),
                 "leads": _scoped(Lead.objects.filter(status=Lead.Status.NEW), op).count(),
                 "packages": _scoped(Plan.objects.filter(is_active=True), op).count(),
                 "vouchers": _scoped(
