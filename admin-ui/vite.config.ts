@@ -2,10 +2,46 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 import {defineConfig} from 'vite';
+import {VitePWA} from 'vite-plugin-pwa';
 
 export default defineConfig(() => {
   return {
-    plugins: [react(), tailwindcss()],
+    plugins: [
+      react(),
+      tailwindcss(),
+      // Installable PWA (technicians add the console to their phone home screen). autoUpdate so a
+      // new deploy's hashed assets replace the old ones — never the stale-bundle problem this app
+      // is careful to avoid. The service worker precaches only the built app shell; /api is never
+      // cached (the httpOnly-cookie session and live data must always hit the network).
+      VitePWA({
+        registerType: 'autoUpdate',
+        injectRegister: 'auto',
+        includeAssets: ['favicon-32.png', 'favicon-48.png', 'apple-touch-icon.png'],
+        workbox: {
+          globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
+          navigateFallbackDenylist: [/^\/api/],   // API calls bypass the SPA fallback
+          cleanupOutdatedCaches: true,
+          clientsClaim: true,
+        },
+        manifest: {
+          name: 'WIFI.OS — ISP Console',
+          short_name: 'WIFI.OS',
+          description: 'Run your ISP — clients, network, fibre plant, dispatch and billing.',
+          theme_color: '#141414',
+          background_color: '#141414',
+          display: 'standalone',
+          orientation: 'any',
+          start_url: '/',
+          scope: '/',
+          icons: [
+            { src: 'icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+            { src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+            { src: 'icons/icon-maskable-192.png', sizes: '192x192', type: 'image/png', purpose: 'maskable' },
+            { src: 'icons/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+          ],
+        },
+      }),
+    ],
     // maplibre-gl ships its own web worker; Vite's dep pre-bundler mishandles it
     // ("maplibre-gl-worker.mjs does not exist"), so serve it un-bundled. It's already ESM.
     optimizeDeps: { exclude: ['maplibre-gl'] },
