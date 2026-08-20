@@ -44,6 +44,13 @@ function DocsGapsReport() {
         <Stat label="Unanswered" value={String(data.unanswered)} />
       </div>
 
+      {/* True margin: Pro fees charged vs. our real token cost over the window. */}
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Stat label="Pro revenue (KES)" value={data.pro_revenue_kes} />
+        <Stat label="AI cost (KES)" value={data.ai_cost_kes} />
+        <Stat label="AI margin (KES)" value={data.ai_margin_kes} />
+      </div>
+
       {data.total_questions === 0 ? (
         <p className="border border-[#141414]/10 bg-[#f4f4f2] p-3 text-xs text-[#141414]/50">
           No assistant questions yet in this window. Once tenants start asking, the gaps show here.

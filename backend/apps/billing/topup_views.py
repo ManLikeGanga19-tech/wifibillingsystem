@@ -108,6 +108,8 @@ class PlatformInvoicesView(APIView):
                             {"label": "Commission on your own-gateway sales",
                              "amount": str(inv.direct_commission), "due": True},
                             {"label": "SMS", "amount": str(inv.sms), "due": True},
+                            {"label": "Pro AI subscription", "amount": str(inv.ai_fee),
+                             "due": True},
                             {"label": "Commission on WIFI.OS-paybill sales (already deducted)",
                              "amount": str(inv.withheld_commission), "due": False},
                         ],

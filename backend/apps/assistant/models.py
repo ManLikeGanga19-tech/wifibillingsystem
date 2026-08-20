@@ -134,6 +134,10 @@ class AssistantQuestion(models.Model):
     #: Provider token usage for this turn — feeds cost tracking and the usage meter.
     tokens_in = models.PositiveIntegerField(default=0)
     tokens_out = models.PositiveIntegerField(default=0)
+    #: Tier + model this turn ran on, so true-margin can price the token cost (and skip BYO, where
+    #: the tenant pays their own provider). free/pro use the platform key; byo uses the tenant's.
+    tier = models.CharField(max_length=8, blank=True)
+    model = models.CharField(max_length=40, blank=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:

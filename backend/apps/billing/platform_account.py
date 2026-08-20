@@ -210,6 +210,7 @@ FEE_REASONS = (
     PlatformLedgerEntry.Reason.PPPOE_FEE,
     PlatformLedgerEntry.Reason.SETUP_FEE,
     PlatformLedgerEntry.Reason.SMS,
+    PlatformLedgerEntry.Reason.AI_PRO,
 )
 
 

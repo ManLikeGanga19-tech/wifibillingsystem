@@ -1051,6 +1051,7 @@ export interface AIUsage {
   used: number;
   limit: number | null;
   remaining: number | null;
+  pro_monthly_fee: string;
 }
 /** The assistant's reply: the text, the docs it cited, the id to attach a 👍/👎 to, and usage. */
 export interface ChatReply {
@@ -1936,6 +1937,12 @@ export const api = {
         body: JSON.stringify({ rating }),
       }),
     usage: () => request<AIUsage>('/assistant/usage/'),
+    // Owner-only: turn the paid Pro tier on/off (adds a monthly platform fee, postpaid).
+    togglePro: (enabled: boolean) =>
+      request<AIUsage & { monthly_fee: string }>('/assistant/pro/', {
+        method: 'POST',
+        body: JSON.stringify({ enabled }),
+      }),
     // Saved, named chat threads (multi-conversation), private to each staff member.
     conversations: {
       list: () => request<Paginated<Conversation>>('/assistant/conversations/'),

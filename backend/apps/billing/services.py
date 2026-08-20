@@ -121,6 +121,41 @@ def charge_pppoe_user_fees() -> int:
     return charged
 
 
+def charge_ai_pro_fees() -> int:
+    """Beat (monthly): accrue the flat Pro AI subscription fee to every tenant that has Pro on.
+
+    Postpaid, exactly like the PPPoE fee: it lands on the platform ledger (what they owe us),
+    shows on the monthly statement, and the exposure check enforces it. Idempotent per
+    (operator, month) via the ledger constraint. Settings-configurable price; 0 disables it."""
+    from decimal import Decimal
+
+    from django.conf import settings
+
+    from apps.assistant.models import AISettings
+    from apps.core.models import Operator
+
+    from .models import PlatformLedgerEntry
+    from .platform_account import accrue_fee
+
+    fee = Decimal(str(settings.AI_PRO_MONTHLY_FEE))
+    if fee <= 0:
+        return 0
+    period = timezone.localdate().strftime("%Y-%m")
+    pro_operator_ids = AISettings.objects.filter(pro_ai=True).values_list("operator_id", flat=True)
+    operators = Operator.objects.filter(
+        id__in=list(pro_operator_ids), status=Operator.Status.ACTIVE,
+        is_platform_owned=False, is_demo=False,
+    )
+    charged = 0
+    for operator in operators:
+        if accrue_fee(
+            operator, fee, reason=PlatformLedgerEntry.Reason.AI_PRO, period=period,
+            memo=f"Pro AI subscription {period}",
+        ):
+            charged += 1
+    return charged
+
+
 def charge_setup_fee(operator) -> bool:
     """One-time onboarding fee, billed to the ISP wallet when it is approved.
     Idempotent: at most one SETUP_FEE entry per operator, ever. Returns True if

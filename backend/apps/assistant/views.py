@@ -7,11 +7,13 @@ from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.accounts.rbac import MONEY_MANAGE
 from apps.core.permissions import (
     IsPlatformOwner,
     IsPlatformStaff,
     NotBillingLocked,
     ReadOnlyForSupport,
+    RequireCapability,
     RequireTenant,
     TenantIsOperational,
 )
@@ -147,6 +149,8 @@ def _log_question(operator, question_text, result) -> AssistantQuestion:
         grounded=result["grounded"],
         top_score=result["top_score"],
         topic=result.get("topic", ""),
+        tier=result.get("tier", ""),
+        model=result.get("model", ""),
         tokens_in=result.get("tokens_in", 0),
         tokens_out=result.get("tokens_out", 0),
     )
@@ -196,6 +200,32 @@ class AIUsageView(APIView):
     @extend_schema(responses=OBJECT_RESPONSE, summary="AI assistant tier & monthly usage")
     def get(self, request):
         return Response(usage_status(acting_tenant(request)))
+
+
+class AIProToggleView(APIView):
+    """Turn the paid Pro tier on or off. Owner-only (money.manage) because it commits the ISP to
+    a recurring platform fee; audited on every flip. Self-serve + postpaid: flipping it on starts
+    the monthly fee accruing to their platform account like any other fee."""
+
+    permission_classes = [IsAdminUser, RequireTenant, TenantIsOperational,
+                          RequireCapability(MONEY_MANAGE)]
+
+    @extend_schema(request=OBJECT_REQUEST, responses=OBJECT_RESPONSE,
+                   summary="Enable/disable Pro AI (owner-only, adds a monthly fee)")
+    def post(self, request):
+        from django.conf import settings as dj_settings
+
+        enable = bool(request.data.get("enabled"))
+        operator = acting_tenant(request)
+        row = settings_for(operator)
+        if row.pro_ai != enable:
+            row.pro_ai = enable
+            row.save(update_fields=["pro_ai"])
+            audit("ai_pro_enabled" if enable else "ai_pro_disabled",
+                  operator=operator, actor=request.user, target=operator,
+                  monthly_fee=str(dj_settings.AI_PRO_MONTHLY_FEE))
+        return Response({**usage_status(operator),
+                         "monthly_fee": str(dj_settings.AI_PRO_MONTHLY_FEE)})
 
 
 class PlatformAISettingsView(APIView):
@@ -262,7 +292,7 @@ class PlatformDocsGapsView(APIView):
     def get(self, request):
         from datetime import timedelta
 
-        from django.db.models import Count, Q
+        from django.db.models import Count, Q, Sum
         from django.utils import timezone
 
         try:
@@ -287,6 +317,22 @@ class PlatformDocsGapsView(APIView):
             qs.filter(rating=-1).exclude(topic="").values("topic")
             .annotate(count=Count("id")).order_by("-count")[:10]
         )
+
+        # True margin: what the assistant COST us (real token spend on the platform key) versus
+        # the Pro fees we CHARGED, over the same window. BYO turns cost us nothing.
+        from decimal import Decimal
+
+        from apps.billing.models import PlatformLedgerEntry
+
+        from .costs import ai_cost_kes
+
+        since = timezone.now() - timedelta(days=days)
+        cost = ai_cost_kes(start=since)
+        pro_revenue = -(
+            PlatformLedgerEntry.objects.filter(
+                reason=PlatformLedgerEntry.Reason.AI_PRO, created_at__gte=since,
+            ).aggregate(v=Sum("amount"))["v"] or Decimal("0")
+        )
         return Response({
             "days": days,
             "total_questions": total,
@@ -296,6 +342,10 @@ class PlatformDocsGapsView(APIView):
             "top_topics": top_topics,
             "gaps": gaps,
             "thumbs_down": thumbs_down,
+            # Cross-tenant true-margin, KES.
+            "ai_cost_kes": str(cost),
+            "pro_revenue_kes": str(pro_revenue),
+            "ai_margin_kes": str(pro_revenue - cost),
         })
 
 

@@ -4,9 +4,10 @@ import { api, ApiError, AISettings, type AIUsage } from '../../api/client';
 import { Btn, Field, inputCls, Panel, toast } from '../ui';
 
 // The three ways to run the assistant, shown as a comparison so an ISP can see what they get.
+// "WIFI.OS AI" is the default — a tenant with no key of their own rides the platform key.
 const TIERS = [
-  { id: 'free', name: 'Free', model: 'Claude Haiku',
-    perks: ['Docs Q&A', 'Your live numbers (read-only)', '100 questions / month'] },
+  { id: 'free', name: 'WIFI.OS AI', model: 'Claude Haiku · on by default',
+    perks: ['Docs Q&A', 'Your live numbers (read-only)', '100 questions / month', 'No key needed'] },
   { id: 'pro', name: 'Pro', model: 'Claude Sonnet',
     perks: ['Everything in Free', 'Propose-and-confirm actions', 'Assistant memory', 'Unlimited'] },
   { id: 'byo', name: 'Your own key', model: 'Your provider',
@@ -68,6 +69,24 @@ export default function AIAssistantPanel() {
     }
   };
 
+  const setPro = async (enabled: boolean) => {
+    if (busy) return;
+    if (enabled && !window.confirm(
+      `Turn on Pro AI? This adds KES ${usage?.pro_monthly_fee ?? ''} per month to your platform ` +
+      `account (postpaid, billed with your other WIFI.OS fees). You can cancel any time.`
+    )) return;
+    setBusy(true);
+    try {
+      const u = await api.assistant.togglePro(enabled);
+      setUsage(u);
+      toast('success', enabled ? 'Pro AI is on.' : 'Pro AI turned off.');
+    } catch (e) {
+      toast('error', e instanceof ApiError ? e.message : 'Could not change the plan.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const removeKey = async () => {
     if (busy) return;
     setBusy(true);
@@ -88,8 +107,8 @@ export default function AIAssistantPanel() {
       <div>
         <h2 className="text-lg font-bold font-mono uppercase tracking-wide">AI Assistant</h2>
         <p className="text-sm text-[#141414]/60 mt-1">
-          Choose the AI provider that powers the assistant and optionally supply your own API key —
-          the assistant will use your account instead of the platform default.
+          By default your assistant runs on <b>WIFI.OS AI</b> — no setup needed. Add your own API
+          key only if you want unlimited use billed to your own provider account instead.
         </p>
       </div>
 
@@ -102,7 +121,7 @@ export default function AIAssistantPanel() {
                 <span className="font-mono uppercase text-[10px] text-[#141414]/40">Current tier</span>
                 <span className="inline-flex items-center gap-1 border border-[#141414] px-2 py-0.5 text-xs font-bold uppercase">
                   {usage.unlimited && <Zap className="h-3 w-3 text-[#228B22]" />}
-                  {usage.tier === 'byo' ? 'Your own key' : usage.tier === 'pro' ? 'Pro' : 'Free'}
+                  {usage.tier === 'byo' ? 'Your own key' : usage.tier === 'pro' ? 'Pro' : 'WIFI.OS AI'}
                 </span>
               </span>
               <span className="flex items-center gap-1.5 text-xs text-[#141414]/60">
@@ -151,14 +170,32 @@ export default function AIAssistantPanel() {
           })}
         </div>
 
-        {usage && !usage.unlimited && (
-          <p className="mt-3 flex items-start gap-1.5 border border-[#B26B00]/30 bg-[#FFF8EC] p-2.5 text-[11px] text-[#7a4a00]">
-            <Zap className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            <span>
-              Want unlimited use, actions and memory? <b>Add your own API key below</b> to switch on
-              unlimited right away, or contact us to enable <b>Pro</b> on your account.
+        {usage && usage.tier === 'free' && (
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border border-[#B26B00]/30 bg-[#FFF8EC] p-2.5 text-[11px] text-[#7a4a00]">
+            <span className="flex items-start gap-1.5">
+              <Zap className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>Want unlimited use, actions and memory? Upgrade to <b>Pro</b> for
+                {' '}<b>KES {usage.pro_monthly_fee}/month</b> — or add your own key below.</span>
             </span>
-          </p>
+            <Btn variant="green" onClick={() => setPro(true)} disabled={busy}>
+              <Zap className="h-3.5 w-3.5" /> Upgrade to Pro
+            </Btn>
+          </div>
+        )}
+        {usage && usage.tier === 'pro' && (
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border border-[#228B22]/30 bg-[#F0F7F0] p-2.5 text-[11px] text-[#141414]/70">
+            <span className="flex items-center gap-1.5">
+              <Zap className="h-3.5 w-3.5 text-[#228B22]" />
+              You’re on <b>Pro</b> — KES {usage.pro_monthly_fee}/month, billed with your platform fees.
+            </span>
+            <button
+              onClick={() => setPro(false)}
+              disabled={busy}
+              className="font-bold uppercase text-[#B22222] hover:underline"
+            >
+              Cancel Pro
+            </button>
+          </div>
         )}
       </Panel>
 
@@ -240,8 +277,8 @@ export default function AIAssistantPanel() {
         {!s.has_own_key && (
           <p className="text-[11px] mt-3 p-2 bg-[#f4f4f2] border border-[#141414]/10 text-[#141414]/60">
             {s.platform_default_available
-              ? `Using the platform default (${s.platform_default_provider === 'openai' ? 'OpenAI' : 'Claude'}). Add your own key above to bill usage to your account instead.`
-              : 'The platform default isn’t configured yet, so the assistant stays off until you add your own key above.'}
+              ? 'You’re on WIFI.OS AI by default — no key needed. Add your own key above only to bill usage to your account instead.'
+              : 'WIFI.OS AI isn’t switched on yet — add your own key above to use the assistant in the meantime.'}
           </p>
         )}
       </Panel>

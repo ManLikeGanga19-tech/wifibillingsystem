@@ -49,6 +49,9 @@ export interface DocsGaps {
   top_topics: { topic: string; count: number; answered: number }[];
   gaps: { topic: string; count: number }[];
   thumbs_down: { topic: string; count: number }[];
+  ai_cost_kes: string;
+  pro_revenue_kes: string;
+  ai_margin_kes: string;
 }
 
 export interface Page<T> {

@@ -16,6 +16,13 @@ def charge_pppoe_user_fees():
 
 
 @shared_task
+def charge_ai_pro_fees():
+    from .services import charge_ai_pro_fees as run
+
+    return run()
+
+
+@shared_task
 def reconcile_pending_topups():
     """The safety net for a top-up callback that never arrived.
 

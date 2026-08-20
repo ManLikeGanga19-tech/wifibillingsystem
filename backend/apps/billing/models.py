@@ -191,6 +191,7 @@ class PlatformLedgerEntry(OperatorOwnedModel):
         BASE_FEE = "base_fee", "Monthly platform fee"
         PPPOE_FEE = "pppoe_fee", "PPPoE per-user fee"
         SETUP_FEE = "setup_fee", "One-time onboarding fee"
+        AI_PRO = "ai_pro", "Pro AI subscription"
         REFUND = "refund", "Refund"
         ADJUSTMENT = "adjustment", "Manual adjustment"
 
@@ -334,6 +335,7 @@ class PlatformInvoice(OperatorOwnedModel):
     base_fee = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     pppoe_fee = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     setup_fee = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    ai_fee = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     #: Commission on the ISP's OWN-gateway sales — money DUE (we could not withhold it).
     direct_commission = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     sms = models.DecimalField(max_digits=12, decimal_places=2, default=0)

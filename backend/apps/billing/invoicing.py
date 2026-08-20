@@ -63,6 +63,7 @@ def build_invoice(operator, period: str) -> PlatformInvoice | None:
     setup = platform_sum(PlatformLedgerEntry.Reason.SETUP_FEE)
     direct_comm = platform_sum(PlatformLedgerEntry.Reason.COMMISSION)
     sms = platform_sum(PlatformLedgerEntry.Reason.SMS)
+    ai = platform_sum(PlatformLedgerEntry.Reason.AI_PRO)
 
     # Aggregator commission, withheld at source in the wallet — informational only.
     withheld = -(
@@ -75,7 +76,7 @@ def build_invoice(operator, period: str) -> PlatformInvoice | None:
         or Decimal("0.00")
     )
 
-    total = base + pppoe + setup + direct_comm + sms
+    total = base + pppoe + setup + direct_comm + sms + ai
     if total == 0 and withheld == 0:
         return None  # a month with no activity gets no statement
 
@@ -89,6 +90,7 @@ def build_invoice(operator, period: str) -> PlatformInvoice | None:
                 setup_fee=setup,
                 direct_commission=direct_comm,
                 sms=sms,
+                ai_fee=ai,
                 withheld_commission=withheld,
                 total=total,
             )

@@ -173,6 +173,8 @@ def usage_status(operator) -> dict:
         "used": used,
         "limit": None if unlimited else FREE_MONTHLY_LIMIT,
         "remaining": None if unlimited else max(FREE_MONTHLY_LIMIT - used, 0),
+        # The Pro price, so the console can show "Upgrade to Pro (KES X/mo)" without a second call.
+        "pro_monthly_fee": str(getattr(dj_settings, "AI_PRO_MONTHLY_FEE", "")),
     }
 
 
@@ -319,6 +321,7 @@ def chat(operator, messages) -> dict:
         ],
         "topic": topic,
         "tier": cfg.tier,
+        "model": cfg.model,
         "tokens_in": tokens_in,
         "tokens_out": tokens_out,
     }

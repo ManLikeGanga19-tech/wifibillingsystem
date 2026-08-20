@@ -189,6 +189,20 @@ FASTEMBED_CACHE_DIR = os.getenv("FASTEMBED_CACHE_DIR", "/opt/models/fastembed")
 # Where the `ingest_docs` command reads the docs markdown from (mounted in dev, synced in prod).
 DOCS_CONTENT_DIR = os.getenv("DOCS_CONTENT_DIR", "/app/docs_content")
 
+# AI billing. Pro is a flat monthly platform fee (KES), accrued to the tenant's platform ledger
+# like every other fee. Settings-configurable so pricing changes without a deploy.
+AI_PRO_MONTHLY_FEE = os.getenv("AI_PRO_MONTHLY_FEE", "1500")
+# Provider token prices (USD per 1M tokens: input, output) for TRUE-MARGIN tracking — our real
+# cost per tenant from logged token usage, versus what we charge. Not what we bill; just cost.
+AI_MODEL_PRICES = {
+    "claude-haiku-4-5": (1.0, 5.0),
+    "claude-sonnet-5": (3.0, 15.0),
+    "claude-opus-4-8": (5.0, 25.0),
+    "gpt-4o-mini": (0.15, 0.60),
+    "gpt-4o": (2.5, 10.0),
+}
+AI_USD_TO_KES = float(os.getenv("AI_USD_TO_KES", "135"))
+
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(hours=8),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
@@ -268,6 +282,10 @@ CELERY_BEAT_SCHEDULE = {
     "charge-pppoe-user-fees": {
         "task": "apps.billing.tasks.charge_pppoe_user_fees",
         "schedule": crontab(minute=45, hour=0, day_of_month=1),
+    },
+    "charge-ai-pro-fees": {
+        "task": "apps.billing.tasks.charge_ai_pro_fees",
+        "schedule": crontab(minute=50, hour=0, day_of_month=1),
     },
     "issue-pppoe-invoices": {
         "task": "apps.pppoe.tasks.issue_due_invoices",
