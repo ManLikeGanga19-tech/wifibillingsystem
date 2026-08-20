@@ -77,18 +77,19 @@ services:
     # separate command. Flat indentation folds it all to one line.
     command: >
       sh -c "python manage.py migrate --noinput &&
-      (python manage.py ingest_docs || true) &&
       python manage.py collectstatic --noinput &&
+      (python manage.py ingest_docs || true &) &&
       gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers ${GUNICORN_WORKERS:-3} --timeout 30 --access-logfile - --error-logfile -"
     # Readiness for zero-downtime rollouts: the deploy waits for this to pass, and Caddy's
     # active health check (see Caddyfile) only routes to the api once it's serving + DB-ready.
-    # start_period covers migrate + collectstatic on boot.
+    # start_period covers migrate + collectstatic on boot. The RAG index build (ingest_docs)
+    # is deliberately backgrounded in the command above so it never gates readiness.
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/v1/health/', timeout=4).status==200 else 1)\""]
       interval: 15s
       timeout: 5s
       retries: 3
-      start_period: 45s
+      start_period: 90s
 
   worker:
     <<: *django
