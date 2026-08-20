@@ -271,6 +271,25 @@ export default function App() {
     if (cap && !can(me, cap)) setActiveTab(ROLE_HOME[me.role] ?? 'dashboard');
   }, [me, activeTab, setActiveTab]);
 
+  // Technicians install a distinct "Field" app (own icon + name) rather than the ISP Console.
+  // We point the manifest link at field.webmanifest for them so the browser's install prompt —
+  // and the resulting home-screen icon — is the Field app. Everyone else keeps the Console PWA.
+  useEffect(() => {
+    if (!me) return;
+    const isTech = me.role === 'tenant_technician' && !me.is_platform_staff;
+    // Swap a <link>'s href to a role-specific target, remembering its build-time default so
+    // non-technicians (and technicians who later switch tenants) get the Console PWA back.
+    const swap = (selector: string, techHref: string) => {
+      const link = document.querySelector<HTMLLinkElement>(selector);
+      if (!link) return;
+      if (!link.dataset.defaultHref) link.dataset.defaultHref = link.getAttribute('href') ?? '';
+      const target = isTech ? techHref : link.dataset.defaultHref;
+      if (target && link.getAttribute('href') !== target) link.setAttribute('href', target);
+    };
+    swap('link[rel="manifest"]', '/field.webmanifest');
+    swap('link[rel="apple-touch-icon"]', '/icons/field-apple-touch-icon.png');
+  }, [me]);
+
   const loadNavCounts = useCallback(() => {
     api.navCounts().then(setNavCounts).catch(() => {});
   }, []);
