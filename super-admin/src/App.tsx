@@ -10,6 +10,7 @@ import {
   Search as SearchIcon,
   ShieldAlert,
   ShieldCheck,
+  Sparkles,
   TrendingUp,
 } from 'lucide-react';
 import { api, logout, type Me } from './api/client';
@@ -26,14 +27,16 @@ import RiskView from './views/RiskView';
 import SearchView from './views/SearchView';
 import TenantsView from './views/TenantsView';
 import BroadcastsView from './views/BroadcastsView';
+import AIKeyView from './views/AIKeyView';
 
 type Tab =
   | 'command' | 'finance' | 'growth' | 'tenants' | 'broadcast'
-  | 'risk' | 'ops' | 'governance' | 'search';
+  | 'risk' | 'ops' | 'governance' | 'search' | 'ai';
 
 /** The sections the URL may name; anything else falls back to the Command Center. */
 const KNOWN_TABS: ReadonlySet<Tab> = new Set<Tab>([
   'command', 'finance', 'growth', 'tenants', 'broadcast', 'risk', 'ops', 'governance', 'search',
+  'ai',
 ]);
 
 // Derived from the CURRENT domain so links work on any deployment (dev localhost
@@ -66,7 +69,10 @@ const NAV: { title: string | null; items: { id: Tab; label: string; icon: typeof
   },
   {
     title: 'Governance',
-    items: [{ id: 'governance', label: 'Audit & Access', icon: ShieldCheck }],
+    items: [
+      { id: 'governance', label: 'Audit & Access', icon: ShieldCheck },
+      { id: 'ai', label: 'AI Assistant Key', icon: Sparkles },
+    ],
   },
 ];
 
@@ -282,6 +288,7 @@ export default function App() {
             {tab === 'risk' && <RiskView />}
             {tab === 'ops' && <OpsView />}
             {tab === 'governance' && <GovernanceView />}
+            {tab === 'ai' && <AIKeyView />}
             {tab === 'search' && <SearchView />}
           </div>
         </div>

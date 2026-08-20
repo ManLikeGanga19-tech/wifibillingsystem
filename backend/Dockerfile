@@ -15,6 +15,13 @@ COPY requirements.txt requirements-dev.txt ./
 RUN pip install -r requirements.txt \
     && if [ "$INSTALL_DEV" = "1" ]; then pip install -r requirements-dev.txt; fi
 
+# Bake the self-hosted embedding model into the image so the RAG assistant never downloads at
+# runtime — fast, offline-reliable, and no HuggingFace dependency in production. Cached to a
+# fixed dir the runtime user can read (chowned below).
+ENV ASSISTANT_EMBED_MODEL=BAAI/bge-small-en-v1.5 \
+    FASTEMBED_CACHE_DIR=/opt/models/fastembed
+RUN python -c "from fastembed import TextEmbedding; TextEmbedding('${ASSISTANT_EMBED_MODEL}', cache_dir='${FASTEMBED_CACHE_DIR}')"
+
 COPY . .
 
 # Run as a nobody. Root in the container is one bad mount away from root on the box, so
@@ -23,7 +30,7 @@ COPY . .
 # The app writes nothing into its own tree (static files are collected to a volume), so
 # it does not need to own /app — which is also what lets the container run read_only.
 RUN useradd --system --create-home --uid 10001 wifios \
-    && chown -R wifios:wifios /app
+    && chown -R wifios:wifios /app /opt/models
 USER wifios
 
 EXPOSE 8000

@@ -24,6 +24,33 @@ const del = (p: string) => request<void>(p, { method: 'DELETE' });
 
 type Money = string | number;
 
+/** The platform (cross-tenant) AI key + platform-wide rate limit. */
+export interface PlatformAISettings {
+  provider: 'claude' | 'openai';
+  has_key: boolean;
+  key_preview: string;
+  enabled: boolean;
+  rate_limit_per_min: number;
+  env_fallback_available: boolean;
+}
+export interface PlatformAISettingsInput {
+  provider: 'claude' | 'openai';
+  api_key: string;
+  enabled: boolean;
+  rate_limit_per_min: number;
+}
+/** The docs-gaps report — cross-tenant, anonymised assistant analytics. */
+export interface DocsGaps {
+  days: number;
+  total_questions: number;
+  grounded: number;
+  unanswered: number;
+  grounded_rate: number | null;
+  top_topics: { topic: string; count: number; answered: number }[];
+  gaps: { topic: string; count: number }[];
+  thumbs_down: { topic: string; count: number }[];
+}
+
 export interface Page<T> {
   count: number;
   results: T[];
@@ -499,6 +526,17 @@ export const api = {
     reject: (id: number, note: string) =>
       post<Payout>(`/billing/platform/payouts/${id}/reject/`, { note }),
   },
+
+  /** The cross-tenant AI key — the shared key every free/Pro tenant rides, rate-limited so a
+   *  spike across ISPs can't run up the platform bill. Owner-only. */
+  aiSettings: {
+    get: () => get<PlatformAISettings>('/platform/ai-settings/'),
+    update: (body: Partial<PlatformAISettingsInput>) =>
+      patch<PlatformAISettings>('/platform/ai-settings/', body),
+  },
+
+  /** The docs-gaps report: what tenants ask and where the assistant had no grounded answer. */
+  docsGaps: (days = 30) => get<DocsGaps>(`/platform/ai-docs-gaps/?days=${days}`),
 };
 
 // ---- formatting --------------------------------------------------------------

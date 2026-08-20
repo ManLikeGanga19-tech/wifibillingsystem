@@ -1,9 +1,9 @@
 ---
 title: WIFI.OS
-description: The billing system for Kenyan WISPs — hotspot, PPPoE, and M-Pesa in one console.
+description: The billing and operations platform for Kenyan WISPs — hotspot, PPPoE, M-Pesa, mapping, fibre plant and field operations in one console.
 template: splash
 hero:
-  tagline: Run your whole ISP from one console — sell hotspot time and broadband lines, take M-Pesa, and watch the business in real time.
+  tagline: Run your whole ISP from one console — sell hotspot time and broadband lines, take M-Pesa, map your network, and dispatch your field team, all in real time.
   actions:
     - text: Get started
       link: /getting-started/
@@ -14,28 +14,72 @@ hero:
       icon: external
 ---
 
-import { Card, CardGrid } from '@astrojs/starlight/components';
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
 
-## What you can do with WIFI.OS
+WIFI.OS is a complete platform for running an internet service provider in Kenya — from the moment a customer pays on the captive portal to the technician who drives out to fix the line. Billing, provisioning to your MikroTik routers, M-Pesa, a live map of your whole network, your fibre plant, and your field team — one console, one login.
+
+## Sell and bill every kind of service
 
 <CardGrid>
-  <Card title="Sell hotspot time" icon="rocket">
-    Prepaid vouchers and M-Pesa time bundles, a captive portal your customers pay through, and automatic cut-off when a plan expires.
+  <Card title="Hotspot billing" icon="rocket">
+    Prepaid vouchers and M-Pesa time bundles through a captive portal your customers pay on themselves. Plans cut off automatically when they expire, and one plan can be shared across a household's devices with tap-to-approve sharing.
   </Card>
-  <Card title="Bill broadband (PPPoE)" icon="setting">
-    Monthly fixed-line subscribers with anniversary billing, automatic suspension on non-payment, and one-click provisioning to your router.
+  <Card title="Broadband lines (PPPoE)" icon="setting">
+    Fixed-line subscribers with **anniversary billing**, automatic suspension on non-payment, and one-click provisioning to the router — over fibre or radio, with full towers-and-sectors topology for the network behind them.
   </Card>
-  <Card title="Take M-Pesa" icon="approve-check">
-    STK Push and Paybill (C2B) built in. Every shilling lands against the right customer, and the money is reconciled for you.
+  <Card title="M-Pesa, built in" icon="approve-check">
+    **STK Push** and **Paybill (C2B)** out of the box. Every shilling lands against the right customer and is reconciled for you — no spreadsheet, no manual matching.
   </Card>
-  <Card title="See the business" icon="bars">
-    A live dashboard: revenue, who's online across every service, recurring revenue (MRR), collections and churn — updated as it happens.
+  <Card title="Plans & vouchers" icon="list-format">
+    Design your own hotspot and PPPoE plans, print or issue voucher batches, and let the front desk hand out access in seconds.
+  </Card>
+</CardGrid>
+
+## See and run your whole network
+
+<CardGrid>
+  <Card title="Live map" icon="random">
+    Every tower, customer, router, lead and fibre point on one map of Kenya. Search any address, drop pins, colour customers by billing status, and see demand as a heatmap to decide where to expand next.
+  </Card>
+  <Card title="Fibre plant & routing" icon="puzzle">
+    Model your outside plant as a real network — OLT, splitters, ODPs, poles and the cables between them. Get **live port capacity**, a fault's exact **blast radius**, and the **shortest cable route** between any two points.
+  </Card>
+  <Card title="Field team & dispatch" icon="rocket">
+    See your technicians' live positions and dispatch the nearest one to a job. Assign tickets by hand or automatically, and technicians get the location, directions and a phone app built for the field.
+  </Card>
+  <Card title="Real-time business view" icon="bars">
+    A live dashboard: revenue, who's online across every service, recurring revenue (MRR), collections, arrears and churn — updated as it happens, not overnight.
+  </Card>
+</CardGrid>
+
+## Built for production
+
+WIFI.OS isn't a script that runs one router — it's a multi-tenant platform built to run many ISPs at once, safely.
+
+<CardGrid>
+  <Card title="Your data is yours alone" icon="approve-check">
+    Every ISP is a separate tenant. Your console shows **only your** customers, money and routers — there is no screen or link that can reach another ISP's data. Isolation is structural, not a setting.
+  </Card>
+  <Card title="Roles & real security" icon="star">
+    Owner, Admin, Customer Care and Technician roles, tailored per ISP from **Access Control**. Moving money and changing access are Owner-only and can't be delegated, and money actions always need a second factor.
+  </Card>
+  <Card title="Changes reach the router" icon="setting">
+    Suspend a customer and they're actually cut off on the MikroTik — not just marked unpaid in a database. What you see in the console is what's live on the network.
+  </Card>
+  <Card title="Install it as an app" icon="rocket">
+    The console, the field app and the customer portal each install to a phone or desktop with their own icon, work full-screen, and update themselves — fast even on a patchy connection.
   </Card>
 </CardGrid>
 
 ## Where to start
 
-- New here? Read **[Getting started](/getting-started/)** for the five-minute tour.
-- Want to look before you read? Open the **[live demo](https://demo.wifios.co.ke)** — it's a full, real console you can click around (nothing you do changes any data).
+<CardGrid>
+  <LinkCard title="Getting started" href="/getting-started/" description="The five-minute tour of your console." />
+  <LinkCard title="Try the live demo" href="https://demo.wifios.co.ke" description="A full, real console you can click around — nothing you do changes any data." />
+  <LinkCard title="The map" href="/map/" description="See your whole network on one canvas." />
+  <LinkCard title="Roles & access" href="/roles/" description="Who can see and do what on your team." />
+</CardGrid>
 
-WIFI.OS is built by **Danamo Tech Ltd**. Each ISP gets its own console at `your-name.wifios.co.ke`.
+---
+
+WIFI.OS is built and operated by **Danamo Tech Ltd**. Each ISP gets its own console at `your-name.wifios.co.ke`, with a free trial to set everything up before you go live.

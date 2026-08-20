@@ -33,6 +33,21 @@ def live_connections_total(operator) -> int:
     return sum(live_connection_counts(operator).values())
 
 
+def hotspot_counts_by_router(operator) -> dict[int, int]:
+    """Active HOTSPOT sessions per router id — for the map's per-router session badge. Hotspot
+    only (not PPPoE): the badge answers "how many people are on this gateway's WiFi right now"."""
+    from django.db.models import Count
+
+    from apps.provisioning.models import Session
+
+    rows = (
+        Session.objects.filter(operator=operator, status=Session.Status.ACTIVE)
+        .values("router")
+        .annotate(n=Count("id"))
+    )
+    return {row["router"]: row["n"] for row in rows if row["router"] is not None}
+
+
 def live_counts_by_router(operator) -> dict[int, int]:
     """Live connections per router id, across service types — for the dashboard's per-router
     "active" column. Two grouped queries (no cross-join), summed by router, so a PPPoE-only

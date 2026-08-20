@@ -96,6 +96,20 @@ class TestMapPoints:
     def test_requires_auth(self):
         assert APIClient().get(URL).status_code in (401, 403)
 
+    def test_router_carries_live_hotspot_session_count(self):
+        from .factories import SessionFactory
+
+        op = OperatorFactory()
+        router = RouterFactory(operator=op, gps_lat=Decimal("-4.02"), gps_lng=Decimal("39.61"))
+        # Two active sessions on this router, one expired (must not count).
+        SessionFactory(operator=op, router=router, status="active")
+        SessionFactory(operator=op, router=router, status="active")
+        SessionFactory(operator=op, router=router, status="expired")
+
+        body = owner(op).get(URL).json()
+        router_pt = next(r for r in body["layers"]["routers"] if r["id"] == router.id)
+        assert router_pt["hotspot"] == 2  # only the two ACTIVE sessions
+
 
 class TestBusinessLocation:
     URL = "/api/v1/map/business-location/"
@@ -126,3 +140,88 @@ class TestBusinessLocation:
         body = owner(OperatorFactory()).get(URL).json()
         assert body["business_location"] is None
         assert body["center"] is None  # client then uses the device location
+
+
+class TestGeoSearch:
+    """The map search box's proxy. The upstream geocoder is always mocked — a test suite must
+    never depend on a network call to photon.komoot.io."""
+
+    URL = "/api/v1/map/search/"
+
+    def test_returns_normalised_results(self, monkeypatch):
+        captured = {}
+
+        def fake(query, lat=None, lng=None, limit=8):
+            captured.update(query=query, lat=lat, lng=lng)
+            return [{"label": "Nyali", "secondary": "Mombasa, Kenya",
+                     "lat": -4.03, "lng": 39.70, "type": "suburb"}]
+
+        monkeypatch.setattr("apps.maps.views.geocode_search", fake)
+        r = owner(OperatorFactory()).get(self.URL, {"q": "nyali", "lat": "-1.29", "lng": "36.8"})
+        assert r.status_code == 200, r.content
+        assert r.json()["results"][0]["label"] == "Nyali"
+        # the map centre is forwarded as a proximity BIAS
+        assert captured == {"query": "nyali", "lat": -1.29, "lng": 36.8}
+
+    def test_bad_lat_lng_are_ignored_not_fatal(self, monkeypatch):
+        seen = {}
+        monkeypatch.setattr(
+            "apps.maps.views.geocode_search",
+            lambda query, lat=None, lng=None, limit=8: seen.update(lat=lat, lng=lng) or [],
+        )
+        r = owner(OperatorFactory()).get(self.URL, {"q": "abc", "lat": "nope"})
+        assert r.status_code == 200
+        assert seen == {"lat": None, "lng": None}
+
+    def test_upstream_failure_is_a_502(self, monkeypatch):
+        from apps.maps.geocoding import GeocoderError
+
+        def boom(*a, **k):
+            raise GeocoderError("upstream down")
+
+        monkeypatch.setattr("apps.maps.views.geocode_search", boom)
+        r = owner(OperatorFactory()).get(self.URL, {"q": "anything"})
+        assert r.status_code == 502
+
+    def test_requires_auth(self):
+        assert APIClient().get(self.URL, {"q": "nairobi"}).status_code in (401, 403)
+
+
+class TestGeocodingService:
+    """The provider adapter in isolation: httpx is mocked, so we assert only our own mapping of
+    Photon's flat properties into the (primary, secondary) shape the UI renders."""
+
+    def test_photon_features_become_primary_secondary(self, monkeypatch):
+        import httpx
+
+        payload = {"features": [
+            {"geometry": {"type": "Point", "coordinates": [39.70, -4.03]},
+             "properties": {"name": "Nyali", "city": "Mombasa", "state": "Mombasa County",
+                            "country": "Kenya", "osm_value": "suburb"}},
+            {"geometry": {"type": "Polygon", "coordinates": []},  # non-point: dropped
+             "properties": {"name": "Some Region"}},
+        ]}
+
+        class FakeResp:
+            def raise_for_status(self): pass
+            def json(self): return payload
+
+        monkeypatch.setattr(httpx, "get", lambda *a, **k: FakeResp())
+        from apps.maps.geocoding import search
+
+        out = search("nyali", lat=-1.29, lng=36.8)
+        assert len(out) == 1  # the polygon feature was skipped
+        assert out[0]["label"] == "Nyali"
+        assert out[0]["secondary"] == "Mombasa, Mombasa County, Kenya"
+        assert out[0]["lat"] == -4.03 and out[0]["lng"] == 39.70
+
+    def test_short_query_never_calls_upstream(self, monkeypatch):
+        import httpx
+
+        def fail(*a, **k):
+            raise AssertionError("upstream must not be called for a 1-char query")
+
+        monkeypatch.setattr(httpx, "get", fail)
+        from apps.maps.geocoding import search
+
+        assert search("a") == []

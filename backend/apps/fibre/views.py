@@ -2,18 +2,26 @@
 with radio plant by default; an Owner can split it on Access Control). Deletes are soft."""
 
 from django.db.models import Count, Q
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework.decorators import action
+from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
-from apps.accounts.rbac import FIBRE_WRITE
+from apps.accounts.rbac import FIBRE_WRITE, MAP_VIEW
+from apps.core.permissions import (
+    RequireCapability,
+    RequireTenant,
+    TenantIsOperational,
+)
 from apps.core.schema import OBJECT_RESPONSE
 from apps.core.services import audit
+from apps.core.tenancy import acting_tenant
 from apps.core.viewsets import TenantModelViewSet
 
 from .models import FibrePoint, FibreSpan
 from .serializers import AffectedClientSerializer, FibrePointSerializer, FibreSpanSerializer
-from .services import affected_clients
+from .services import affected_clients, nearest_point, shortest_path
 
 
 class _PlantViewSet(TenantModelViewSet):
@@ -84,3 +92,101 @@ class FibreSpanViewSet(_PlantViewSet):
     serializer_class = FibreSpanSerializer
     queryset = FibreSpan.objects.select_related("from_point", "to_point").all()
     audit_noun = "fibre_span"
+
+
+def _point_json(p: FibrePoint) -> dict:
+    return {
+        "id": p.id, "label": p.label, "type": p.type,
+        "lat": float(p.gps_lat) if p.gps_lat is not None else None,
+        "lng": float(p.gps_lng) if p.gps_lng is not None else None,
+    }
+
+
+class FibreRouteView(APIView):
+    """Shortest CABLE route through the plant, source → target.
+
+    Gated on map.view (not fibre.write) so a technician standing in the field — any role that can
+    see the map — can trace the run to a client or a pole. Source is either a plant point
+    (`from_point`) or a raw coordinate (`from_lat`/`from_lng`) that snaps to the nearest point.
+    Target is a point (`to_point`) or a customer (`to_client`, routed to their ODP).
+    """
+
+    permission_classes = [IsAdminUser, RequireTenant, TenantIsOperational,
+                          RequireCapability(MAP_VIEW)]
+
+    @staticmethod
+    def _float(v):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    def _resolve_source(self, request, op):
+        """(point_id, snapped_dict|None) or an error string."""
+        raw_point = request.query_params.get("from_point")
+        if raw_point:
+            p = FibrePoint.objects.filter(operator=op, is_active=True, id=raw_point).first()
+            return (p.id, None) if p else "from_point not found."
+        lat = self._float(request.query_params.get("from_lat"))
+        lng = self._float(request.query_params.get("from_lng"))
+        if lat is None or lng is None:
+            return "Provide from_point, or from_lat and from_lng."
+        snapped, dist = nearest_point(op.id, lat, lng)
+        if not snapped:
+            return "No placed plant points to route from."
+        return (snapped.id, {"point": _point_json(snapped), "distance_m": round(dist, 1)})
+
+    def _resolve_target(self, request, op):
+        raw_point = request.query_params.get("to_point")
+        if raw_point:
+            p = FibrePoint.objects.filter(operator=op, is_active=True, id=raw_point).first()
+            return p.id if p else "to_point not found."
+        raw_client = request.query_params.get("to_client")
+        if raw_client:
+            from apps.pppoe.models import Client
+            c = (Client.objects.filter(operator=op, id=raw_client)
+                 .only("id", "fibre_point_id").first())
+            if not c:
+                return "to_client not found."
+            if not c.fibre_point_id:
+                return "That customer isn't attached to a fibre point yet."
+            return c.fibre_point_id
+        return "Provide to_point or to_client."
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter("from_point", int, description="Source plant point id"),
+            OpenApiParameter("from_lat", float, description="Source latitude (snaps to nearest)"),
+            OpenApiParameter("from_lng", float, description="Source longitude (snaps to nearest)"),
+            OpenApiParameter("to_point", int, description="Target plant point id"),
+            OpenApiParameter("to_client", int, description="Target customer id (routes to ODP)"),
+        ],
+        responses=OBJECT_RESPONSE,
+        summary="Shortest fibre cable route between two plant points",
+    )
+    def get(self, request):
+        op = acting_tenant(request)
+        src = self._resolve_source(request, op)
+        if isinstance(src, str):
+            return Response({"detail": src}, status=400)
+        source_id, snapped = src
+        target_id = self._resolve_target(request, op)
+        if isinstance(target_id, str):
+            return Response({"detail": target_id}, status=400)
+
+        route = shortest_path(op.id, source_id, target_id)
+        if route is None:
+            return Response(
+                {"detail": "No cable path connects those two points."}, status=404)
+        return Response({
+            "from_snapped": snapped,  # null when source was an explicit point
+            "points": [_point_json(p) for p in route["points"]],
+            "spans": [
+                {"id": s.id, "from_point": s.from_point_id, "to_point": s.to_point_id,
+                 "length_m": s.length_m, "cable_type": s.cable_type}
+                for s in route["spans"]
+            ],
+            "total_m": route["total_m"],
+            "span_count": route["span_count"],
+            "splice_count": route["splice_count"],
+        })

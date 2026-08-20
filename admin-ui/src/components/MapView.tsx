@@ -6,11 +6,13 @@ import {
   MapPin, RadioTower, Router as RouterIcon, Home, UserPlus, Loader2, AlertTriangle,
   Satellite, Map as MapGlyph, Flame, Building2, X, LocateFixed,
   Waypoints, Server, Box, GitMerge, Split, CircleDot, Milestone, Circle, HardHat,
+  Route as RouteIcon, Crosshair,
 } from 'lucide-react';
-import { api, ApiError, type MapData, type MapLayer, type MapPoint, type FibreType, type FleetData } from '../api/client';
+import { api, ApiError, type MapData, type MapLayer, type MapPoint, type FibreType, type FleetData, type FibreRoute } from '../api/client';
 import { getPosition, watchPosition } from '../utils/geolocate';
 import { navLinks } from '../utils/nav';
 import MapPicker from './MapPicker';
+import MapSearch from './MapSearch';
 import { toast } from './ui';
 
 type MLMap = maplibregl.Map;
@@ -100,6 +102,41 @@ async function addLucideIcon(map: MLMap, id: string, Icon: IconType) {
   if (!map.hasImage(id)) map.addImage(id, c.getContext('2d')!.getImageData(0, 0, 44, 44), { pixelRatio: 2 });
 }
 
+/** A small rounded "count" badge (active hotspot sessions) rasterised to a map image. The raster
+ *  basemap has no glyphs, so on-pin numbers must be images, exactly like the icons. */
+function addCountBadge(map: MLMap, id: string, count: number) {
+  if (map.hasImage(id)) return;
+  const label = count > 99 ? '99+' : String(count);
+  const scale = 2, h = 30, padX = 9, fontPx = 17;
+  const measure = document.createElement('canvas').getContext('2d')!;
+  measure.font = `700 ${fontPx}px "JetBrains Mono", ui-monospace, monospace`;
+  const w = Math.max(h, Math.ceil(measure.measureText(label).width) + padX * 2);
+  const c = document.createElement('canvas');
+  c.width = w * scale;
+  c.height = h * scale;
+  const ctx = c.getContext('2d')!;
+  ctx.scale(scale, scale);
+  const r = h / 2;
+  ctx.beginPath();
+  ctx.moveTo(r, 0);
+  ctx.arcTo(w, 0, w, h, r);
+  ctx.arcTo(w, h, 0, h, r);
+  ctx.arcTo(0, h, 0, 0, r);
+  ctx.arcTo(0, 0, w, 0, r);
+  ctx.closePath();
+  ctx.fillStyle = '#059669';           // emerald = live/online sessions
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = '#ffffff';
+  ctx.stroke();
+  ctx.fillStyle = '#ffffff';
+  ctx.font = `700 ${fontPx}px "JetBrains Mono", ui-monospace, monospace`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(label, w / 2, h / 2 + 0.5);
+  map.addImage(id, ctx.getImageData(0, 0, c.width, c.height), { pixelRatio: scale });
+}
+
 export default function MapView(
   { onNavigate, canViewFleet = false, canSetBusinessLocation = false }:
   { onNavigate: (tab: string) => void; canViewFleet?: boolean; canSetBusinessLocation?: boolean },
@@ -125,6 +162,8 @@ export default function MapView(
 
   // "You are here" live dot (our own control — see the map-create effect for why not GeolocateControl).
   const dotRef = useRef<maplibregl.Marker | null>(null);
+  // The pin dropped when a place is picked from the search box (one, reused across searches).
+  const searchMarkerRef = useRef<maplibregl.Marker | null>(null);
   const watchStopRef = useRef<(() => void) | null>(null);
   const [locating, setLocating] = useState(false); // waiting on the first fix
   const [tracking, setTracking] = useState(false); // dot is live and following
@@ -160,6 +199,116 @@ export default function MapView(
       (msg) => { stopLocate(); toast('error', msg); },
     );
   };
+
+  // A place was picked from the search box: fly there and drop a labelled pin. The marker is
+  // reused across searches (one pin, not a trail), and carries a popup with the place name.
+  const flyToPlace = (r: { label: string; secondary: string; lat: number; lng: number }) => {
+    const map = mapRef.current;
+    if (!map) return;
+    const popup = new maplibregl.Popup({ offset: 28, closeButton: false }).setHTML(
+      `<div style="font-family:ui-monospace,monospace;max-width:220px">
+         <div style="font-weight:700;font-size:12px;color:#141414">${esc(r.label)}</div>
+         ${r.secondary ? `<div style="font-size:11px;color:#6b7280">${esc(r.secondary)}</div>` : ''}
+       </div>`,
+    );
+    if (!searchMarkerRef.current) {
+      searchMarkerRef.current = new maplibregl.Marker({ color: '#DC2626' })
+        .setLngLat([r.lng, r.lat]).setPopup(popup).addTo(map);
+    } else {
+      searchMarkerRef.current.setLngLat([r.lng, r.lat]).setPopup(popup);
+    }
+    searchMarkerRef.current.togglePopup();
+    map.flyTo({ center: [r.lng, r.lat], zoom: 16, duration: 900 });
+  };
+
+  // ---- Cable routing: shortest fibre path through the plant (server-side Dijkstra) ----------
+  type RouteEnd = { kind: 'point' | 'client' | 'gps'; id?: number; lat?: number; lng?: number; label: string };
+  const [routeMode, setRouteMode] = useState(false);
+  const routeModeRef = useRef(false);
+  routeModeRef.current = routeMode;
+  const [routeFrom, setRouteFrom] = useState<RouteEnd | null>(null);
+  const [routeResult, setRouteResult] = useState<FibreRoute | null>(null);
+  const [routeMsg, setRouteMsg] = useState('');
+  // The once-registered map click handlers call this; reassigned every render so it always sees
+  // the current routeFrom (first click = start, second = destination).
+  const pickRef = useRef<(end: RouteEnd) => void>(() => {});
+
+  const runRoute = (from: RouteEnd, to: RouteEnd) => {
+    const params: Parameters<typeof api.fibre.route>[0] = {};
+    if (from.kind === 'point') params.fromPoint = from.id;
+    else { params.fromLat = from.lat; params.fromLng = from.lng; } // client/gps → snap to nearest
+    if (to.kind === 'point') params.toPoint = to.id;
+    else params.toClient = to.id;
+    setRouteMsg('Finding the shortest route…');
+    api.fibre
+      .route(params)
+      .then((r) => { setRouteResult(r); setRouteMsg(''); })
+      .catch((e) => { setRouteResult(null); setRouteMsg(e instanceof ApiError ? e.message : 'No route found.'); });
+  };
+
+  pickRef.current = (end: RouteEnd) => {
+    if (!routeFrom) {
+      setRouteFrom(end);
+      setRouteResult(null);
+      setRouteMsg('Now pick the destination — a fibre point or a client.');
+    } else {
+      runRoute(routeFrom, end);
+    }
+  };
+
+  const routeFromMyLocation = () => {
+    setRouteMsg('Getting your location…');
+    getPosition()
+      .then(({ lat, lng }) => {
+        setRouteFrom({ kind: 'gps', lat, lng, label: 'My location' });
+        setRouteResult(null);
+        setRouteMsg('Now pick the destination — a fibre point or a client.');
+      })
+      .catch((err) => setRouteMsg(err instanceof Error ? err.message : 'Could not get your location.'));
+  };
+
+  const clearRoute = () => { setRouteFrom(null); setRouteResult(null); setRouteMsg(''); };
+  const exitRouteMode = () => { setRouteMode(false); clearRoute(); };
+
+  // Draw the route as a bright line over the plant, and frame it.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    const coords: [number, number][] = [];
+    if (routeResult) {
+      // If the start snapped from a client/GPS point, begin the line at that real location so the
+      // "snap onto the plant" is visible.
+      if (routeResult.from_snapped && routeFrom && routeFrom.kind !== 'point'
+          && routeFrom.lat != null && routeFrom.lng != null) {
+        coords.push([routeFrom.lng, routeFrom.lat]);
+      }
+      for (const p of routeResult.points) {
+        if (p.lat != null && p.lng != null) coords.push([p.lng, p.lat]);
+      }
+    }
+    const fc: GeoJSON.FeatureCollection = {
+      type: 'FeatureCollection',
+      features: coords.length >= 2
+        ? [{ type: 'Feature', geometry: { type: 'LineString', coordinates: coords }, properties: {} }]
+        : [],
+    };
+    const src = map.getSource('route') as maplibregl.GeoJSONSource | undefined;
+    if (src) {
+      src.setData(fc);
+    } else {
+      map.addSource('route', { type: 'geojson', data: fc });
+      map.addLayer({
+        id: 'route-line', type: 'line', source: 'route',
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': '#F59E0B', 'line-width': 6, 'line-opacity': 0.9 },
+      });
+    }
+    if (coords.length >= 2) {
+      const b = new maplibregl.LngLatBounds(coords[0], coords[0]);
+      coords.forEach((c) => b.extend(c));
+      map.fitBounds(b, { padding: 90, maxZoom: 16, duration: 600 });
+    }
+  }, [routeResult, routeFrom, mapReady]);
 
   // Tear the watch down if the component unmounts mid-track.
   useEffect(() => () => { watchStopRef.current?.(); }, []);
@@ -209,6 +358,19 @@ export default function MapView(
     addedRef.current = true;
 
     const hover = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 16 });
+    // Hover bridge: the card carries clickable links (Navigate), so closing it is DELAYED and
+    // moving the cursor onto the card cancels the close. Without this the card vanishes the
+    // instant you leave the pin and its links are unreachable.
+    let hoverCloseTimer: number | null = null;
+    const cancelHoverClose = () => { if (hoverCloseTimer) { clearTimeout(hoverCloseTimer); hoverCloseTimer = null; } };
+    const scheduleHoverClose = () => { cancelHoverClose(); hoverCloseTimer = window.setTimeout(() => hover.remove(), 220); };
+    const bindHoverCard = () => {
+      const el = hover.getElement();
+      if (!el || el.dataset.bridged) return;   // bind once per popup DOM element
+      el.dataset.bridged = '1';
+      el.addEventListener('mouseenter', cancelHoverClose);
+      el.addEventListener('mouseleave', scheduleHoverClose);
+    };
     for (const layer of LAYERS) {
       if (layer.id === 'fibre') continue;   // rendered by the dedicated fibre block below
       const features = (data.layers[layer.id] || []).map((pt) => ({
@@ -254,6 +416,27 @@ export default function MapView(
           'circle-stroke-width': 2.5, 'circle-stroke-color': '#fff',
         },
       });
+      // Router pins carry a live "active hotspot sessions" badge at their top-right. Register a
+      // badge image per distinct count present, then a symbol layer that reads it per feature.
+      if (layer.id === 'routers') {
+        const counts = new Set<number>();
+        for (const f of features) {
+          const n = (f.properties as { hotspot?: number }).hotspot ?? 0;
+          if (n > 0) counts.add(Math.min(n, 100)); // 100 renders as "99+"
+        }
+        counts.forEach((n) => addCountBadge(map, `hsbadge-${n}`, n));
+        map.addLayer({
+          id: 'routers-badge', type: 'symbol', source: 'routers',
+          filter: ['all', ['!', ['has', 'point_count']], ['>', ['coalesce', ['get', 'hotspot'], 0], 0]],
+          layout: {
+            'icon-image': ['concat', 'hsbadge-', ['to-string', ['min', ['get', 'hotspot'], 100]]],
+            'icon-size': 1,
+            'icon-allow-overlap': true,
+            'icon-ignore-placement': true,
+            'icon-offset': [15, -14], // sit at the pin's top-right
+          },
+        });
+      }
       // Icons layer on top when ready — a failed glyph never blocks the status-coloured discs.
       addLucideIcon(map, `icon-${layer.id}`, layer.Icon).then(() => {
         if (map.getSource(layer.id) && !map.getLayer(`${layer.id}-icon`)) {
@@ -275,15 +458,29 @@ export default function MapView(
         const f = e.features?.[0];
         if (!f) return;
         map.getCanvas().style.cursor = 'pointer';
+        cancelHoverClose();
         hover.setLngLat((f.geometry as GeoJSON.Point).coordinates as [number, number])
           .setDOMContent(card(f.properties as unknown as MapPoint, layer))
           .addTo(map);
+        bindHoverCard();
       });
-      map.on('mouseleave', `${layer.id}-pt`, () => { map.getCanvas().style.cursor = ''; hover.remove(); });
+      map.on('mouseleave', `${layer.id}-pt`, () => { map.getCanvas().style.cursor = ''; scheduleHoverClose(); });
       map.on('mouseenter', `${layer.id}-cluster`, () => (map.getCanvas().style.cursor = 'pointer'));
       map.on('mouseleave', `${layer.id}-cluster`, () => (map.getCanvas().style.cursor = ''));
-      map.on('click', `${layer.id}-pt`, () =>
-        navRef.current(TAB_FOR[layer.id]));
+      map.on('click', `${layer.id}-pt`, (e) => {
+        if (routeModeRef.current) {
+          // Only customers are routable endpoints among the non-fibre layers.
+          if (layer.id !== 'clients') return;
+          const f = e.features?.[0];
+          if (!f) return;
+          const [lng, lat] = (f.geometry as GeoJSON.Point).coordinates as [number, number];
+          const props = f.properties as unknown as MapPoint;
+          pickRef.current({ kind: 'client', id: props.id, lat, lng,
+            label: props.label || `Client #${props.id}` });
+          return;
+        }
+        navRef.current(TAB_FOR[layer.id]);
+      });
     }
 
     // ---- FIBRE PLANT: span lines (under the pins) + type-icon points ---------------------------
@@ -343,12 +540,25 @@ export default function MapView(
       const f = e.features?.[0];
       if (!f) return;
       map.getCanvas().style.cursor = 'pointer';
+      cancelHoverClose();
       hover.setLngLat((f.geometry as GeoJSON.Point).coordinates as [number, number])
         .setDOMContent(fibreCard(f.properties as unknown as MapPoint))
         .addTo(map);
+      bindHoverCard();
     });
-    map.on('mouseleave', 'fibre-pt', () => { map.getCanvas().style.cursor = ''; hover.remove(); });
-    map.on('click', 'fibre-pt', () => navRef.current(TAB_FOR.fibre));
+    map.on('mouseleave', 'fibre-pt', () => { map.getCanvas().style.cursor = ''; scheduleHoverClose(); });
+    map.on('click', 'fibre-pt', (e) => {
+      if (routeModeRef.current) {
+        const f = e.features?.[0];
+        if (!f) return;
+        const [lng, lat] = (f.geometry as GeoJSON.Point).coordinates as [number, number];
+        const props = f.properties as unknown as MapPoint;
+        pickRef.current({ kind: 'point', id: props.id, lat, lng,
+          label: props.label || `Point #${props.id}` });
+        return;
+      }
+      navRef.current(TAB_FOR.fibre);
+    });
 
     // Where to open. THE PINS MUST BE VISIBLE — a location you just set is useless if it opens
     // somewhere else. So: if there are ANY placed assets, frame ALL of them (plus the device,
@@ -406,6 +616,16 @@ export default function MapView(
     if (!map || !mapReady || !canViewFleet || fleetAddedRef.current) return;
     fleetAddedRef.current = true;
     const hover = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 16 });
+    let hoverCloseTimer: number | null = null;
+    const cancelHoverClose = () => { if (hoverCloseTimer) { clearTimeout(hoverCloseTimer); hoverCloseTimer = null; } };
+    const scheduleHoverClose = () => { cancelHoverClose(); hoverCloseTimer = window.setTimeout(() => hover.remove(), 220); };
+    const bindHoverCard = () => {
+      const el = hover.getElement();
+      if (!el || el.dataset.bridged) return;
+      el.dataset.bridged = '1';
+      el.addEventListener('mouseenter', cancelHoverClose);
+      el.addEventListener('mouseleave', scheduleHoverClose);
+    };
     map.addSource('fleet', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
     map.addLayer({
       id: 'fleet-pt', type: 'circle', source: 'fleet',
@@ -427,11 +647,13 @@ export default function MapView(
       const f = e.features?.[0];
       if (!f) return;
       map.getCanvas().style.cursor = 'pointer';
+      cancelHoverClose();
       hover.setLngLat((f.geometry as GeoJSON.Point).coordinates as [number, number])
         .setDOMContent(fleetCard(f.properties as unknown as FleetProps))
         .addTo(map);
+      bindHoverCard();
     });
-    map.on('mouseleave', 'fleet-pt', () => { map.getCanvas().style.cursor = ''; hover.remove(); });
+    map.on('mouseleave', 'fleet-pt', () => { map.getCanvas().style.cursor = ''; scheduleHoverClose(); });
   }, [mapReady, canViewFleet]);
 
   // Push fleet data into the source whenever a poll returns OR the source has just been added
@@ -507,6 +729,15 @@ export default function MapView(
             </button>
           )}
           <button
+            onClick={() => (routeMode ? exitRouteMode() : setRouteMode(true))}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold font-mono uppercase border cursor-pointer ${
+              routeMode ? 'bg-[#F59E0B] text-white border-[#F59E0B]' : 'bg-white text-[#141414]/60 border-[#141414]/40'
+            }`}
+            title="Trace the shortest fibre cable route between two points"
+          >
+            <RouteIcon className="h-3.5 w-3.5" /> Route
+          </button>
+          <button
             onClick={toggleLocate}
             className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold font-mono uppercase border cursor-pointer ${
               tracking || locating ? 'bg-[#2563EB] text-white border-[#2563EB]' : 'bg-white text-[#141414]/60 border-[#141414]/40'
@@ -576,6 +807,82 @@ export default function MapView(
           </div>
         )}
         <div ref={holder} style={{ height: '74vh', width: '100%' }} />
+
+        {/* Google/Apple-style place search — top-centre, above the legend and controls. */}
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20">
+          <MapSearch
+            getCenter={() => {
+              const c = mapRef.current?.getCenter();
+              return c ? { lat: c.lat, lng: c.lng } : null;
+            }}
+            onPick={flyToPlace}
+          />
+        </div>
+
+        {/* Cable-routing panel — shown while Route mode is on. */}
+        {routeMode && (
+          <div className="absolute bottom-3 left-3 z-20 w-[min(320px,calc(100vw-2.5rem))] bg-white border border-[#F59E0B] shadow-md">
+            <div className="flex items-center justify-between px-3 py-2 bg-[#F59E0B] text-white">
+              <span className="text-xs font-bold font-mono uppercase tracking-wide flex items-center gap-1.5">
+                <RouteIcon className="h-3.5 w-3.5" /> Cable route
+              </span>
+              <button onClick={exitRouteMode} className="cursor-pointer" title="Exit route mode" aria-label="Exit route mode">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="p-3 space-y-2">
+              {!routeFrom && (
+                <button
+                  onClick={routeFromMyLocation}
+                  className="w-full flex items-center justify-center gap-1.5 px-2.5 py-1.5 text-xs font-bold font-mono uppercase border border-[#141414] bg-white text-[#141414] cursor-pointer hover:bg-[#141414] hover:text-white"
+                >
+                  <Crosshair className="h-3.5 w-3.5" /> Start from my location
+                </button>
+              )}
+              {routeFrom && (
+                <div className="text-xs text-[#141414]/70">
+                  <span className="font-mono uppercase text-[10px] text-[#141414]/40">From</span>{' '}
+                  <b>{routeFrom.label}</b>
+                </div>
+              )}
+              {routeMsg && <div className="text-xs text-[#141414]/60">{routeMsg}</div>}
+              {!routeFrom && !routeMsg && (
+                <p className="text-xs text-[#141414]/50">
+                  Click a fibre point or a client for the start, then click the destination.
+                </p>
+              )}
+              {routeResult && (
+                <div className="border-t border-[#141414]/10 pt-2 text-sm">
+                  <div className="flex items-baseline justify-between">
+                    <span className="font-mono uppercase text-[10px] text-[#141414]/40">Distance</span>
+                    <b className="text-[#141414]">
+                      {routeResult.total_m >= 1000
+                        ? `${(routeResult.total_m / 1000).toFixed(2)} km`
+                        : `${Math.round(routeResult.total_m)} m`}
+                    </b>
+                  </div>
+                  <div className="flex items-baseline justify-between text-xs text-[#141414]/60">
+                    <span>{routeResult.span_count} span{routeResult.span_count === 1 ? '' : 's'}</span>
+                    <span>{routeResult.splice_count} splice{routeResult.splice_count === 1 ? '' : 's'}</span>
+                  </div>
+                  {routeResult.from_snapped && (
+                    <p className="text-[11px] text-[#141414]/40 mt-1">
+                      Snapped to <b>{routeResult.from_snapped.point.label}</b> ({Math.round(routeResult.from_snapped.distance_m)} m away)
+                    </p>
+                  )}
+                </div>
+              )}
+              {(routeFrom || routeResult) && (
+                <button
+                  onClick={clearRoute}
+                  className="w-full px-2.5 py-1.5 text-[10px] font-bold font-mono uppercase border border-[#141414]/40 text-[#141414]/60 cursor-pointer hover:border-[#141414] hover:text-[#141414]"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* The guide — what each pin means. */}
         <aside className="absolute top-3 left-3 z-10 w-52 bg-white/95 border border-[#141414] p-3 shadow-sm hidden sm:block">
@@ -684,9 +991,14 @@ function card(p: MapPoint, layer: { id: MapLayer; label: string }): HTMLElement 
       ${rows([['Phone', p.phone], ['Source', p.source]])}
       <div style="font-size:10px;color:#999;margin-top:5px">A prospect — click to open in Leads</div>${navHtml(p)}`;
   } else {
+    const sessions = layer.id === 'routers' && (p.hotspot ?? 0) > 0
+      ? `<div style="margin-top:5px;font-size:11px;color:#059669;font-weight:700">● ${p.hotspot} hotspot session${p.hotspot === 1 ? '' : 's'} live</div>`
+      : layer.id === 'routers'
+        ? `<div style="margin-top:5px;font-size:11px;color:#999">No hotspot sessions right now</div>`
+        : '';
     el.innerHTML = `
       <div style="font-weight:700;font-size:13px;margin-bottom:3px">${esc(p.label)}</div>
-      <div>${chip}</div>
+      <div>${chip}</div>${sessions}
       <div style="font-size:10px;color:#999;margin-top:5px">Click to open in ${layer.id === 'routers' ? 'MikroTik' : 'Network'}</div>${navHtml(p)}`;
   }
   return el;

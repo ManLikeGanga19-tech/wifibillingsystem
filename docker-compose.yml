@@ -4,8 +4,14 @@ x-backend: &backend
   build: ./backend
   volumes:
     - ./backend:/app
+    # The product docs, read-only, so the assistant's RAG ingest can index them in dev. In
+    # production the deploy syncs docs-site to the box and ingest points at it there.
+    - ./docs-site/src/content/docs:/app/docs_content:ro
   environment: &backend-env
     DJANGO_SETTINGS_MODULE: config.settings.dev
+    ASSISTANT_EMBED_MODEL: ${ASSISTANT_EMBED_MODEL:-BAAI/bge-small-en-v1.5}
+    FASTEMBED_CACHE_DIR: ${FASTEMBED_CACHE_DIR:-/opt/models/fastembed}
+    DOCS_CONTENT_DIR: ${DOCS_CONTENT_DIR:-/app/docs_content}
     DATABASE_URL: postgres://wifi:wifi@db:5432/wifi
     REDIS_URL: redis://redis:6379/0
     DARAJA_CONSUMER_KEY: ${DARAJA_CONSUMER_KEY:-}
@@ -35,7 +41,7 @@ x-backend: &backend
 
 services:
   db:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: wifi
       POSTGRES_PASSWORD: wifi

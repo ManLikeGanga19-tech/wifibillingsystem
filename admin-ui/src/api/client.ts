@@ -204,7 +204,11 @@ async function request<T>(path: string, init?: RequestInit, retried = false): Pr
           ...init?.headers,
         },
       });
-    } catch {
+    } catch (err) {
+      // An intentional cancel (e.g. the map search aborting a superseded keystroke) is NOT a
+      // connectivity problem — rethrow it quietly so it never trips the "Reconnecting…" banner
+      // or the retry loop. The caller recognises it by err.name === 'AbortError'.
+      if ((err as { name?: string })?.name === 'AbortError' || init?.signal?.aborted) throw err;
       // Network-level failure — the server is unreachable (mid-deploy, blip). Retry GETs a
       // few times so a brief outage is invisible; writes fail fast so we never double-submit.
       if (isGet && attempt < 4) {
@@ -851,6 +855,8 @@ export interface MapPoint {
   capacity?: number;
   used?: number;
   free?: number | null;
+  // routers carry a live count of active hotspot sessions (for the on-pin badge)
+  hotspot?: number;
 }
 /** A fibre span drawn as a line between its two placed endpoints. */
 export interface FibreSpanSeg {
@@ -861,6 +867,16 @@ export interface FibreSpanSeg {
   from_lng: number;
   to_lat: number;
   to_lng: number;
+}
+/** A shortest cable route through the plant (Dijkstra result). */
+export interface FibreRoutePoint { id: number; label: string; type: FibreType; lat: number | null; lng: number | null; }
+export interface FibreRoute {
+  from_snapped: { point: FibreRoutePoint; distance_m: number } | null;
+  points: FibreRoutePoint[];
+  spans: { id: number; from_point: number; to_point: number; length_m: number | null; cable_type: string }[];
+  total_m: number;
+  span_count: number;
+  splice_count: number;
 }
 export interface MapData {
   business_location: { lat: number; lng: number } | null;
@@ -873,6 +889,15 @@ export interface MapData {
 export interface BusinessLocation {
   gps_lat: number | null;
   gps_lng: number | null;
+}
+// One place suggestion from the map search box. `label` is the primary line, `secondary` the
+// grey context line beneath it (locality, region, country) — Google/Apple style.
+export interface GeoResult {
+  label: string;
+  secondary: string;
+  lat: number;
+  lng: number;
+  type: string;
 }
 
 // ---- Fibre plant (console CRUD) -----------------------------------------------
@@ -1012,6 +1037,49 @@ export interface AISettings {
 export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
+}
+/** A doc passage the assistant grounded its answer in (shown as a citation). */
+export interface ChatSource {
+  slug: string;
+  title: string;
+  heading: string;
+}
+/** The ISP's assistant tier and this month's usage — drives the widget meter + upgrade prompt. */
+export interface AIUsage {
+  tier: 'free' | 'pro' | 'byo';
+  unlimited: boolean;
+  used: number;
+  limit: number | null;
+  remaining: number | null;
+}
+/** The assistant's reply: the text, the docs it cited, the id to attach a 👍/👎 to, and usage. */
+export interface ChatReply {
+  reply: string;
+  sources: ChatSource[];
+  question_id: number;
+  usage: AIUsage;
+}
+/** A saved chat thread (multi-conversation), and its stored messages. */
+export interface Conversation {
+  id: number;
+  title: string;
+  created_at: string;
+  updated_at: string;
+}
+export interface ConvMessage {
+  id: number;
+  role: 'user' | 'assistant';
+  content: string;
+  sources: ChatSource[];
+  question_id: number | null;
+  created_at: string;
+}
+export interface ConversationDetail extends Conversation {
+  messages: ConvMessage[];
+}
+export interface SendResult {
+  message: ConvMessage;
+  usage: AIUsage;
 }
 
 /** Settings > Operator alerts. */
@@ -1610,6 +1678,22 @@ export const api = {
         request<FibreSpan>(`/fibre/spans/${id}/`, { method: 'PATCH', body: JSON.stringify(data) }),
       remove: (id: number) => request<null>(`/fibre/spans/${id}/`, { method: 'DELETE' }),
     },
+    // Shortest CABLE route through the plant (Dijkstra, server-side). Source is a point or a raw
+    // coordinate that snaps to the nearest point; target is a point or a customer (→ their ODP).
+    route: (params: {
+      fromPoint?: number; fromLat?: number; fromLng?: number;
+      toPoint?: number; toClient?: number;
+    }) => {
+      const p = new URLSearchParams();
+      if (params.fromPoint != null) p.set('from_point', String(params.fromPoint));
+      if (params.fromLat != null && params.fromLng != null) {
+        p.set('from_lat', String(params.fromLat));
+        p.set('from_lng', String(params.fromLng));
+      }
+      if (params.toPoint != null) p.set('to_point', String(params.toPoint));
+      if (params.toClient != null) p.set('to_client', String(params.toClient));
+      return request<FibreRoute>(`/fibre/route/?${p.toString()}`);
+    },
   },
 
   /** Fleet tracking. A technician reports their own position; a dispatcher sees the fleet. */
@@ -1800,6 +1884,13 @@ export const api = {
     setBusinessLocation: (gps_lat: number | null, gps_lng: number | null) =>
       request<{ detail: string; gps_lat: number | null; gps_lng: number | null }>(
         '/map/business-location/', { method: 'POST', body: JSON.stringify({ gps_lat, gps_lng }) }),
+    // Place/address autocomplete for the map search box. lat/lng bias the ranking toward the
+    // current viewport (nearby first); they never restrict results to a region.
+    search: (q: string, lat?: number, lng?: number, signal?: AbortSignal) => {
+      const p = new URLSearchParams({ q });
+      if (lat != null && lng != null) { p.set('lat', String(lat)); p.set('lng', String(lng)); }
+      return request<{ results: GeoResult[] }>(`/map/search/?${p.toString()}`, { signal });
+    },
   },
 
   developer: {
@@ -1835,10 +1926,35 @@ export const api = {
         body: JSON.stringify(data),
       }),
     chat: (messages: ChatMessage[]) =>
-      request<{ reply: string }>('/assistant/chat/', {
+      request<ChatReply>('/assistant/chat/', {
         method: 'POST',
         body: JSON.stringify({ messages }),
       }),
+    rate: (questionId: number, rating: 1 | -1 | 0) =>
+      request<{ rating: number | null }>(`/assistant/questions/${questionId}/rate/`, {
+        method: 'POST',
+        body: JSON.stringify({ rating }),
+      }),
+    usage: () => request<AIUsage>('/assistant/usage/'),
+    // Saved, named chat threads (multi-conversation), private to each staff member.
+    conversations: {
+      list: () => request<Paginated<Conversation>>('/assistant/conversations/'),
+      create: () =>
+        request<ConversationDetail>('/assistant/conversations/', { method: 'POST', body: '{}' }),
+      get: (id: number) => request<ConversationDetail>(`/assistant/conversations/${id}/`),
+      rename: (id: number, title: string) =>
+        request<Conversation>(`/assistant/conversations/${id}/`, {
+          method: 'PATCH',
+          body: JSON.stringify({ title }),
+        }),
+      remove: (id: number) =>
+        request<null>(`/assistant/conversations/${id}/`, { method: 'DELETE' }),
+      send: (id: number, content: string) =>
+        request<SendResult>(`/assistant/conversations/${id}/messages/`, {
+          method: 'POST',
+          body: JSON.stringify({ content }),
+        }),
+    },
   },
 
   alerts: {

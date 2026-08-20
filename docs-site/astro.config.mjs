@@ -23,6 +23,9 @@ export default defineConfig({
       tagline: 'The billing system for Kenyan WISPs.',
       credits: false,
       pagination: true,
+      // The WIFI.OS brand skin — without it the docs render in Starlight's stock theme and read
+      // as a different product from the console and marketing site.
+      customCss: ['./src/styles/brand.css'],
       sidebar: [
         {
           label: 'Start here',
@@ -42,19 +45,49 @@ export default defineConfig({
           ],
         },
         {
-          label: 'Running the business',
+          label: 'Customers & sales',
           items: [
             { label: 'Clients', slug: 'clients' },
-            { label: 'Billing & payments', slug: 'billing-payments' },
+            { label: 'Leads', slug: 'leads' },
             { label: 'Active users', slug: 'active-users' },
+            { label: 'Tickets & field jobs', slug: 'field-ops' },
             { label: 'Churn & retention', slug: 'churn' },
+          ],
+        },
+        {
+          label: 'Network & field',
+          items: [
+            { label: 'The map', slug: 'map' },
+            { label: 'Network (towers & sectors)', slug: 'network' },
+            { label: 'Fibre plant & routing', slug: 'fibre-plant' },
+            { label: 'Routers & equipment', slug: 'devices' },
+            { label: 'Technician fleet & dispatch', slug: 'fleet' },
+          ],
+        },
+        {
+          label: 'Money',
+          items: [
+            { label: 'Billing & payments', slug: 'billing-payments' },
+            { label: 'Wallet & payouts', slug: 'wallet' },
+            { label: 'Expenses', slug: 'expenses' },
+            { label: 'Reports', slug: 'reports' },
+          ],
+        },
+        {
+          label: 'Reaching customers',
+          items: [
+            { label: 'Communication', slug: 'communication' },
           ],
         },
         {
           label: 'Administration',
           items: [
-            { label: 'Settings', slug: 'settings' },
+            { label: 'Your team', slug: 'team' },
             { label: 'Roles & access', slug: 'roles' },
+            { label: 'Security & sign-in', slug: 'security' },
+            { label: 'Settings', slug: 'settings' },
+            { label: 'Developer & API', slug: 'developer-api' },
+            { label: 'Install as an app', slug: 'install-app' },
           ],
         },
       ],

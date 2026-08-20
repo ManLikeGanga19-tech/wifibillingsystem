@@ -1,0 +1,88 @@
+/*
+ * WIFI.OS brand skin for Starlight.
+ *
+ * Without this, the docs render in Starlight's stock theme (a generic blue-accent docs look) and
+ * read as a different product from the console, portal and marketing site. This aligns the docs
+ * with the shared brand: Inter + JetBrains Mono, warm paper + ink, sharp corners, and mono-caps
+ * for structural labels — the same design language as the app.
+ */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=Playfair+Display:wght@600;700&display=swap');
+
+:root {
+  --sl-font: 'Inter', ui-sans-serif, system-ui, 'Segoe UI', Roboto, sans-serif;
+  --sl-font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* Light theme — warm paper + ink, matching the marketing site's palette. */
+:root[data-theme='light'] {
+  --brand-paper: #e4e3e0;
+  --brand-ink: #141414;
+
+  --sl-color-accent-low: #d6d5d1;
+  --sl-color-accent: #141414;
+  --sl-color-accent-high: #000000;
+  --sl-color-text-accent: #141414;
+
+  --sl-color-white: #141414;      /* Starlight uses "white" for the strongest text */
+  --sl-color-gray-1: #26251f;
+  --sl-color-gray-2: #3f3e38;
+  --sl-color-gray-3: #6b6a63;
+  --sl-color-gray-4: #8f8e86;
+  --sl-color-gray-5: #b6b5ad;
+  --sl-color-gray-6: #d7d6d1;
+  --sl-color-gray-7: #e8e7e3;
+  --sl-color-black: #eceae6;      /* ...and "black" for the page background */
+
+  --sl-color-bg: #eceae6;
+  --sl-color-bg-nav: #e4e3df;
+  --sl-color-bg-sidebar: #e4e3df;
+  --sl-color-hairline: rgba(20, 20, 20, 0.14);
+  --sl-color-hairline-light: rgba(20, 20, 20, 0.08);
+  --sl-color-hairline-shade: rgba(20, 20, 20, 0.14);
+}
+
+/* Dark theme — ink ground, paper-toned accents so links stay legible on black. */
+:root[data-theme='dark'] {
+  --sl-color-accent-low: #2a2a28;
+  --sl-color-accent: #cfcbc2;
+  --sl-color-accent-high: #ffffff;
+  --sl-color-text-accent: #e4e3e0;
+
+  --sl-color-bg: #131311;
+  --sl-color-bg-nav: #171715;
+  --sl-color-bg-sidebar: #171715;
+}
+
+/* Structural labels in mono-caps, the app's signature. */
+.site-title {
+  font-family: var(--sl-font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+}
+.sidebar-content .large,
+summary .group-label .large {
+  font-family: var(--sl-font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.72rem;
+}
+
+/* Sharp corners — the console and marketing site avoid rounded UI. */
+.card,
+.starlight-aside,
+:root {
+  --border-radius: 0;
+}
+.card,
+.starlight-aside {
+  border-radius: 0;
+}
+
+/* Headings: Inter, tight and confident like the app's section headers. */
+.sl-markdown-content h1,
+.sl-markdown-content h2,
+.sl-markdown-content h3 {
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}

@@ -166,8 +166,28 @@ REST_FRAMEWORK = {
         # 10/IP/hr) — this is just a coarse backstop.
         "signup": "60/hour",
         "signup-check": "120/hour",  # slug/name availability, typed live
+        # Map search box: one call per keystroke (debounced ~250ms on the client). Bounded
+        # so a stuck key or a scraper can't machine-gun the upstream geocoder on our behalf.
+        "geo-search": "60/min",
     },
 }
+
+# Map search (address/place autocomplete). Proxied through the API so no key ever ships to the
+# browser (there is none for the default OSM/Photon provider) and the upstream can be swapped
+# per deployment without touching the frontend. Results are biased toward Kenya + the current
+# map viewport. Point GEOCODER_URL at a self-hosted Photon for volume/SLA, or swap the provider
+# later for a paid one — the frontend never changes.
+GEOCODER_PROVIDER = os.getenv("GEOCODER_PROVIDER", "photon")
+GEOCODER_URL = os.getenv("GEOCODER_URL", "https://photon.komoot.io/api")
+# A courteous identifier for the shared public instance, as its usage policy asks.
+GEOCODER_USER_AGENT = os.getenv("GEOCODER_USER_AGENT", "WIFI.OS/1.0 (+https://wifios.co.ke)")
+
+# AI assistant RAG (retrieval over the product docs). A self-hosted fastembed model — baked into
+# the image, no key, runs offline — turns docs and questions into vectors stored in pgvector.
+ASSISTANT_EMBED_MODEL = os.getenv("ASSISTANT_EMBED_MODEL", "BAAI/bge-small-en-v1.5")
+FASTEMBED_CACHE_DIR = os.getenv("FASTEMBED_CACHE_DIR", "/opt/models/fastembed")
+# Where the `ingest_docs` command reads the docs markdown from (mounted in dev, synced in prod).
+DOCS_CONTENT_DIR = os.getenv("DOCS_CONTENT_DIR", "/app/docs_content")
 
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(hours=8),

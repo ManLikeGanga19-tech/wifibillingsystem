@@ -33,6 +33,10 @@ x-django: &django
   # The application never needs to write to its own code. If something is trying to,
   # that is either a bug or an attacker.
   read_only: true
+  volumes:
+    # The product docs, read-only, so `ingest_docs` can build the AI assistant's RAG index on
+    # boot. Synced to the box by the deploy step alongside the code.
+    - ../docs-site/src/content/docs:/app/docs_content:ro
   tmpfs:
     - /tmp
     # collectstatic (ManifestStaticFilesStorage) writes here on boot; whitenoise then
@@ -73,6 +77,7 @@ services:
     # separate command. Flat indentation folds it all to one line.
     command: >
       sh -c "python manage.py migrate --noinput &&
+      (python manage.py ingest_docs || true) &&
       python manage.py collectstatic --noinput &&
       gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers ${GUNICORN_WORKERS:-3} --timeout 30 --access-logfile - --error-logfile -"
     # Readiness for zero-downtime rollouts: the deploy waits for this to pass, and Caddy's
@@ -98,7 +103,7 @@ services:
       --schedule=/tmp/celerybeat-schedule --pidfile=/tmp/celerybeat.pid
 
   db:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
@@ -200,7 +205,7 @@ services:
   # Nightly pg_dump. A backup you have never restored is not a backup — see
   # docs/DEPLOYMENT.md for the restore drill, and do it before you take real money.
   backup:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     restart: unless-stopped
     env_file: .env
     volumes:

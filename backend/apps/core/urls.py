@@ -1,6 +1,8 @@
 from django.urls import path
 from rest_framework.routers import SimpleRouter
 
+from apps.assistant.views import PlatformAISettingsView, PlatformDocsGapsView
+
 from .analytics_views import (
     PlatformCohortRetentionView,
     PlatformKpisView,
@@ -89,6 +91,10 @@ urlpatterns = [
     path("tenants/signup/", TenantSignupView.as_view(), name="tenant-signup"),
     # Platform-wide (cross-tenant aggregates live ONLY here)
     path("platform/overview/", PlatformOverviewView.as_view(), name="platform-overview"),
+    # The cross-tenant AI key + platform-wide rate limit (owner-only, lives in the assistant app).
+    path("platform/ai-settings/", PlatformAISettingsView.as_view(), name="platform-ai-settings"),
+    # The docs-gaps report — cross-tenant, anonymised assistant analytics.
+    path("platform/ai-docs-gaps/", PlatformDocsGapsView.as_view(), name="platform-ai-docs-gaps"),
     # The lost phone: platform owner clears an ISP owner's authenticator, audited.
     path("platform/reset-mfa/", ResetTenantMfaView.as_view(), name="platform-reset-mfa"),
     path(

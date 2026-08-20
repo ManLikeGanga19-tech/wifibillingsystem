@@ -142,11 +142,12 @@ class TestChat:
         def fake_claude(cfg, system, messages):
             seen["system"] = system
             seen["messages"] = messages
-            return "Your ISP looks healthy."
+            return "Your ISP looks healthy.", 20, 8
 
         monkeypatch.setattr("apps.assistant.providers._claude_chat", fake_claude)
-        reply = chat(op, [{"role": "user", "content": "How am I doing?"}])
-        assert reply == "Your ISP looks healthy."
+        monkeypatch.setattr("apps.assistant.rag.retrieve", lambda q, **kw: [])
+        result = chat(op, [{"role": "user", "content": "How am I doing?"}])
+        assert result["reply"] == "Your ISP looks healthy."
         # The system prompt is grounded in this ISP.
         assert op.name in seen["system"]
         assert seen["messages"][-1]["content"] == "How am I doing?"
@@ -166,6 +167,7 @@ class TestChat:
             raise RuntimeError("401 unauthorized")
 
         monkeypatch.setattr("apps.assistant.providers._claude_chat", boom)
+        monkeypatch.setattr("apps.assistant.rag.retrieve", lambda q, **kw: [])
         with pytest.raises(AssistantError):
             chat(op, [{"role": "user", "content": "hi"}])
 
@@ -189,8 +191,9 @@ class TestChatEndpoint:
         op = OperatorFactory()
         AISettings.objects.update_or_create(operator=op, defaults={"api_key": CLAUDE_KEY})
         monkeypatch.setattr(
-            "apps.assistant.providers._claude_chat", lambda *a: "Here's your answer."
+            "apps.assistant.providers._claude_chat", lambda *a: ("Here's your answer.", 15, 6)
         )
+        monkeypatch.setattr("apps.assistant.rag.retrieve", lambda q, **kw: [])
         resp = staff(op).post(
             CHAT_URL, {"messages": [{"role": "user", "content": "help"}]}, format="json"
         )

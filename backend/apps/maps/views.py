@@ -10,9 +10,10 @@ than dropped, so nothing is silently invisible — the console can prompt to pla
 
 from decimal import Decimal, InvalidOperation
 
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
 from apps.accounts.rbac import BUSINESS_LOCATION_WRITE, MAP_VIEW
@@ -26,6 +27,9 @@ from apps.core.permissions import (
 from apps.core.schema import OBJECT_REQUEST, OBJECT_RESPONSE
 from apps.core.services import audit
 from apps.core.tenancy import acting_tenant
+
+from .geocoding import GeocoderError
+from .geocoding import search as geocode_search
 
 
 def _has_coords(qs):
@@ -44,6 +48,7 @@ class MapDataView(APIView):
     def get(self, request):
         from django.db.models import Count, Q
 
+        from apps.core.live import hotspot_counts_by_router
         from apps.fibre.models import FibrePoint, FibreSpan
         from apps.ops.models import Lead
         from apps.pppoe.models import Client, Tower
@@ -77,9 +82,12 @@ class MapDataView(APIView):
                 "account_number", "connection_type", "phone", "plan__name",
             )
         ]
+        # Active hotspot sessions per router, so each router pin can show a live "who's on this
+        # gateway's WiFi" badge. One grouped query, not one per router.
+        hs_by_router = hotspot_counts_by_router(op)
         routers = [
             {"id": r.id, "lat": float(r.gps_lat), "lng": float(r.gps_lng),
-             "label": r.name, "status": r.status}
+             "label": r.name, "status": r.status, "hotspot": hs_by_router.get(r.id, 0)}
             for r in _has_coords(routers_qs).only("id", "gps_lat", "gps_lng", "name", "status")
         ]
         leads = [
@@ -210,3 +218,43 @@ class BusinessLocationView(APIView):
             "gps_lat": float(op.gps_lat) if op.gps_lat is not None else None,
             "gps_lng": float(op.gps_lng) if op.gps_lng is not None else None,
         })
+
+
+class GeoSearchView(APIView):
+    """Type-ahead place/address search for the Map's search box.
+
+    A thin proxy over the configured geocoder (default OSM/Photon, no key). Gated to the same
+    people who can see the map, and throttled per-user — one call lands per keystroke. `lat`/`lng`
+    are the current map centre and only BIAS the ranking (nearby first), never restrict it.
+    """
+
+    permission_classes = [IsAdminUser, RequireTenant, TenantIsOperational,
+                          RequireCapability(MAP_VIEW)]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "geo-search"
+
+    @staticmethod
+    def _float(value):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter("q", str, description="Search text (min 2 chars)"),
+            OpenApiParameter("lat", float, description="Map-centre latitude, for proximity bias"),
+            OpenApiParameter("lng", float, description="Map-centre longitude, for proximity bias"),
+        ],
+        responses=OBJECT_RESPONSE,
+        summary="Place/address autocomplete for the map",
+    )
+    def get(self, request):
+        query = request.query_params.get("q", "")
+        lat = self._float(request.query_params.get("lat"))
+        lng = self._float(request.query_params.get("lng"))
+        try:
+            results = geocode_search(query, lat=lat, lng=lng)
+        except GeocoderError:
+            return Response({"detail": "Place search is unavailable right now."}, status=502)
+        return Response({"results": results})
