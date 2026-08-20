@@ -194,6 +194,9 @@ SPECTACULAR_SETTINGS = {
         "PaymentStatus": "apps.core.enums.TRANSACTION_STATUS_CHOICES",
         # SMS and email share the platform/own choice set — one name, not two.
         "GatewayMode": "apps.core.enums.GATEWAY_MODE_CHOICES",
+        # Fibre plant health (FibrePoint + FibreSpan share it). Named so its "status" field
+        # doesn't collide with the other "status" enums into an opaque "Status2f8Enum".
+        "PlantStatus": "apps.fibre.models.PlantStatus",
     },
 }
 

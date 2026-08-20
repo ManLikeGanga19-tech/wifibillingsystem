@@ -34,7 +34,7 @@ class FibrePointSerializer(serializers.ModelSerializer):
     def get_used(self, obj) -> int:
         return self._used(obj)
 
-    def get_free(self, obj):
+    def get_free(self, obj) -> int | None:
         if obj.port_capacity <= 0:
             return None
         return max(obj.port_capacity - self._used(obj), 0)
