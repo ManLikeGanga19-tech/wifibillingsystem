@@ -147,6 +147,9 @@ class SubscriberViewSet(TenantReadOnlyViewSet):
     read_capability = "clients.view"     # customers are visible to the whole console
     serializer_class = SubscriberSerializer
     queryset = Subscriber.objects.all()
+    search_fields = ["phone", "name", "email"]
+    ordering_fields = ["created_at", "name"]
+    filterset_fields = ["is_blocked"]
 
     def get_queryset(self):
         # super() applies the tenant filter (TenantScopedMixin) — never bypass it

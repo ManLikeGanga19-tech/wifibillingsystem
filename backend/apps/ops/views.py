@@ -41,6 +41,9 @@ class TicketViewSet(StatusFilterMixin, TenantModelViewSet):
     queryset = Ticket.objects.select_related("subscriber").order_by("-created_at")
     read_capability = TICKETS_VIEW
     write_capability = TICKETS_WORK          # Owner/Admin/Care/Technician may all work a ticket
+    search_fields = ["subject", "description", "subscriber__phone"]
+    ordering_fields = ["created_at", "priority", "status"]
+    filterset_fields = ["priority", "assigned_to", "subscriber"]  # status via StatusFilterMixin
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -141,6 +144,9 @@ class LeadViewSet(StatusFilterMixin, TenantModelViewSet):
     queryset = Lead.objects.order_by("-created_at")
     read_capability = LEADS_VIEW             # technician: read-only (map layer)
     write_capability = LEADS_WRITE           # the CRM — Care/Admin/Owner
+    search_fields = ["name", "phone", "location"]
+    ordering_fields = ["created_at", "status"]
+    filterset_fields = ["source"]            # status via StatusFilterMixin
 
 
 class ExpenseViewSet(TenantModelViewSet):
@@ -148,6 +154,21 @@ class ExpenseViewSet(TenantModelViewSet):
     queryset = Expense.objects.select_related("router").order_by("-date", "-created_at")
     read_capability = FINANCE_VIEW           # the books — Owner/Admin
     write_capability = FINANCE_VIEW
+    search_fields = ["category", "description"]
+    ordering_fields = ["date", "amount", "created_at"]
+    filterset_fields = ["category", "router"]
+
+    @extend_schema(responses=OBJECT_RESPONSE, summary="Expense totals for the current month")
+    @action(detail=False, methods=["get"])
+    def summary(self, request):
+        """Server-side month total so the summary card is correct no matter how the
+        list is paginated — the client must never sum a single page and call it a month."""
+        from django.db.models import Sum
+        from django.utils import timezone
+
+        month_start = timezone.localdate().replace(day=1)
+        agg = self.get_queryset().filter(date__gte=month_start).aggregate(total=Sum("amount"))
+        return Response({"month_total": str(agg["total"] or 0)})
 
 
 class EquipmentViewSet(StatusFilterMixin, TenantModelViewSet):
@@ -155,6 +176,9 @@ class EquipmentViewSet(StatusFilterMixin, TenantModelViewSet):
     queryset = Equipment.objects.select_related("router").order_by("-created_at")
     read_capability = NETWORK_WRITE          # CPE / plant inventory — Owner/Admin/Technician
     write_capability = NETWORK_WRITE
+    search_fields = ["name", "serial_number"]
+    ordering_fields = ["name", "created_at"]
+    filterset_fields = ["equipment_type", "router"]  # status via StatusFilterMixin
 
 
 class PlatformFeesView(APIView):

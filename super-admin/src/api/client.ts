@@ -56,6 +56,8 @@ export interface DocsGaps {
 
 export interface Page<T> {
   count: number;
+  next: string | null;
+  previous: string | null;
   results: T[];
 }
 
@@ -454,7 +456,7 @@ export const api = {
   },
 
   tenants: {
-    list: () => get<Page<Tenant>>('/platform/tenants/'),
+    list: (page = 1) => get<Page<Tenant>>(`/platform/tenants/?page=${page}`),
     /** Hand-onboard an ISP (skip the marketing signup wizard). Returns the owner's login,
      *  shown once so you can pass it on yourself. */
     provision: (body: { name: string; slug: string; owner_phone: string; owner_name: string }) =>
@@ -501,9 +503,10 @@ export const api = {
   },
 
   audit: {
-    list: (params: { tenant?: string; action?: string } = {}) => {
+    list: (params: { tenant?: string; action?: string; page?: number } = {}) => {
       const qs = new URLSearchParams(
-        Object.entries(params).filter(([, v]) => v) as [string, string][]
+        Object.entries(params).filter(([, v]) => v !== undefined && v !== '')
+          .map(([k, v]) => [k, String(v)]) as [string, string][]
       ).toString();
       return get<Page<AuditRow>>(`/platform/audit/${qs ? `?${qs}` : ''}`);
     },
@@ -511,8 +514,11 @@ export const api = {
   },
 
   impersonation: {
-    history: (live?: boolean) =>
-      get<Page<Grant>>(`/platform/impersonation/${live ? '?live=true' : ''}`),
+    history: (live?: boolean, page = 1) => {
+      const p = new URLSearchParams({ page: String(page) });
+      if (live) p.set('live', 'true');
+      return get<Page<Grant>>(`/platform/impersonation/?${p.toString()}`);
+    },
     /** Opens an AUDITED, time-boxed door into one ISP's console. Reason required. */
     start: (tenant: string, reason: string, minutes = 60) =>
       post<Grant>('/platform/impersonation/start/', { tenant, reason, minutes }),

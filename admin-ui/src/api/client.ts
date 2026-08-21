@@ -1052,6 +1052,7 @@ export interface AIUsage {
   limit: number | null;
   remaining: number | null;
   pro_monthly_fee: string;
+  pro_self_serve: boolean;
 }
 /** The assistant's reply: the text, the docs it cited, the id to attach a 👍/👎 to, and usage. */
 export interface ChatReply {
@@ -1585,8 +1586,10 @@ export interface DashboardStats {
   generated_at: string;
 }
 
-interface Paginated<T> {
+export interface Paginated<T> {
   count: number;
+  next: string | null;
+  previous: string | null;
   results: T[];
 }
 
@@ -1661,7 +1664,7 @@ export const api = {
   /** Fibre outside-plant CRUD (fibre.write). Points, spans, and a point's blast radius. */
   fibre: {
     points: {
-      list: () => request<Paginated<FibrePoint>>('/fibre/points/'),
+      list: (query = '') => request<Paginated<FibrePoint>>(`/fibre/points/${query}`),
       create: (data: Partial<FibrePoint>) =>
         request<FibrePoint>('/fibre/points/', { method: 'POST', body: JSON.stringify(data) }),
       update: (id: number, data: Partial<FibrePoint>) =>
@@ -1672,7 +1675,7 @@ export const api = {
       affected: (id: number) => request<BlastRadius>(`/fibre/points/${id}/affected/`),
     },
     spans: {
-      list: () => request<Paginated<FibreSpan>>('/fibre/spans/'),
+      list: (query = '') => request<Paginated<FibreSpan>>(`/fibre/spans/${query}`),
       create: (data: Partial<FibreSpan>) =>
         request<FibreSpan>('/fibre/spans/', { method: 'POST', body: JSON.stringify(data) }),
       update: (id: number, data: Partial<FibreSpan>) =>
@@ -2062,9 +2065,9 @@ export const api = {
 
   billing: {
     wallet: () => request<WalletSummary>('/billing/wallet/'),
-    ledger: () => request<Paginated<ApiLedgerEntry>>('/billing/ledger/'),
+    ledger: (query = '') => request<Paginated<ApiLedgerEntry>>(`/billing/ledger/${query}`),
     payouts: {
-      list: () => request<Paginated<ApiPayout>>('/billing/payouts/'),
+      list: (query = '') => request<Paginated<ApiPayout>>(`/billing/payouts/${query}`),
       /** Preview the transfer cost before committing (no money moves). The rail follows
        *  the verified settlement account, so no method is passed. */
       quote: (amount: string) =>
@@ -2119,8 +2122,8 @@ export const api = {
   },
 
   transactions: {
-    list: (status?: string) =>
-      request<Paginated<ApiTransaction>>(`/payments/transactions/${status ? `?status=${status}` : ''}`),
+    list: (query = '') =>
+      request<Paginated<ApiTransaction>>(`/payments/transactions/${query}`),
     /** Search across hotspot + PPPoE payments by phone / M-Pesa code / account number. */
     search: (q: string) =>
       request<{ results: PaymentSearchResult[] }>(`/payments/search/?q=${encodeURIComponent(q)}`),
@@ -2150,7 +2153,7 @@ export const api = {
   },
 
   subscribers: {
-    list: () => request<Paginated<ApiSubscriber>>('/subscribers/'),
+    list: (query = '') => request<Paginated<ApiSubscriber>>(`/subscribers/${query}`),
   },
 
   sessions: {
@@ -2204,6 +2207,8 @@ export const api = {
     /** What this ISP paid WIFI.OS (fees + SMS) for a month — the auto expense line. */
     platformFees: (month?: string) =>
       request<PlatformFees>(`/ops/platform-fees/${month ? `?month=${month}` : ''}`),
+    /** Server-side month total — correct regardless of pagination. */
+    summary: () => request<{ month_total: string }>('/ops/expenses/summary/'),
   },
   equipment: crud<ApiEquipment>('/ops/equipment'),
 

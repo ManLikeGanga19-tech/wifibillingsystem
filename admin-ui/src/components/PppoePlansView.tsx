@@ -1,7 +1,8 @@
 import { useState, type FormEvent } from 'react';
 import { Gauge, Pencil, Plus, Trash2 } from 'lucide-react';
 import { api, ApiError, PppoePlan } from '../api/client';
-import { Badge, Btn, Field, inputCls, Panel, RefreshBtn, TableShell, tdCls, toast, useList, ViewHeader, fmtKsh } from './ui';
+import { Badge, Btn, Field, inputCls, Panel, toast, ViewHeader, fmtKsh } from './ui';
+import DataTable, { type Column } from './DataTable';
 
 const mbps = (kbps: number) => (kbps >= 1024 ? `${Math.round(kbps / 1024)} Mbps` : `${kbps} Kbps`);
 
@@ -10,7 +11,8 @@ const BLANK = {
 };
 
 export default function PppoePlansView() {
-  const { rows, error, refreshing, reload } = useList(() => api.pppoe.plans.list());
+  const [refresh, setRefresh] = useState(0);
+  const reload = () => setRefresh((n) => n + 1);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<PppoePlan | null>(null);
   const [form, setForm] = useState({ ...BLANK });
@@ -85,7 +87,6 @@ export default function PppoePlansView() {
         <Btn onClick={openNew}>
           <Plus className="h-3.5 w-3.5" /> New Plan
         </Btn>
-        <RefreshBtn onClick={reload} spinning={refreshing} />
       </ViewHeader>
 
       {showForm && (
@@ -123,38 +124,39 @@ export default function PppoePlansView() {
         </Panel>
       )}
 
-      <TableShell
-        headers={['Name', 'Price/mo', 'Download', 'Upload', 'Data cap', 'Profile', 'Status', '']}
-        loading={rows === null}
-        error={error}
-        empty="No broadband plans yet — create one to start signing up clients."
-      >
-        {(rows ?? []).map((p: PppoePlan) => (
-          <tr key={p.id} className="hover:bg-[#f0efec]/40 transition">
-            <td className={`${tdCls} font-bold`}>{p.name}</td>
-            <td className={`${tdCls} font-mono`}>{fmtKsh(p.price)}</td>
-            <td className={`${tdCls} font-mono`}>{mbps(p.download_kbps)}</td>
-            <td className={`${tdCls} font-mono`}>{mbps(p.upload_kbps)}</td>
-            <td className={`${tdCls} font-mono`}>
-              {p.data_cap_gb ? `${p.data_cap_gb} GB` : <span className="text-[#141414]/40">Unlimited</span>}
-            </td>
-            <td className={`${tdCls} font-mono`}>{p.mikrotik_profile}</td>
-            <td className={tdCls}>
-              <Badge color={p.is_active ? 'green' : 'gray'}>{p.is_active ? 'active' : 'inactive'}</Badge>
-            </td>
-            <td className={tdCls}>
-              <div className="flex gap-1.5">
-                <Btn variant="outline" onClick={() => openEdit(p)} title="Edit plan">
-                  <Pencil className="h-3.5 w-3.5" />
-                </Btn>
-                <Btn variant="danger" onClick={() => remove(p)} title="Delete plan">
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Btn>
-              </div>
-            </td>
-          </tr>
-        ))}
-      </TableShell>
+      <DataTable<PppoePlan>
+        fetcher={(q) => api.pppoe.plans.list(q)}
+        columns={planColumns()}
+        rowKey={(p) => p.id}
+        searchPlaceholder="Search plans…"
+        emptyMessage="No broadband plans yet — create one to start signing up clients."
+        initialOrdering="sort_order"
+        refreshSignal={refresh}
+      />
     </div>
   );
+
+  function planColumns(): Column<PppoePlan>[] {
+    return [
+      { header: 'Name', sortKey: 'name', render: (p) => <span className="font-bold">{p.name}</span> },
+      { header: 'Price/mo', sortKey: 'price', render: (p) => <span className="font-mono">{fmtKsh(p.price)}</span> },
+      { header: 'Download', render: (p) => <span className="font-mono">{mbps(p.download_kbps)}</span> },
+      { header: 'Upload', render: (p) => <span className="font-mono">{mbps(p.upload_kbps)}</span> },
+      {
+        header: 'Data cap',
+        render: (p) => <span className="font-mono">{p.data_cap_gb ? `${p.data_cap_gb} GB` : <span className="text-[#141414]/40">Unlimited</span>}</span>,
+      },
+      { header: 'Profile', render: (p) => <span className="font-mono">{p.mikrotik_profile}</span> },
+      { header: 'Status', render: (p) => <Badge color={p.is_active ? 'green' : 'gray'}>{p.is_active ? 'active' : 'inactive'}</Badge> },
+      {
+        header: '',
+        render: (p) => (
+          <div className="flex gap-1.5">
+            <Btn variant="outline" onClick={() => openEdit(p)} title="Edit plan"><Pencil className="h-3.5 w-3.5" /></Btn>
+            <Btn variant="danger" onClick={() => remove(p)} title="Delete plan"><Trash2 className="h-3.5 w-3.5" /></Btn>
+          </div>
+        ),
+      },
+    ];
+  }
 }

@@ -174,12 +174,14 @@ export default function AIAssistantPanel() {
           <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border border-[#B26B00]/30 bg-[#FFF8EC] p-2.5 text-[11px] text-[#7a4a00]">
             <span className="flex items-start gap-1.5">
               <Zap className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              <span>Want unlimited use, actions and memory? Upgrade to <b>Pro</b> for
-                {' '}<b>KES {usage.pro_monthly_fee}/month</b> — or add your own key below.</span>
+              <span>Want unlimited use, actions and memory? <b>Pro</b> is coming soon —
+                for now, add your own key below to switch on unlimited right away.</span>
             </span>
-            <Btn variant="green" onClick={() => setPro(true)} disabled={busy}>
-              <Zap className="h-3.5 w-3.5" /> Upgrade to Pro
-            </Btn>
+            {usage.pro_self_serve && (
+              <Btn variant="green" onClick={() => setPro(true)} disabled={busy}>
+                <Zap className="h-3.5 w-3.5" /> Upgrade to Pro
+              </Btn>
+            )}
           </div>
         )}
         {usage && usage.tier === 'pro' && (

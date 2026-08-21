@@ -9,8 +9,10 @@ const BLANK_TOWER = { name: '', notes: '',
 const BLANK_AP = { tower: '', name: '', mode: 'ap', capacity: '', band: '', router: '' };
 
 export default function NetworkView() {
-  const towers = useList(() => api.pppoe.towers.list());
-  const aps = useList(() => api.pppoe.accessPoints.list());
+  // Grouped tower→sector view, not a flat paginated table — pull the whole plant (capped at the
+  // API max) so a tower is never silently dropped off the end of a page.
+  const towers = useList(() => api.pppoe.towers.list('?page_size=100&ordering=name'));
+  const aps = useList(() => api.pppoe.accessPoints.list('?page_size=100'));
   const [routers, setRouters] = useState<ApiRouter[]>([]);
   const [showTower, setShowTower] = useState(false);
   const [showAp, setShowAp] = useState(false);

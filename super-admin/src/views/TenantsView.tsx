@@ -9,6 +9,7 @@ import {
   Btn,
   Empty,
   ErrorBox,
+  Pager,
   Panel,
   RefreshBtn,
   Spinner,
@@ -38,7 +39,8 @@ export default function TenantsView({
 /* ---- list ---------------------------------------------------------------- */
 
 function TenantList({ onOpen }: { onOpen: (id: number) => void }) {
-  const { data, error, reload } = useLoad(() => api.tenants.list(), []);
+  const [page, setPage] = useState(1);
+  const { data, error, reload } = useLoad(() => api.tenants.list(page), [page]);
   // Declared before the early returns — hooks cannot live behind a conditional.
   const [resetting, setResetting] = useState<Tenant | null>(null);
   const [creating, setCreating] = useState(false);
@@ -181,6 +183,7 @@ function TenantList({ onOpen }: { onOpen: (id: number) => void }) {
           ))}
         </Table>
       )}
+      <Pager page={page} count={data.count} onPage={setPage} />
 
       {resetting && (
         <ResetMfaDialog

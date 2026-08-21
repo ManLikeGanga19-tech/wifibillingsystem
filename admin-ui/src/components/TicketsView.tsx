@@ -1,9 +1,8 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { LifeBuoy, Plus } from 'lucide-react';
 import { api, ApiTicket, TicketAssignee } from '../api/client';
-import {
-  Badge, Btn, Field, FilterChips, inputCls, Panel, RefreshBtn, TableShell, tdCls, toast, useList, ViewHeader, fmtDateTime,
-} from './ui';
+import { Badge, Btn, Field, FilterChips, inputCls, Panel, toast, ViewHeader, fmtDateTime } from './ui';
+import DataTable, { type Column } from './DataTable';
 import MapPicker from './MapPicker';
 import NavigateButton from './NavigateButton';
 
@@ -34,10 +33,8 @@ export default function TicketsView({ canAssign = false }: { canAssign?: boolean
   const [priority, setPriority] = useState<ApiTicket['priority']>('normal');
   const [gps, setGps] = useState<{ lat: number | null; lng: number | null }>({ lat: null, lng: null });
   const [assignees, setAssignees] = useState<TicketAssignee[]>([]);
-  const { rows, count, error, refreshing, reload } = useList(
-    () => api.tickets.list(filter === 'all' ? '' : `?status=${filter}`),
-    [filter]
-  );
+  const [refresh, setRefresh] = useState(0);
+  const reload = () => setRefresh((n) => n + 1);
 
   // Dispatchers (tickets.assign) get the technician list for the "assign to" picker.
   useEffect(() => {
@@ -94,7 +91,6 @@ export default function TicketsView({ canAssign = false }: { canAssign?: boolean
         <Btn onClick={() => setShowForm(!showForm)}>
           <Plus className="h-3.5 w-3.5" /> New Ticket
         </Btn>
-        <RefreshBtn onClick={reload} spinning={refreshing} />
       </ViewHeader>
 
       {showForm && (
@@ -125,52 +121,63 @@ export default function TicketsView({ canAssign = false }: { canAssign?: boolean
         </Panel>
       )}
 
-      <FilterChips options={FILTERS} value={filter} onChange={setFilter} right={<span className="text-[11px] font-mono text-[#141414]/50">{count} tickets</span>} />
-
-      <TableShell
-        headers={['#', 'Subject', 'Client', 'Priority', 'Status', 'Assigned to', 'Created', '']}
-        loading={rows === null}
-        error={error}
-        empty="No tickets here — that's a good thing."
-      >
-        {(rows ?? []).map((t) => (
-          <tr key={t.id} className="hover:bg-[#f0efec]/40 transition">
-            <td className={`${tdCls} font-mono`}>#{t.id}</td>
-            <td className={tdCls}>
-              <span className="font-bold">{t.subject}</span>
-              {t.description && <span className="block text-[11px] text-[#141414]/60 max-w-[20rem] truncate">{t.description}</span>}
-            </td>
-            <td className={`${tdCls} font-mono`}>{t.subscriber_phone || '—'}</td>
-            <td className={tdCls}><Badge color={PRIORITY_COLOR[t.priority]}>{t.priority}</Badge></td>
-            <td className={tdCls}><Badge color={STATUS_COLOR[t.status]}>{t.status.replace('_', ' ')}</Badge></td>
-            <td className={tdCls}>
-              {canAssign ? (
-                <select
-                  value={t.assigned_to ?? ''}
-                  onChange={(e) => assign(t, e.target.value ? Number(e.target.value) : null)}
-                  className="border border-[#141414]/30 px-1.5 py-1 text-xs bg-white cursor-pointer max-w-[9rem]"
-                >
-                  <option value="">Unassigned</option>
-                  {assignees.map((a) => <option key={a.id} value={a.id}>{a.name || a.phone}</option>)}
-                </select>
-              ) : (
-                <span className="text-xs">{t.assigned_to_name || '—'}</span>
-              )}
-            </td>
-            <td className={`${tdCls} font-mono whitespace-nowrap`}>{fmtDateTime(t.created_at)}</td>
-            <td className={tdCls}>
-              <div className="flex items-center gap-1.5">
-                {t.gps_lat && t.gps_lng && (
-                  <NavigateButton lat={Number(t.gps_lat)} lng={Number(t.gps_lng)} label={t.subject} compact />
-                )}
-                {NEXT_STATUS[t.status] && (
-                  <Btn variant="outline" onClick={() => advance(t)}>{NEXT_STATUS[t.status]!.label}</Btn>
-                )}
-              </div>
-            </td>
-          </tr>
-        ))}
-      </TableShell>
+      <DataTable<ApiTicket>
+        fetcher={(q) => api.tickets.list(q)}
+        columns={ticketColumns()}
+        rowKey={(t) => t.id}
+        searchPlaceholder="Search subject / details…"
+        emptyMessage="No tickets here — that's a good thing."
+        filters={{ status: filter === 'all' ? undefined : filter }}
+        refreshSignal={refresh}
+        toolbar={<FilterChips options={FILTERS} value={filter} onChange={setFilter} />}
+      />
     </div>
   );
+
+  function ticketColumns(): Column<ApiTicket>[] {
+    return [
+      { header: '#', render: (t) => <span className="font-mono">#{t.id}</span> },
+      {
+        header: 'Subject',
+        render: (t) => (
+          <>
+            <span className="font-bold">{t.subject}</span>
+            {t.description && <span className="block text-[11px] text-[#141414]/60 max-w-[20rem] truncate">{t.description}</span>}
+          </>
+        ),
+      },
+      { header: 'Client', render: (t) => <span className="font-mono">{t.subscriber_phone || '—'}</span> },
+      { header: 'Priority', sortKey: 'priority', render: (t) => <Badge color={PRIORITY_COLOR[t.priority]}>{t.priority}</Badge> },
+      { header: 'Status', render: (t) => <Badge color={STATUS_COLOR[t.status]}>{t.status.replace('_', ' ')}</Badge> },
+      {
+        header: 'Assigned to',
+        render: (t) => canAssign ? (
+          <select
+            value={t.assigned_to ?? ''}
+            onChange={(e) => assign(t, e.target.value ? Number(e.target.value) : null)}
+            className="border border-[#141414]/30 px-1.5 py-1 text-xs bg-white cursor-pointer max-w-[9rem]"
+          >
+            <option value="">Unassigned</option>
+            {assignees.map((a) => <option key={a.id} value={a.id}>{a.name || a.phone}</option>)}
+          </select>
+        ) : (
+          <span className="text-xs">{t.assigned_to_name || '—'}</span>
+        ),
+      },
+      { header: 'Created', sortKey: 'created_at', render: (t) => <span className="font-mono whitespace-nowrap">{fmtDateTime(t.created_at)}</span> },
+      {
+        header: '',
+        render: (t) => (
+          <div className="flex items-center gap-1.5">
+            {t.gps_lat && t.gps_lng && (
+              <NavigateButton lat={Number(t.gps_lat)} lng={Number(t.gps_lng)} label={t.subject} compact />
+            )}
+            {NEXT_STATUS[t.status] && (
+              <Btn variant="outline" onClick={() => advance(t)}>{NEXT_STATUS[t.status]!.label}</Btn>
+            )}
+          </div>
+        ),
+      },
+    ];
+  }
 }

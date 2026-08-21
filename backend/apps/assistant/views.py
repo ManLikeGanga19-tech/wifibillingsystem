@@ -216,6 +216,14 @@ class AIProToggleView(APIView):
         from django.conf import settings as dj_settings
 
         enable = bool(request.data.get("enabled"))
+        # Self-serve Pro is feature-flagged off for now — turning it ON is blocked; turning it OFF
+        # is always allowed so no one is ever stuck on a paid tier.
+        if enable and not getattr(dj_settings, "AI_PRO_SELF_SERVE", False):
+            return Response(
+                {"detail": "Pro AI isn't available for self-serve yet — it's coming soon.",
+                 "code": "pro_unavailable"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         operator = acting_tenant(request)
         row = settings_for(operator)
         if row.pro_ai != enable:
@@ -405,6 +413,8 @@ class ConversationViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAdminUser, RequireTenant, TenantIsOperational]
     # For schema/router introspection only; get_queryset() below is the real, scoped source.
     queryset = Conversation.objects.all()
+    search_fields = ["title"]
+    ordering_fields = ["updated_at", "created_at"]
 
     def get_queryset(self):
         return Conversation.objects.filter(

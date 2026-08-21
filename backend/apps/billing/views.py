@@ -75,6 +75,9 @@ class LedgerViewSet(TenantReadOnlyViewSet):
     read_capability = FINANCE_VIEW       # the books — Owner/Admin
     serializer_class = LedgerEntrySerializer
     queryset = LedgerEntry.objects.order_by("-created_at")
+    search_fields = ["memo"]
+    ordering_fields = ["created_at", "amount"]
+    filterset_fields = ["entry_type"]
 
 
 class MyPayoutsViewSet(TenantReadOnlyViewSet):
@@ -85,6 +88,9 @@ class MyPayoutsViewSet(TenantReadOnlyViewSet):
     read_capability = FINANCE_VIEW
     serializer_class = PayoutSerializer
     queryset = Payout.objects.order_by("-created_at")
+    search_fields = ["mpesa_reference", "phone", "note"]
+    ordering_fields = ["created_at", "amount", "status"]
+    filterset_fields = ["status", "method"]
     permission_classes = [
         *TenantReadOnlyViewSet.permission_classes,
         CanManageMoney,
@@ -175,6 +181,9 @@ class PlatformPayoutViewSet(viewsets.ReadOnlyModelViewSet):
     Platform staff may view; only the platform owner may pay or reject."""
 
     serializer_class = PayoutSerializer
+    search_fields = ["mpesa_reference", "phone", "operator__slug", "operator__name"]
+    ordering_fields = ["created_at", "amount", "status"]
+    filterset_fields = ["status", "method", "operator"]
 
     def get_permissions(self):
         if self.request.method in ("GET", "HEAD", "OPTIONS"):

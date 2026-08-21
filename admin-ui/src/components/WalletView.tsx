@@ -4,7 +4,8 @@ import { api, ApiLedgerEntry, ApiPayout, asMfaChallenge, MfaChallenge, PayoutQuo
 import ConfirmPayout from './ConfirmPayout';
 import MfaGate from './MfaGate';
 import SettlementSetup from './SettlementSetup';
-import { Badge, Btn, Field, inputCls, Panel, RefreshBtn, TableShell, tdCls, toast, ViewHeader, fmtDateTime, fmtKsh } from './ui';
+import { Badge, Btn, Field, inputCls, Panel, RefreshBtn, toast, ViewHeader, fmtDateTime, fmtKsh } from './ui';
+import DataTable, { type Column } from './DataTable';
 
 const ENTRY_LABEL: Record<ApiLedgerEntry['entry_type'], { label: string; color: 'green' | 'red' | 'amber' | 'gray' | 'blue' }> = {
   sale: { label: 'Sale', color: 'green' },
@@ -18,8 +19,9 @@ const ENTRY_LABEL: Record<ApiLedgerEntry['entry_type'], { label: string; color: 
 
 export default function WalletView({ canWithdraw }: { canWithdraw: boolean }) {
   const [summary, setSummary] = useState<WalletSummary | null>(null);
-  const [ledger, setLedger] = useState<ApiLedgerEntry[] | null>(null);
   const [payouts, setPayouts] = useState<ApiPayout[]>([]);
+  // Bumped to force the ledger table to re-fetch after a withdrawal or go-live.
+  const [tick, setTick] = useState(0);
   const [settlement, setSettlement] = useState<Settlement | null>(null);
   const [error, setError] = useState('');
   const [amount, setAmount] = useState('');
@@ -34,16 +36,16 @@ export default function WalletView({ canWithdraw }: { canWithdraw: boolean }) {
   const load = useCallback(async () => {
     setRefreshing(true);
     try {
-      const [s, l, p, st] = await Promise.all([
+      const [s, p, st] = await Promise.all([
         api.billing.wallet(),
-        api.billing.ledger(),
-        api.billing.payouts.list(),
+        // Enough to cover any outstanding withdrawals for the pending-payout banner.
+        api.billing.payouts.list('?page_size=100'),
         api.settlement.get(),
       ]);
       setSummary(s);
-      setLedger(l.results);
       setPayouts(p.results);
       setSettlement(st);
+      setTick((t) => t + 1);
       setError('');
     } catch {
       setError('Could not load your wallet.');
@@ -117,6 +119,10 @@ export default function WalletView({ canWithdraw }: { canWithdraw: boolean }) {
       >
         <RefreshBtn onClick={load} spinning={refreshing} />
       </ViewHeader>
+
+      {error && (
+        <p className="border border-[#B22222] bg-[#B22222]/5 px-3 py-2 text-xs font-mono text-[#B22222]">{error}</p>
+      )}
 
       {challenge && (
         <MfaGate
@@ -226,25 +232,30 @@ export default function WalletView({ canWithdraw }: { canWithdraw: boolean }) {
         <SettlementSetup onWentLive={load} />
       </Panel>
 
-      <TableShell
-        headers={['When', 'Type', 'Details', 'Amount']}
-        loading={ledger === null}
-        error={error}
-        empty="No wallet activity yet — it starts with your first customer payment."
-      >
-        {(ledger ?? []).map((e) => (
-          <tr key={e.id} className="hover:bg-[#f0efec]/40 transition">
-            <td className={`${tdCls} font-mono whitespace-nowrap`}>{fmtDateTime(e.created_at)}</td>
-            <td className={tdCls}>
-              <Badge color={ENTRY_LABEL[e.entry_type].color}>{ENTRY_LABEL[e.entry_type].label}</Badge>
-            </td>
-            <td className={`${tdCls} text-[#141414]/70`}>{e.memo || '—'}</td>
-            <td className={`${tdCls} font-mono font-bold text-right whitespace-nowrap ${Number(e.amount) < 0 ? 'text-[#B22222]' : 'text-[#228B22]'}`}>
-              {Number(e.amount) > 0 ? '+' : ''}{fmtKsh(e.amount)}
-            </td>
-          </tr>
-        ))}
-      </TableShell>
+      <DataTable<ApiLedgerEntry>
+        fetcher={(q) => api.billing.ledger(q)}
+        columns={ledgerColumns}
+        rowKey={(e) => e.id}
+        searchable={false}
+        emptyMessage="No wallet activity yet — it starts with your first customer payment."
+        initialOrdering="-created_at"
+        refreshSignal={tick}
+      />
     </div>
   );
 }
+
+const ledgerColumns: Column<ApiLedgerEntry>[] = [
+  { header: 'When', render: (e) => <span className="font-mono whitespace-nowrap">{fmtDateTime(e.created_at)}</span> },
+  { header: 'Type', render: (e) => <Badge color={ENTRY_LABEL[e.entry_type].color}>{ENTRY_LABEL[e.entry_type].label}</Badge> },
+  { header: 'Details', render: (e) => <span className="text-[#141414]/70">{e.memo || '—'}</span> },
+  {
+    header: 'Amount',
+    className: 'text-right',
+    render: (e) => (
+      <span className={`font-mono font-bold whitespace-nowrap ${Number(e.amount) < 0 ? 'text-[#B22222]' : 'text-[#228B22]'}`}>
+        {Number(e.amount) > 0 ? '+' : ''}{fmtKsh(e.amount)}
+      </span>
+    ),
+  },
+];

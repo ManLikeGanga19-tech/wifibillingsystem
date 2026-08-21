@@ -63,6 +63,7 @@ class TestProToggle:
     def test_owner_enables_pro_and_it_is_audited(self, settings):
         from apps.core.models import AuditLog
 
+        settings.AI_PRO_SELF_SERVE = True
         op = OperatorFactory()
         r = as_role(op, Role.TENANT_OWNER).post(PRO_URL, {"enabled": True}, format="json")
         assert r.status_code == 200, r.content
@@ -70,14 +71,24 @@ class TestProToggle:
         assert r.json()["tier"] == "pro"
         assert AuditLog.objects.filter(operator=op, action="ai_pro_enabled").exists()
 
-    def test_care_cannot_toggle_pro(self):
+    def test_enabling_is_blocked_while_self_serve_is_off(self, settings):
+        settings.AI_PRO_SELF_SERVE = False
+        op = OperatorFactory()
+        r = as_role(op, Role.TENANT_OWNER).post(PRO_URL, {"enabled": True}, format="json")
+        assert r.status_code == 403
+        assert r.json()["code"] == "pro_unavailable"
+        assert not AISettings.objects.filter(operator=op, pro_ai=True).exists()
+
+    def test_care_cannot_toggle_pro(self, settings):
+        settings.AI_PRO_SELF_SERVE = True
         op = OperatorFactory()
         r = as_role(op, Role.TENANT_CARE).post(PRO_URL, {"enabled": True}, format="json")
         assert r.status_code == 403          # money.manage is Owner-only
 
-    def test_disable_turns_it_back_off(self):
+    def test_disable_is_always_allowed(self):
         op = OperatorFactory()
         AISettings.objects.update_or_create(operator=op, defaults={"pro_ai": True})
+        # Even with self-serve off (the default), turning it OFF must always work.
         r = as_role(op, Role.TENANT_OWNER).post(PRO_URL, {"enabled": False}, format="json")
         assert r.status_code == 200
         assert AISettings.objects.get(operator=op).pro_ai is False

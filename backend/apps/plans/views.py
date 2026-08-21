@@ -18,6 +18,9 @@ class PlanViewSet(viewsets.ModelViewSet):
     ?router=); staff manage their own tenant's plans."""
 
     serializer_class = PlanSerializer
+    search_fields = ["name", "mikrotik_profile"]
+    ordering_fields = ["name", "price", "sort_order"]
+    filterset_fields = ["is_active", "plan_type"]
 
     def get_permissions(self):
         if self.action in ("list", "retrieve"):

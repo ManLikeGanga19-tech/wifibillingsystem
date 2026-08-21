@@ -23,6 +23,9 @@ class VoucherViewSet(TenantReadOnlyViewSet):
     write_capability = HOTSPOT_VOUCHERS
     serializer_class = VoucherSerializer
     queryset = Voucher.objects.select_related("plan").order_by("-created_at")
+    search_fields = ["code", "batch_id"]
+    ordering_fields = ["created_at", "status"]
+    filterset_fields = ["status", "plan", "printed"]
 
     def get_queryset(self):
         qs = super().get_queryset()

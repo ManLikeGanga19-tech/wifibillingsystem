@@ -35,6 +35,8 @@ class ApiTokenViewSet(
     write_capability = SETTINGS_WRITE
     serializer_class = ApiTokenSerializer
     queryset = ApiToken.objects.all()
+    search_fields = ["name"]
+    ordering_fields = ["created_at", "last_used_at"]
 
     def get_queryset(self):
         # super() applies the tenant filter (TenantScopedMixin) — never bypass it.
@@ -77,6 +79,9 @@ class WebhookViewSet(TenantModelViewSet):
     write_capability = SETTINGS_WRITE
     serializer_class = WebhookSerializer
     queryset = Webhook.objects.all()
+    search_fields = ["label", "url"]
+    ordering_fields = ["created_at", "last_status"]
+    filterset_fields = ["is_active"]
 
     def create(self, request, *args, **kwargs):
         resp = super().create(request, *args, **kwargs)

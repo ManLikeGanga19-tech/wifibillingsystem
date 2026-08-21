@@ -394,6 +394,9 @@ class TransactionViewSet(TenantReadOnlyViewSet):
     read_capability = PAYMENTS_VIEW_AMOUNTS   # the money feed — Owner/Admin (Care sees status only)
     serializer_class = TransactionAdminSerializer
     queryset = Transaction.objects.select_related("plan", "session").order_by("-created_at")
+    search_fields = ["phone", "mpesa_receipt", "checkout_request_id", "public_id"]
+    ordering_fields = ["created_at", "amount", "status"]
+    filterset_fields = ["status", "plan"]
 
     def get_queryset(self):
         qs = super().get_queryset()

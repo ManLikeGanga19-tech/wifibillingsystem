@@ -34,8 +34,10 @@ const BLANK_SPAN = {
 };
 
 export default function FibrePlantView({ canDispatch = false }: { canDispatch?: boolean }) {
-  const points = useList(() => api.fibre.points.list());
-  const spans = useList(() => api.fibre.spans.list());
+  // Plant view: points feed the map and the active-count totals, not a flat page — pull the
+  // whole plant (capped at the API max) so nothing is dropped off the end of a page.
+  const points = useList(() => api.fibre.points.list('?page_size=100'));
+  const spans = useList(() => api.fibre.spans.list('?page_size=100'));
   const [showPoint, setShowPoint] = useState(false);
   const [showSpan, setShowSpan] = useState(false);
   const [editPoint, setEditPoint] = useState<FibrePoint | null>(null);

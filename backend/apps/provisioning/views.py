@@ -31,6 +31,9 @@ class RouterViewSet(TenantModelViewSet):
     serializer_class = RouterSerializer
     queryset = Router.objects.all()
     read_capability = ROUTER_ACCESS      # MikroTik access — Owner/Admin/Technician
+    search_fields = ["name", "management_host", "serial_number"]
+    ordering_fields = ["name", "status", "last_seen_at"]
+    filterset_fields = ["status", "is_active", "provisioning_backend"]
     write_capability = ROUTER_ACCESS
 
     @action(detail=True, methods=["get"])
@@ -214,6 +217,9 @@ class SessionViewSet(TenantReadOnlyViewSet):
         .prefetch_related("devices")  # the per-session device list, without an N+1
         .order_by("-created_at")
     )
+    search_fields = ["hotspot_username", "mac_address", "ip_address", "subscriber__phone"]
+    ordering_fields = ["starts_at", "expires_at", "status"]
+    filterset_fields = ["status", "router", "plan"]
 
     def get_queryset(self):
         qs = super().get_queryset()

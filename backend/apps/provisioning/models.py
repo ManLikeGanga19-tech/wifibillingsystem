@@ -101,6 +101,10 @@ class Router(OperatorOwnedModel):
     # REST check: a dead tunnel means unreachable no matter what a stale API check says.
     wg_last_handshake_at = models.DateTimeField(null=True, blank=True)
 
+    class Meta:
+        # Sites listed by name, with a unique tiebreaker so paginated lists are stable.
+        ordering = ["name", "id"]
+
     def __str__(self):
         return f"{self.name} ({self.management_host or 'not enrolled'})"
 

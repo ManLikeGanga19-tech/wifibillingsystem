@@ -1,7 +1,8 @@
-import { useState, type FormEvent } from 'react';
+import { useMemo, useState, type FormEvent } from 'react';
 import { Mail, Send } from 'lucide-react';
-import { api } from '../api/client';
-import { Badge, Btn, Field, inputCls, Panel, RefreshBtn, TableShell, tdCls, toast, useList, ViewHeader, fmtDateTime } from './ui';
+import { api, type ApiMessage } from '../api/client';
+import { Badge, Btn, Field, inputCls, Panel, toast, ViewHeader, fmtDateTime } from './ui';
+import DataTable, { type Column } from './DataTable';
 
 const AUDIENCES = [
   { value: 'all', label: 'All clients with an email' },
@@ -14,7 +15,31 @@ export default function EmailsView() {
   const [body, setBody] = useState('');
   const [audience, setAudience] = useState<'all' | 'active' | 'expired'>('all');
   const [busy, setBusy] = useState(false);
-  const { rows, error, refreshing, reload } = useList(() => api.messages.list('?channel=email'));
+  const [refresh, setRefresh] = useState(0);
+  const reload = () => setRefresh((n) => n + 1);
+
+  const columns = useMemo<Column<ApiMessage>[]>(() => [
+    { header: 'To', render: (m) => <span className="font-mono font-bold">{m.to_email}</span> },
+    {
+      header: 'Subject',
+      render: (m) => (
+        <>
+          <span className="font-bold block">{m.subject || '—'}</span>
+          <span className="text-[#141414]/70 block max-w-[24rem] truncate">{m.body}</span>
+        </>
+      ),
+    },
+    {
+      header: 'Status', sortKey: 'status',
+      render: (m) => (
+        <>
+          <Badge color={m.status === 'sent' ? 'green' : m.status === 'failed' ? 'red' : 'gray'}>{m.status}</Badge>
+          {m.error && <span className="block text-[11px] text-[#B22222] font-mono mt-0.5">{m.error}</span>}
+        </>
+      ),
+    },
+    { header: 'Sent', sortKey: 'sent_at', render: (m) => <span className="font-mono whitespace-nowrap">{fmtDateTime(m.sent_at ?? m.created_at)}</span> },
+  ], []);
 
   const send = async (e: FormEvent) => {
     e.preventDefault();
@@ -45,9 +70,7 @@ export default function EmailsView() {
         icon={<Mail className="h-4.5 w-4.5" />}
         title="Emails"
         subtitle="Email broadcasts to clients who have an email on file. Individual deliveries are logged below."
-      >
-        <RefreshBtn onClick={reload} spinning={refreshing} />
-      </ViewHeader>
+      />
 
       <Panel title="Compose email broadcast">
         <form onSubmit={send} className="space-y-3">
@@ -71,27 +94,15 @@ export default function EmailsView() {
         </form>
       </Panel>
 
-      <TableShell
-        headers={['To', 'Subject', 'Status', 'Sent']}
-        loading={rows === null}
-        error={error}
-        empty="No emails sent yet. Note: clients only get an email address if you add one to their profile."
-      >
-        {(rows ?? []).map((m) => (
-          <tr key={m.id} className="hover:bg-[#f0efec]/40 transition">
-            <td className={`${tdCls} font-mono font-bold`}>{m.to_email}</td>
-            <td className={tdCls}>
-              <span className="font-bold block">{m.subject || '—'}</span>
-              <span className="text-[#141414]/70 block max-w-[24rem] truncate">{m.body}</span>
-            </td>
-            <td className={tdCls}>
-              <Badge color={m.status === 'sent' ? 'green' : m.status === 'failed' ? 'red' : 'gray'}>{m.status}</Badge>
-              {m.error && <span className="block text-[11px] text-[#B22222] font-mono mt-0.5">{m.error}</span>}
-            </td>
-            <td className={`${tdCls} font-mono whitespace-nowrap`}>{fmtDateTime(m.sent_at ?? m.created_at)}</td>
-          </tr>
-        ))}
-      </TableShell>
+      <DataTable<ApiMessage>
+        fetcher={(q) => api.messages.list(q)}
+        columns={columns}
+        rowKey={(m) => m.id}
+        searchPlaceholder="Search recipient / subject…"
+        emptyMessage="No emails sent yet. Note: clients only get an email address if you add one to their profile."
+        filters={{ channel: 'email' }}
+        refreshSignal={refresh}
+      />
     </div>
   );
 }

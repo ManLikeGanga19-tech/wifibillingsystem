@@ -24,6 +24,9 @@ class CampaignViewSet(
     serializer_class = CampaignSerializer
     queryset = Campaign.objects.order_by("-created_at")
     read_capability = MESSAGING_SEND     # sending to customers — Owner/Admin/Care
+    search_fields = ["name", "subject"]
+    ordering_fields = ["created_at", "status"]
+    filterset_fields = ["status", "channel", "audience"]
     write_capability = MESSAGING_SEND
 
     def perform_create(self, serializer):
@@ -63,6 +66,9 @@ class MessageViewSet(TenantReadOnlyViewSet):
     read_capability = MESSAGING_SEND     # the sent-message log
     serializer_class = MessageSerializer
     queryset = Message.objects.order_by("-created_at")
+    search_fields = ["to_phone", "to_email", "subject"]
+    ordering_fields = ["created_at", "status", "sent_at"]
+    filterset_fields = ["status", "channel", "campaign"]
 
     def get_queryset(self):
         qs = super().get_queryset()

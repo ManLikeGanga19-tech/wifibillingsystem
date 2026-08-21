@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Wallet, Plus, Building2 } from 'lucide-react';
 import { api, ApiExpense, PlatformFees } from '../api/client';
 import {
-  Badge, Btn, Field, inputCls, Panel, RefreshBtn, TableShell, tdCls, toast, useList, ViewHeader, fmtKsh,
+  Badge, Btn, Field, inputCls, Panel, toast, ViewHeader, fmtKsh,
 } from './ui';
+import DataTable, { type Column } from './DataTable';
 
 const CATEGORIES = ['bandwidth', 'power', 'rent', 'salaries', 'equipment', 'transport', 'other'] as const;
 
@@ -15,19 +16,18 @@ export default function ExpensesView() {
     description: '',
     amount: '',
   });
-  const { rows, count, error, refreshing, reload } = useList(() => api.expenses.list());
+  const [refresh, setRefresh] = useState(0);
+  const reload = () => setRefresh((n) => n + 1);
 
   // Auto side: what the ISP paid WIFI.OS (Danamo) this month, pulled live from billing.
   const [platform, setPlatform] = useState<PlatformFees | null>(null);
+  // Server-side month total + entry count — correct no matter how the table paginates.
+  const [monthTotal, setMonthTotal] = useState(0);
+  const [count, setCount] = useState<number | null>(null);
   useEffect(() => {
     api.expenses.platformFees().then(setPlatform).catch(() => setPlatform(null));
-  }, []);
-
-  const monthTotal = useMemo(() => {
-    if (!rows) return 0;
-    const monthStart = new Date().toISOString().slice(0, 7);
-    return rows.filter((e) => e.date.startsWith(monthStart)).reduce((a, e) => a + Number(e.amount), 0);
-  }, [rows]);
+    api.expenses.summary().then((s) => setMonthTotal(Number(s.month_total))).catch(() => setMonthTotal(0));
+  }, [refresh]);
 
   const platformTotal = platform ? Number(platform.total) : 0;
   const platformLines = (platform?.lines ?? []).filter((l) => Number(l.amount) > 0);
@@ -55,7 +55,6 @@ export default function ExpensesView() {
         <Btn onClick={() => setShowForm(!showForm)}>
           <Plus className="h-3.5 w-3.5" /> Record Expense
         </Btn>
-        <RefreshBtn onClick={reload} spinning={refreshing} />
       </ViewHeader>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -79,7 +78,7 @@ export default function ExpensesView() {
         </div>
         <div className="bg-white border border-[#141414] p-3.5">
           <p className="text-[11px] font-mono uppercase text-[#141414]/60">Entries</p>
-          <p className="text-xl font-black font-mono mt-1">{count}</p>
+          <p className="text-xl font-black font-mono mt-1">{count ?? '—'}</p>
         </div>
       </div>
 
@@ -135,22 +134,24 @@ export default function ExpensesView() {
         </Panel>
       )}
 
-      <TableShell
-        headers={['Date', 'Category', 'Description', 'Site', 'Amount']}
-        loading={rows === null}
-        error={error}
-        empty="No expenses recorded yet."
-      >
-        {(rows ?? []).map((e) => (
-          <tr key={e.id} className="hover:bg-[#f0efec]/40 transition">
-            <td className={`${tdCls} font-mono whitespace-nowrap`}>{e.date}</td>
-            <td className={tdCls}><Badge color="gray">{e.category}</Badge></td>
-            <td className={tdCls}>{e.description}</td>
-            <td className={tdCls}>{e.router_name || '—'}</td>
-            <td className={`${tdCls} font-mono font-bold text-right whitespace-nowrap`}>{fmtKsh(e.amount)}</td>
-          </tr>
-        ))}
-      </TableShell>
+      <DataTable<ApiExpense>
+        fetcher={(q) => api.expenses.list(q)}
+        columns={expenseColumns}
+        rowKey={(e) => e.id}
+        searchPlaceholder="Search expenses…"
+        emptyMessage="No expenses recorded yet."
+        initialOrdering="-date"
+        refreshSignal={refresh}
+        onLoaded={setCount}
+      />
     </div>
   );
 }
+
+const expenseColumns: Column<ApiExpense>[] = [
+  { header: 'Date', sortKey: 'date', render: (e) => <span className="font-mono whitespace-nowrap">{e.date}</span> },
+  { header: 'Category', render: (e) => <Badge color="gray">{e.category}</Badge> },
+  { header: 'Description', render: (e) => e.description },
+  { header: 'Site', render: (e) => e.router_name || '—' },
+  { header: 'Amount', sortKey: 'amount', className: 'text-right', render: (e) => <span className="font-mono font-bold whitespace-nowrap">{fmtKsh(e.amount)}</span> },
+];

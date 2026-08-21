@@ -2,8 +2,9 @@ import React, { useEffect, useState, type FormEvent } from 'react';
 import { Users, Plus, Ban, RotateCcw, Zap, Printer, X, Loader2, Wifi, WifiOff, AlertTriangle, Key, Copy, Eye, EyeOff, Trash2, RefreshCw, Upload, Download, Pencil, Save, Search, MoreHorizontal, ArrowRight } from 'lucide-react';
 import { api, ApiError, PppoeClient, PppoePlan, ApiRouter, AccessPoint, FibrePoint, PppoeUsageSummary, PppoeChurnSummary, CapacityWarning, PppoeImportRow, PppoeImportItem, PppoeCsvPreview, PppoeImportResult } from '../api/client';
 import MapPicker from './MapPicker';
+import DataTable, { type Column } from './DataTable';
 import {
-  Badge, Btn, Field, FilterChips, inputCls, Panel, RefreshBtn, TableShell, tdCls, toast, useList, ViewHeader, fmtDateTime, fmtKsh,
+  Badge, Btn, Field, FilterChips, inputCls, Panel, toast, ViewHeader, fmtDateTime, fmtKsh,
 } from './ui';
 
 /** Live status dot, from the 5-minute metering poll. */
@@ -222,21 +223,9 @@ const DELIVERY = [
 
 export default function PppoeClientsView() {
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>('all');
-  // Search box -> `query` is debounced so we don't fire a request per keystroke.
-  const [search, setSearch] = useState('');
-  const [query, setQuery] = useState('');
-  useEffect(() => {
-    const t = window.setTimeout(() => setQuery(search.trim()), 300);
-    return () => window.clearTimeout(t);
-  }, [search]);
-
-  const { rows, count, error, refreshing, reload } = useList(() => {
-    const params = new URLSearchParams();
-    if (filter !== 'all') params.set('status', filter);
-    if (query) params.set('search', query);
-    const qs = params.toString();
-    return api.pppoe.clients.list(qs ? `?${qs}` : '');
-  }, [filter, query]);
+  // Bumped to reload the DataTable after a create / status action.
+  const [refresh, setRefresh] = useState(0);
+  const reload = () => setRefresh((n) => n + 1);
   const [plans, setPlans] = useState<PppoePlan[]>([]);
   const [routers, setRouters] = useState<ApiRouter[]>([]);
   const [aps, setAps] = useState<AccessPoint[]>([]);
@@ -357,6 +346,55 @@ export default function PppoeClientsView() {
     }
   };
 
+  const clientColumns: Column<PppoeClient>[] = [
+    { header: 'Account', sortKey: 'account_number', render: (c) => <span className="font-mono font-bold">{c.account_number}</span> },
+    {
+      header: 'Name', sortKey: 'full_name',
+      render: (c) => (
+        <>
+          <button onClick={() => setEditFor(c)} className="text-left hover:underline cursor-pointer" title="Edit this client">
+            {c.full_name}
+          </button>
+          <span className="block text-[11px] font-mono text-[#141414]/50">
+            {c.connection_type === 'static' ? `Static · ${c.static_ip ?? '—'}` : c.pppoe_username}
+          </span>
+        </>
+      ),
+    },
+    { header: 'Plan', render: (c) => c.plan_name },
+    { header: 'Live', render: (c) => <LiveDot client={c} /> },
+    { header: 'Usage (cycle)', render: (c) => <UsageCell client={c} /> },
+    { header: 'Status', sortKey: 'status', render: (c) => <Badge color={STATUS_COLOR[c.status]}>{c.status.replace('_', ' ')}</Badge> },
+    {
+      header: 'Balance', sortKey: 'balance', className: 'text-right',
+      render: (c) => <span className={`font-mono ${Number(c.balance) < 0 ? 'text-[#B22222]' : ''}`}>{fmtKsh(c.balance)}</span>,
+    },
+    { header: 'Next billing', sortKey: 'next_due_date', render: (c) => <span className="font-mono whitespace-nowrap"><NextDueCell client={c} /></span> },
+    {
+      header: '', className: 'whitespace-nowrap',
+      render: (c) => (
+        <div className="flex items-center justify-end gap-1.5">
+          {c.status === 'pending_install' && (
+            <Btn variant="green" onClick={() => act(c, () => api.pppoe.clients.provision(c.id), 'provisioned')}>
+              <Zap className="h-3.5 w-3.5" /> Provision
+            </Btn>
+          )}
+          {c.status === 'active' && (
+            <Btn variant="danger" onClick={() => act(c, () => api.pppoe.clients.suspend(c.id), 'suspended')}>
+              <Ban className="h-3.5 w-3.5" /> Suspend
+            </Btn>
+          )}
+          {c.status === 'suspended' && (
+            <Btn variant="green" onClick={() => act(c, () => api.pppoe.clients.restore(c.id), 'restored')}>
+              <RotateCcw className="h-3.5 w-3.5" /> Restore
+            </Btn>
+          )}
+          <RowMenu onEdit={() => setEditFor(c)} onCredentials={() => setCredsFor(c)} onSheet={() => setSheetFor(c)} />
+        </div>
+      ),
+    },
+  ];
+
   return (
     <div className="space-y-5 text-[#141414]">
       <ViewHeader
@@ -373,7 +411,6 @@ export default function PppoeClientsView() {
         <Btn variant="outline" onClick={() => setShowExport(true)} title="Download all clients as CSV">
           <Download className="h-3.5 w-3.5" /> Export
         </Btn>
-        <RefreshBtn onClick={reload} spinning={refreshing} />
       </ViewHeader>
 
       <UsageSummaryTile />
@@ -465,86 +502,17 @@ export default function PppoeClientsView() {
         </Panel>
       )}
 
-      <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[#141414]/40" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search name, account number, phone or PPPoE user…"
-            className={`${inputCls} pl-8 pr-8`}
-          />
-          {search && (
-            <button
-              onClick={() => setSearch('')}
-              className="absolute right-2 top-1/2 -translate-y-1/2 cursor-pointer text-[#141414]/40 hover:text-[#141414]"
-              title="Clear search"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          )}
-        </div>
-      </div>
-
-      <FilterChips options={FILTERS} value={filter} onChange={setFilter} right={<span className="text-[11px] font-mono text-[#141414]/50">{count} client{count === 1 ? '' : 's'}{query ? ' found' : ''}</span>} />
-
-      <TableShell
-        headers={['Account', 'Name', 'Plan', 'Live', 'Usage (cycle)', 'Status', 'Balance', 'Next billing', '']}
-        loading={rows === null}
-        error={error}
-        empty="No broadband clients yet."
-      >
-        {(rows ?? []).map((c: PppoeClient) => (
-          <tr key={c.id} className="hover:bg-[#f0efec]/40 transition">
-            <td className={`${tdCls} font-mono font-bold`}>{c.account_number}</td>
-            <td className={tdCls}>
-              <button
-                onClick={() => setEditFor(c)}
-                className="text-left hover:underline cursor-pointer"
-                title="Edit this client"
-              >
-                {c.full_name}
-              </button>
-              <span className="block text-[11px] font-mono text-[#141414]/50">
-                {c.connection_type === 'static' ? `Static · ${c.static_ip ?? '—'}` : c.pppoe_username}
-              </span>
-            </td>
-            <td className={tdCls}>{c.plan_name}</td>
-            <td className={tdCls}><LiveDot client={c} /></td>
-            <td className={tdCls}><UsageCell client={c} /></td>
-            <td className={tdCls}><Badge color={STATUS_COLOR[c.status]}>{c.status.replace('_', ' ')}</Badge></td>
-            <td className={`${tdCls} font-mono text-right ${Number(c.balance) < 0 ? 'text-[#B22222]' : ''}`}>{fmtKsh(c.balance)}</td>
-            <td className={`${tdCls} font-mono whitespace-nowrap`}><NextDueCell client={c} /></td>
-            <td className={`${tdCls} whitespace-nowrap`}>
-              <div className="flex items-center justify-end gap-1.5">
-                {/* The one status action stays visible — it's what an ISP reaches for. */}
-                {c.status === 'pending_install' && (
-                  <Btn variant="green" onClick={() => act(c, () => api.pppoe.clients.provision(c.id), 'provisioned')}>
-                    <Zap className="h-3.5 w-3.5" /> Provision
-                  </Btn>
-                )}
-                {c.status === 'active' && (
-                  <Btn variant="danger" onClick={() => act(c, () => api.pppoe.clients.suspend(c.id), 'suspended')}>
-                    <Ban className="h-3.5 w-3.5" /> Suspend
-                  </Btn>
-                )}
-                {c.status === 'suspended' && (
-                  <Btn variant="green" onClick={() => act(c, () => api.pppoe.clients.restore(c.id), 'restored')}>
-                    <RotateCcw className="h-3.5 w-3.5" /> Restore
-                  </Btn>
-                )}
-                {/* …and the tools collapse into a menu, so the row stays readable as the
-                    client base grows. */}
-                <RowMenu
-                  onEdit={() => setEditFor(c)}
-                  onCredentials={() => setCredsFor(c)}
-                  onSheet={() => setSheetFor(c)}
-                />
-              </div>
-            </td>
-          </tr>
-        ))}
-      </TableShell>
+      <DataTable<PppoeClient>
+        fetcher={(q) => api.pppoe.clients.list(q)}
+        columns={clientColumns}
+        rowKey={(c) => c.id}
+        searchPlaceholder="Search name, account, phone or PPPoE user…"
+        emptyMessage="No broadband clients yet."
+        initialOrdering="-created_at"
+        filters={{ status: filter === 'all' ? undefined : filter }}
+        refreshSignal={refresh}
+        toolbar={<FilterChips options={FILTERS} value={filter} onChange={setFilter} />}
+      />
 
       {sheetFor && <AccountSheet client={sheetFor} onClose={() => setSheetFor(null)} />}
       {credsFor && (

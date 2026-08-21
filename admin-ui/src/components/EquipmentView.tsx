@@ -1,9 +1,8 @@
-import { useState, type FormEvent } from 'react';
+import { useMemo, useState, type FormEvent } from 'react';
 import { HardDrive, Pencil, Plus, Trash2 } from 'lucide-react';
 import { api, ApiEquipment, ApiError } from '../api/client';
-import {
-  Badge, Btn, Field, FilterChips, inputCls, Panel, RefreshBtn, TableShell, tdCls, toast, useList, ViewHeader, fmtKsh,
-} from './ui';
+import { Badge, Btn, Field, FilterChips, inputCls, Panel, toast, ViewHeader, fmtKsh } from './ui';
+import DataTable, { type Column } from './DataTable';
 
 const TYPES = ['router', 'antenna', 'switch', 'cpe', 'cable', 'power', 'other'] as const;
 const FILTERS = ['all', 'in_store', 'deployed', 'faulty', 'retired'] as const;
@@ -23,10 +22,9 @@ export default function EquipmentView() {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<ApiEquipment | null>(null);
   const [form, setForm] = useState({ ...BLANK });
-  const { rows, count, error, refreshing, reload } = useList(
-    () => api.equipment.list(filter === 'all' ? '' : `?status=${filter}`),
-    [filter]
-  );
+  // Bumping this reloads the DataTable (after a create / edit / delete / status change).
+  const [refresh, setRefresh] = useState(0);
+  const reload = () => setRefresh((n) => n + 1);
 
   const openNew = () => { setEditing(null); setForm({ ...BLANK }); setShowForm(true); };
   const openEdit = (item: ApiEquipment) => {
@@ -76,6 +74,40 @@ export default function EquipmentView() {
     }
   };
 
+  const columns = useMemo<Column<ApiEquipment>[]>(() => [
+    { header: 'Name', sortKey: 'name', render: (i) => <span className="font-bold">{i.name}</span> },
+    { header: 'Type', render: (i) => <Badge color="gray">{i.equipment_type}</Badge> },
+    { header: 'Serial', render: (i) => <span className="font-mono">{i.serial_number || '—'}</span> },
+    { header: 'Site', render: (i) => i.router_name || '—' },
+    {
+      header: 'Cost', className: 'text-right',
+      render: (i) => <span className="font-mono whitespace-nowrap">{fmtKsh(i.cost)}</span>,
+    },
+    {
+      header: 'Status',
+      render: (i) => <Badge color={STATUS_COLOR[i.status]}>{i.status.replace('_', ' ')}</Badge>,
+    },
+    {
+      header: '',
+      render: (i) => (
+        <div className="flex items-center gap-1.5">
+          <select
+            value={i.status}
+            onChange={(e) => setStatus(i, e.target.value as ApiEquipment['status'])}
+            className="border border-[#141414]/40 bg-white text-[11px] font-mono p-1 outline-none cursor-pointer"
+            title="Change status"
+          >
+            {(['in_store', 'deployed', 'faulty', 'retired'] as const).map((s) => (
+              <option key={s} value={s}>{s.replace('_', ' ')}</option>
+            ))}
+          </select>
+          <Btn variant="outline" onClick={() => openEdit(i)} title="Edit equipment"><Pencil className="h-3.5 w-3.5" /></Btn>
+          <Btn variant="danger" onClick={() => remove(i)} title="Delete equipment"><Trash2 className="h-3.5 w-3.5" /></Btn>
+        </div>
+      ),
+    },
+  ], []); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
     <div className="space-y-5 text-[#141414]">
       <ViewHeader
@@ -86,7 +118,6 @@ export default function EquipmentView() {
         <Btn onClick={openNew}>
           <Plus className="h-3.5 w-3.5" /> Add Equipment
         </Btn>
-        <RefreshBtn onClick={reload} spinning={refreshing} />
       </ViewHeader>
 
       {showForm && (
@@ -107,48 +138,23 @@ export default function EquipmentView() {
               <input type="number" min="0" step="0.01" value={form.cost} onChange={(e) => setForm({ ...form, cost: e.target.value })} className={inputCls} />
             </Field>
             <div className="flex gap-2">
-              <Btn type="submit" variant="green">{editing ? 'Save' : 'Save'}</Btn>
+              <Btn type="submit" variant="green">Save</Btn>
               {editing && <Btn type="button" variant="outline" onClick={() => { setShowForm(false); setEditing(null); }}>Cancel</Btn>}
             </div>
           </form>
         </Panel>
       )}
 
-      <FilterChips options={FILTERS} value={filter} onChange={setFilter} right={<span className="text-[11px] font-mono text-[#141414]/50">{count} items</span>} />
-
-      <TableShell
-        headers={['Name', 'Type', 'Serial', 'Site', 'Cost', 'Status', '']}
-        loading={rows === null}
-        error={error}
-        empty="No equipment recorded yet."
-      >
-        {(rows ?? []).map((item) => (
-          <tr key={item.id} className="hover:bg-[#f0efec]/40 transition">
-            <td className={`${tdCls} font-bold`}>{item.name}</td>
-            <td className={tdCls}><Badge color="gray">{item.equipment_type}</Badge></td>
-            <td className={`${tdCls} font-mono`}>{item.serial_number || '—'}</td>
-            <td className={tdCls}>{item.router_name || '—'}</td>
-            <td className={`${tdCls} font-mono whitespace-nowrap`}>{fmtKsh(item.cost)}</td>
-            <td className={tdCls}><Badge color={STATUS_COLOR[item.status]}>{item.status.replace('_', ' ')}</Badge></td>
-            <td className={tdCls}>
-              <div className="flex items-center gap-1.5">
-                <select
-                  value={item.status}
-                  onChange={(e) => setStatus(item, e.target.value as ApiEquipment['status'])}
-                  className="border border-[#141414]/40 bg-white text-[11px] font-mono p-1 outline-none cursor-pointer"
-                  title="Change status"
-                >
-                  {(['in_store', 'deployed', 'faulty', 'retired'] as const).map((s) => (
-                    <option key={s} value={s}>{s.replace('_', ' ')}</option>
-                  ))}
-                </select>
-                <Btn variant="outline" onClick={() => openEdit(item)} title="Edit equipment"><Pencil className="h-3.5 w-3.5" /></Btn>
-                <Btn variant="danger" onClick={() => remove(item)} title="Delete equipment"><Trash2 className="h-3.5 w-3.5" /></Btn>
-              </div>
-            </td>
-          </tr>
-        ))}
-      </TableShell>
+      <DataTable<ApiEquipment>
+        fetcher={(q) => api.equipment.list(q)}
+        columns={columns}
+        rowKey={(i) => i.id}
+        searchPlaceholder="Search equipment…"
+        emptyMessage="No equipment recorded yet."
+        filters={{ status: filter === 'all' ? undefined : filter }}
+        refreshSignal={refresh}
+        toolbar={<FilterChips options={FILTERS} value={filter} onChange={setFilter} />}
+      />
     </div>
   );
 }

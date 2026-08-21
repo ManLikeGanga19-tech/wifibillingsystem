@@ -175,6 +175,8 @@ def usage_status(operator) -> dict:
         "remaining": None if unlimited else max(FREE_MONTHLY_LIMIT - used, 0),
         # The Pro price, so the console can show "Upgrade to Pro (KES X/mo)" without a second call.
         "pro_monthly_fee": str(getattr(dj_settings, "AI_PRO_MONTHLY_FEE", "")),
+        # Whether tenants may self-serve buy Pro yet (feature-flagged off while billing is refined).
+        "pro_self_serve": bool(getattr(dj_settings, "AI_PRO_SELF_SERVE", False)),
     }
 
 

@@ -61,6 +61,9 @@ class ServicePlanViewSet(TenantModelViewSet):
     # only plan CONFIG (pricing) is an Admin/Owner job.
     read_capability = CLIENTS_PLAN
     write_capability = HOTSPOT_PLANS
+    search_fields = ["name", "mikrotik_profile"]
+    ordering_fields = ["name", "price", "sort_order"]
+    filterset_fields = ["is_active"]
 
 
 class TowerViewSet(TenantModelViewSet):
@@ -68,6 +71,9 @@ class TowerViewSet(TenantModelViewSet):
     queryset = Tower.objects.all()
     read_capability = NETWORK_WRITE      # network plant — Owner/Admin/Technician
     write_capability = NETWORK_WRITE
+    search_fields = ["name", "notes"]
+    ordering_fields = ["name"]
+    filterset_fields = ["is_active"]
 
     def get_queryset(self):
         # super() applies the tenant filter (TenantScopedMixin) — never bypass it
@@ -81,6 +87,9 @@ class AccessPointViewSet(TenantModelViewSet):
     queryset = AccessPoint.objects.all()
     read_capability = NETWORK_WRITE
     write_capability = NETWORK_WRITE
+    search_fields = ["name", "ssid"]
+    ordering_fields = ["name"]
+    filterset_fields = ["is_active", "tower", "router", "mode", "band"]
 
     def get_queryset(self):
         # super() applies the tenant filter (TenantScopedMixin) — never bypass it
@@ -100,6 +109,16 @@ class AccessPointViewSet(TenantModelViewSet):
 class ClientViewSet(TenantModelViewSet):
     serializer_class = ClientSerializer
     queryset = Client.objects.select_related("plan", "router").order_by("-created_at")
+    search_fields = [
+        "account_number", "full_name", "phone", "email", "pppoe_username", "physical_address",
+    ]
+    ordering_fields = [
+        "created_at", "full_name", "account_number", "status", "next_due_date", "balance",
+    ]
+    filterset_fields = [
+        "status", "plan", "router", "connection_type", "delivery_method",
+        "is_online", "access_point", "fibre_point",
+    ]
 
     #: Switching a paying customer ON is the moment an ISP starts earning. An
     #: unverified ISP may build their whole client list — they simply cannot turn
@@ -469,6 +488,9 @@ class ClientViewSet(TenantModelViewSet):
 class InvoiceViewSet(TenantReadOnlyViewSet):
     serializer_class = InvoiceSerializer
     queryset = Invoice.objects.select_related("client").order_by("-issued_at")
+    search_fields = ["number", "client__account_number", "client__full_name"]
+    ordering_fields = ["issued_at", "due_date", "amount", "status"]
+    filterset_fields = ["status", "client"]
     read_capability = FINANCE_VIEW      # invoices carry amounts — Owner/Admin
 
     def get_queryset(self):

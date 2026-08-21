@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Eye, ShieldCheck } from 'lucide-react';
 import { api, dt, type AuditRow, type Grant } from '../api/client';
 import {
@@ -6,6 +6,7 @@ import {
   Btn,
   Empty,
   ErrorBox,
+  Pager,
   Panel,
   RefreshBtn,
   Spinner,
@@ -46,7 +47,9 @@ export default function GovernanceView() {
 function AuditTrail() {
   const [action, setAction] = useState('');
   const [tenant, setTenant] = useState('');
-  const list = useLoad(() => api.audit.list({ action, tenant }), [action, tenant]);
+  const [page, setPage] = useState(1);
+  useEffect(() => { setPage(1); }, [action, tenant]);   // a new filter starts at page 1
+  const list = useLoad(() => api.audit.list({ action, tenant, page }), [action, tenant, page]);
   const actions = useLoad(() => api.audit.actions(), []);
 
   if (list.error) return <ErrorBox message={list.error} onRetry={list.reload} />;
@@ -83,11 +86,14 @@ function AuditTrail() {
       ) : list.data.results.length === 0 ? (
         <Empty message="Nothing recorded for this filter." />
       ) : (
-        <Table head={['When', 'Action', 'Actor', 'ISP', 'Target', 'Detail', 'IP']}>
-          {list.data.results.map((r) => (
-            <AuditLine key={r.id} r={r} />
-          ))}
-        </Table>
+        <>
+          <Table head={['When', 'Action', 'Actor', 'ISP', 'Target', 'Detail', 'IP']}>
+            {list.data.results.map((r) => (
+              <AuditLine key={r.id} r={r} />
+            ))}
+          </Table>
+          <Pager page={page} count={list.data.count} onPage={setPage} />
+        </>
       )}
     </Panel>
   );
@@ -138,7 +144,8 @@ function AuditLine({ r }: { r: AuditRow }) {
 /* ---- impersonation history ----------------------------------------------- */
 
 function AccessHistory() {
-  const { data, error, reload } = useLoad(() => api.impersonation.history(), []);
+  const [page, setPage] = useState(1);
+  const { data, error, reload } = useLoad(() => api.impersonation.history(false, page), [page]);
 
   const endAll = async () => {
     try {
@@ -175,11 +182,14 @@ function AccessHistory() {
       ) : rows.length === 0 ? (
         <Empty message="No one has entered an ISP console yet." />
       ) : (
-        <Table head={['Started', 'Staff', 'ISP', 'Reason', 'Expires', 'Ended', 'State']}>
-          {rows.map((g) => (
-            <GrantLine key={g.id} g={g} />
-          ))}
-        </Table>
+        <>
+          <Table head={['Started', 'Staff', 'ISP', 'Reason', 'Expires', 'Ended', 'State']}>
+            {rows.map((g) => (
+              <GrantLine key={g.id} g={g} />
+            ))}
+          </Table>
+          <Pager page={page} count={data.count} onPage={setPage} />
+        </>
       )}
     </Panel>
   );

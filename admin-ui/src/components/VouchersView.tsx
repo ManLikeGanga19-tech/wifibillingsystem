@@ -1,9 +1,8 @@
-import { useState, type FormEvent } from 'react';
+import { useMemo, useState, type FormEvent } from 'react';
 import { Ticket, Plus, Printer, Send } from 'lucide-react';
 import { api, ApiVoucher, ApiPlan } from '../api/client';
-import {
-  Badge, Btn, Field, FilterChips, inputCls, Panel, RefreshBtn, TableShell, tdCls, toast, useList, ViewHeader, fmtDateTime,
-} from './ui';
+import { Badge, Btn, Field, FilterChips, inputCls, Panel, toast, ViewHeader, fmtDateTime } from './ui';
+import DataTable, { type Column } from './DataTable';
 
 const FILTERS = ['unused', 'all', 'redeemed', 'expired', 'void'] as const;
 const STATUS_COLOR: Record<ApiVoucher['status'], 'green' | 'gray' | 'amber' | 'blue' | 'red'> = {
@@ -20,10 +19,7 @@ export default function VouchersView({ plans }: { plans: ApiPlan[] }) {
   const [countInput, setCountInput] = useState('20');
   const [prefix, setPrefix] = useState('');
   const [busy, setBusy] = useState(false);
-  const { rows, count, error, refreshing, reload } = useList(
-    () => api.vouchers.list(filter === 'all' ? '' : `?status=${filter}`),
-    [filter]
-  );
+  const [refresh, setRefresh] = useState(0);
 
   const generate = async (e: FormEvent) => {
     e.preventDefault();
@@ -37,7 +33,7 @@ export default function VouchersView({ plans }: { plans: ApiPlan[] }) {
       });
       toast('success', `${created.length} vouchers generated.`);
       setShowForm(false);
-      reload();
+      setRefresh((n) => n + 1);
       printBatch(created, plans.find((p) => p.id === Number(planId))?.name ?? '');
     } catch {
       toast('error', 'Failed to generate vouchers.');
@@ -79,6 +75,22 @@ export default function VouchersView({ plans }: { plans: ApiPlan[] }) {
     win.document.close();
   };
 
+  const columns = useMemo<Column<ApiVoucher>[]>(() => [
+    { header: 'Code', render: (v) => <span className="font-mono font-black tracking-widest">{v.code}</span> },
+    { header: 'Plan', render: (v) => v.plan_name },
+    { header: 'Status', sortKey: 'status', render: (v) => <Badge color={STATUS_COLOR[v.status]}>{v.status}</Badge> },
+    { header: 'Redeemed', render: (v) => <span className="font-mono whitespace-nowrap">{fmtDateTime(v.redeemed_at)}</span> },
+    { header: 'Created', sortKey: 'created_at', render: (v) => <span className="font-mono whitespace-nowrap">{fmtDateTime(v.created_at)}</span> },
+    {
+      header: '',
+      render: (v) => v.status === 'unused' ? (
+        <Btn variant="outline" onClick={() => smsVoucher(v)} title="Text this code to a customer">
+          <Send className="h-3.5 w-3.5" /> SMS
+        </Btn>
+      ) : null,
+    },
+  ], []); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
     <div className="space-y-5 text-[#141414]">
       <ViewHeader
@@ -89,7 +101,6 @@ export default function VouchersView({ plans }: { plans: ApiPlan[] }) {
         <Btn onClick={() => setShowForm(!showForm)}>
           <Plus className="h-3.5 w-3.5" /> Generate Batch
         </Btn>
-        <RefreshBtn onClick={reload} spinning={refreshing} />
       </ViewHeader>
 
       {showForm && (
@@ -117,31 +128,16 @@ export default function VouchersView({ plans }: { plans: ApiPlan[] }) {
         </Panel>
       )}
 
-      <FilterChips options={FILTERS} value={filter} onChange={setFilter} right={<span className="text-[11px] font-mono text-[#141414]/50">{count} vouchers</span>} />
-
-      <TableShell
-        headers={['Code', 'Plan', 'Status', 'Redeemed', 'Created', '']}
-        loading={rows === null}
-        error={error}
-        empty="No vouchers in this list. Generate a batch to get started."
-      >
-        {(rows ?? []).map((v) => (
-          <tr key={v.id} className="hover:bg-[#f0efec]/40 transition">
-            <td className={`${tdCls} font-mono font-black tracking-widest`}>{v.code}</td>
-            <td className={tdCls}>{v.plan_name}</td>
-            <td className={tdCls}><Badge color={STATUS_COLOR[v.status]}>{v.status}</Badge></td>
-            <td className={`${tdCls} font-mono whitespace-nowrap`}>{fmtDateTime(v.redeemed_at)}</td>
-            <td className={`${tdCls} font-mono whitespace-nowrap`}>{fmtDateTime(v.created_at)}</td>
-            <td className={tdCls}>
-              {v.status === 'unused' && (
-                <Btn variant="outline" onClick={() => smsVoucher(v)} title="Text this code to a customer">
-                  <Send className="h-3.5 w-3.5" /> SMS
-                </Btn>
-              )}
-            </td>
-          </tr>
-        ))}
-      </TableShell>
+      <DataTable<ApiVoucher>
+        fetcher={(q) => api.vouchers.list(q)}
+        columns={columns}
+        rowKey={(v) => v.id}
+        searchPlaceholder="Search by code…"
+        emptyMessage="No vouchers in this list. Generate a batch to get started."
+        filters={{ status: filter === 'all' ? undefined : filter }}
+        refreshSignal={refresh}
+        toolbar={<FilterChips options={FILTERS} value={filter} onChange={setFilter} />}
+      />
     </div>
   );
 }

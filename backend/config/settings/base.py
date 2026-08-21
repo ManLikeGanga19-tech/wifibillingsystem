@@ -21,6 +21,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "rest_framework",
     "drf_spectacular",
+    "django_filters",
     "apps.core",
     "apps.accounts",
     "apps.plans",
@@ -126,8 +127,16 @@ REST_FRAMEWORK = {
     ],
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
-    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
-    "PAGE_SIZE": 50,
+    "DEFAULT_PAGINATION_CLASS": "apps.core.pagination.StandardPagination",
+    "PAGE_SIZE": 25,
+    # Server-side filtering/search/sort on every list endpoint. The backends are inert on a
+    # viewset until it declares filterset_fields / search_fields / ordering_fields, so this is a
+    # safe global default that each list viewset opts into with its own field allow-lists.
+    "DEFAULT_FILTER_BACKENDS": [
+        "django_filters.rest_framework.DjangoFilterBackend",
+        "rest_framework.filters.SearchFilter",
+        "rest_framework.filters.OrderingFilter",
+    ],
     # WITHOUT THESE THE RATES BELOW DO NOTHING. DRF only applies a default throttle if a
     # class is named here; the rates alone are inert configuration that READS like
     # protection. Every endpoint that doesn't declare its own scope was unlimited until
@@ -192,6 +201,9 @@ DOCS_CONTENT_DIR = os.getenv("DOCS_CONTENT_DIR", "/app/docs_content")
 # AI billing. Pro is a flat monthly platform fee (KES), accrued to the tenant's platform ledger
 # like every other fee. Settings-configurable so pricing changes without a deploy.
 AI_PRO_MONTHLY_FEE = os.getenv("AI_PRO_MONTHLY_FEE", "1500")
+# Self-serve Pro opt-in. OFF for now — the billing model still needs work before tenants can
+# buy it themselves; the fee machinery stays intact behind this flag. Flip to "1" to enable.
+AI_PRO_SELF_SERVE = os.getenv("AI_PRO_SELF_SERVE", "0") == "1"
 # Provider token prices (USD per 1M tokens: input, output) for TRUE-MARGIN tracking — our real
 # cost per tenant from logged token usage, versus what we charge. Not what we bill; just cost.
 AI_MODEL_PRICES = {

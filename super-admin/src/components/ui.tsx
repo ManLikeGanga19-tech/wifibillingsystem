@@ -1,5 +1,39 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import { AlertTriangle, Loader2, RefreshCw } from 'lucide-react';
+import { AlertTriangle, ChevronLeft, ChevronRight, Loader2, RefreshCw } from 'lucide-react';
+
+/** Page-number pager for a `Page<T>` list — matches the console's DataTable pager. */
+export function Pager({
+  page, count, pageSize = 25, onPage,
+}: { page: number; count: number; pageSize?: number; onPage: (p: number) => void }) {
+  if (count === 0) return null;
+  const last = Math.max(1, Math.ceil(count / pageSize));
+  const from = (page - 1) * pageSize + 1;
+  const to = Math.min(page * pageSize, count);
+  return (
+    <div className="mt-3 flex items-center justify-between gap-2 text-[11px] font-mono text-[#141414]/60">
+      <span>{from}–{to} of {count}</span>
+      <div className="flex items-center gap-1">
+        <button
+          onClick={() => onPage(Math.max(1, page - 1))}
+          disabled={page <= 1}
+          className="border border-[#141414]/25 p-1 disabled:opacity-30 hover:border-[#141414]"
+          aria-label="Previous page"
+        >
+          <ChevronLeft className="h-3.5 w-3.5" />
+        </button>
+        <span className="px-1">{page} / {last}</span>
+        <button
+          onClick={() => onPage(Math.min(last, page + 1))}
+          disabled={page >= last}
+          className="border border-[#141414]/25 p-1 disabled:opacity-30 hover:border-[#141414]"
+          aria-label="Next page"
+        >
+          <ChevronRight className="h-3.5 w-3.5" />
+        </button>
+      </div>
+    </div>
+  );
+}
 
 /**
  * Primitives — matched to the ISP console's brutalist kit so the two consoles

@@ -66,6 +66,9 @@ class FibrePointViewSet(_PlantViewSet):
     serializer_class = FibrePointSerializer
     queryset = FibrePoint.objects.all()
     audit_noun = "fibre_point"
+    search_fields = ["label", "notes"]
+    ordering_fields = ["type", "label", "status"]
+    filterset_fields = ["type", "status"]
 
     def get_queryset(self):
         # Annotate the two "used" counters once, so a list of the whole plant is a single query
@@ -92,6 +95,9 @@ class FibreSpanViewSet(_PlantViewSet):
     serializer_class = FibreSpanSerializer
     queryset = FibreSpan.objects.select_related("from_point", "to_point").all()
     audit_noun = "fibre_span"
+    search_fields = ["from_point__label", "to_point__label"]
+    ordering_fields = ["created_at"]
+    filterset_fields = ["cable_type", "status", "from_point", "to_point"]
 
 
 def _point_json(p: FibrePoint) -> dict:

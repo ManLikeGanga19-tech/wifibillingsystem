@@ -1,10 +1,9 @@
-import { useState, type FormEvent } from 'react';
+import { useMemo, useState, type FormEvent } from 'react';
 import { Pencil, Plus, Trash2, UserPlus } from 'lucide-react';
 import { api, ApiError, ApiLead } from '../api/client';
 import MapPicker from './MapPicker';
-import {
-  Badge, Btn, Field, FilterChips, inputCls, Panel, RefreshBtn, TableShell, tdCls, toast, useList, ViewHeader, fmtDateTime,
-} from './ui';
+import { Badge, Btn, Field, FilterChips, inputCls, Panel, toast, ViewHeader, fmtDateTime } from './ui';
+import DataTable, { type Column } from './DataTable';
 
 const FILTERS = ['new', 'all', 'contacted', 'converted', 'lost'] as const;
 const STATUS_COLOR: Record<ApiLead['status'], 'green' | 'gray' | 'amber' | 'blue' | 'red'> = {
@@ -29,10 +28,8 @@ export default function LeadsView() {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<ApiLead | null>(null);
   const [form, setForm] = useState({ ...BLANK });
-  const { rows, count, error, refreshing, reload } = useList(
-    () => api.leads.list(filter === 'all' ? '' : `?status=${filter}`),
-    [filter]
-  );
+  const [refresh, setRefresh] = useState(0);
+  const reload = () => setRefresh((n) => n + 1);
 
   const openNew = () => { setEditing(null); setForm({ ...BLANK }); setShowForm(true); };
   const openEdit = (l: ApiLead) => {
@@ -79,6 +76,8 @@ export default function LeadsView() {
     }
   };
 
+  const columns = useMemo(columnsDef, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
     <div className="space-y-5 text-[#141414]">
       <ViewHeader
@@ -89,7 +88,6 @@ export default function LeadsView() {
         <Btn onClick={openNew}>
           <Plus className="h-3.5 w-3.5" /> New Lead
         </Btn>
-        <RefreshBtn onClick={reload} spinning={refreshing} />
       </ViewHeader>
 
       {showForm && (
@@ -124,38 +122,43 @@ export default function LeadsView() {
         </Panel>
       )}
 
-      <FilterChips options={FILTERS} value={filter} onChange={setFilter} right={<span className="text-[11px] font-mono text-[#141414]/50">{count} leads</span>} />
-
-      <TableShell
-        headers={['Name', 'Phone', 'Location', 'Source', 'Status', 'Added', '']}
-        loading={rows === null}
-        error={error}
-        empty="No leads in this list yet."
-      >
-        {(rows ?? []).map((l) => (
-          <tr key={l.id} className="hover:bg-[#f0efec]/40 transition">
-            <td className={`${tdCls} font-bold`}>{l.name}</td>
-            <td className={`${tdCls} font-mono`}>{l.phone || '—'}</td>
-            <td className={tdCls}>{l.location || '—'}</td>
-            <td className={tdCls}>{l.source || '—'}</td>
-            <td className={tdCls}><Badge color={STATUS_COLOR[l.status]}>{l.status}</Badge></td>
-            <td className={`${tdCls} font-mono whitespace-nowrap`}>{fmtDateTime(l.created_at)}</td>
-            <td className={`${tdCls} whitespace-nowrap`}>
-              <div className="flex items-center gap-1.5">
-                {(NEXT[l.status] ?? []).map((n) => (
-                  <span key={n.to} className="inline-block">
-                    <Btn variant={n.to === 'lost' ? 'danger' : 'outline'} onClick={() => move(l, n.to)}>
-                      {n.label}
-                    </Btn>
-                  </span>
-                ))}
-                <Btn variant="outline" onClick={() => openEdit(l)} title="Edit lead"><Pencil className="h-3.5 w-3.5" /></Btn>
-                <Btn variant="danger" onClick={() => remove(l)} title="Delete lead"><Trash2 className="h-3.5 w-3.5" /></Btn>
-              </div>
-            </td>
-          </tr>
-        ))}
-      </TableShell>
+      <DataTable<ApiLead>
+        fetcher={(q) => api.leads.list(q)}
+        columns={columns}
+        rowKey={(l) => l.id}
+        searchPlaceholder="Search leads…"
+        emptyMessage="No leads in this list yet."
+        filters={{ status: filter === 'all' ? undefined : filter }}
+        refreshSignal={refresh}
+        toolbar={<FilterChips options={FILTERS} value={filter} onChange={setFilter} />}
+      />
     </div>
   );
+
+  function columnsDef(): Column<ApiLead>[] {
+    return [
+      { header: 'Name', render: (l) => <span className="font-bold">{l.name}</span> },
+      { header: 'Phone', render: (l) => <span className="font-mono">{l.phone || '—'}</span> },
+      { header: 'Location', render: (l) => l.location || '—' },
+      { header: 'Source', render: (l) => l.source || '—' },
+      { header: 'Status', sortKey: 'status', render: (l) => <Badge color={STATUS_COLOR[l.status]}>{l.status}</Badge> },
+      { header: 'Added', sortKey: 'created_at', render: (l) => <span className="font-mono whitespace-nowrap">{fmtDateTime(l.created_at)}</span> },
+      {
+        header: '',
+        render: (l) => (
+          <div className="flex items-center gap-1.5 whitespace-nowrap">
+            {(NEXT[l.status] ?? []).map((n) => (
+              <span key={n.to}>
+                <Btn variant={n.to === 'lost' ? 'danger' : 'outline'} onClick={() => move(l, n.to)}>
+                  {n.label}
+                </Btn>
+              </span>
+            ))}
+            <Btn variant="outline" onClick={() => openEdit(l)} title="Edit lead"><Pencil className="h-3.5 w-3.5" /></Btn>
+            <Btn variant="danger" onClick={() => remove(l)} title="Delete lead"><Trash2 className="h-3.5 w-3.5" /></Btn>
+          </div>
+        ),
+      },
+    ];
+  }
 }

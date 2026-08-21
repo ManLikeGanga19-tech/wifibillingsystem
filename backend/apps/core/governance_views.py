@@ -55,6 +55,7 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
 
     serializer_class = AuditLogSerializer
     permission_classes = [IsPlatformStaff]
+    ordering_fields = ["created_at"]     # search/filter handled by the bespoke params below
 
     def get_queryset(self):
         qs = AuditLog.objects.select_related("actor", "operator")
@@ -100,6 +101,7 @@ class ImpersonationViewSet(viewsets.ReadOnlyModelViewSet):
 
     serializer_class = ImpersonationGrantSerializer
     permission_classes = [IsPlatformStaff]
+    ordering_fields = ["started_at"]
 
     def get_queryset(self):
         qs = ImpersonationGrant.objects.select_related("actor", "operator")

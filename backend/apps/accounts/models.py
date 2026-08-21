@@ -231,6 +231,9 @@ class Subscriber(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        # Deterministic default order (newest first, unique tiebreaker) so paginated lists are
+        # stable and reproducible.
+        ordering = ["-created_at", "-id"]
         constraints = [
             models.UniqueConstraint(
                 fields=["operator", "phone"], name="subscriber_unique_operator_phone"

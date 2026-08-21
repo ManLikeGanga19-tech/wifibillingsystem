@@ -92,6 +92,9 @@ class StaffViewSet(TenantModelViewSet):
     read_capability = STAFF_MANAGE
     write_capability = STAFF_MANAGE
     queryset = User.objects.all().order_by("name", "phone")
+    search_fields = ["name", "phone", "email"]
+    ordering_fields = ["name", "role", "date_joined"]
+    filterset_fields = ["role", "is_active"]
 
     def get_serializer_class(self):
         if self.action == "create":

@@ -2,9 +2,8 @@ import { useState, type FormEvent } from 'react';
 import { Router as RouterIcon, Plus, Plug, RefreshCw, Copy, Check, Loader2, X, Cpu, Pencil, Trash2 } from 'lucide-react';
 import { api, ApiError, ApiRouter, DeviceInfo } from '../api/client';
 import MapPicker from './MapPicker';
-import {
-  Badge, Btn, Field, inputCls, Panel, RefreshBtn, TableShell, tdCls, toast, useList, ViewHeader, fmtDateTime,
-} from './ui';
+import DataTable, { type Column } from './DataTable';
+import { Badge, Btn, Field, inputCls, Panel, toast, ViewHeader, fmtDateTime } from './ui';
 
 function mb(bytes: number | null): string {
   return bytes === null ? '—' : `${Math.round(bytes / 1048576)} MB`;
@@ -21,7 +20,8 @@ export default function RoutersView() {
   const [infoFor, setInfoFor] = useState<ApiRouter | null>(null);
   const [info, setInfo] = useState<DeviceInfo | null>(null);
   const [editRouter, setEditRouter] = useState<ApiRouter | null>(null);
-  const { rows, error, refreshing, reload } = useList(() => api.routers.list());
+  const [refresh, setRefresh] = useState(0);
+  const reload = () => setRefresh((n) => n + 1);
 
   const deleteRouter = async (r: ApiRouter) => {
     if (!confirm(`Delete router "${r.name}"? Clients and sessions on it must be moved first.`)) return;
@@ -107,6 +107,72 @@ export default function RoutersView() {
     }
   };
 
+  function routerColumns(): Column<ApiRouter>[] {
+    return [
+      {
+        header: 'Site', sortKey: 'name',
+        render: (r) => (
+          <span className="font-bold">
+            {r.name}
+            {r.management_host && <span className="block text-[11px] font-mono text-[#141414]/50">{r.management_host}</span>}
+          </span>
+        ),
+      },
+      {
+        header: 'Model',
+        render: (r) => r.board_name ? (
+          <>
+            <span className="font-mono">{r.board_name}</span>
+            {r.serial_number && <span className="block text-[11px] font-mono text-[#141414]/50">SN {r.serial_number}</span>}
+          </>
+        ) : <span className="text-[#141414]/40">—</span>,
+      },
+      {
+        header: 'Status', sortKey: 'status',
+        render: (r) => r.needs_onboarding
+          ? <Badge color="amber">needs setup</Badge>
+          : <Badge color={r.status === 'online' ? 'green' : r.status === 'offline' ? 'red' : 'gray'}>{r.status}</Badge>,
+      },
+      { header: 'RouterOS', render: (r) => <span className="font-mono">{r.routeros_version || '—'}</span> },
+      { header: 'Last seen', sortKey: 'last_seen_at', render: (r) => <span className="font-mono whitespace-nowrap">{fmtDateTime(r.last_seen_at)}</span> },
+      { header: 'Last sync', render: (r) => <span className="font-mono whitespace-nowrap">{fmtDateTime(r.last_sync_at)}</span> },
+      {
+        header: '', className: 'whitespace-nowrap space-x-1.5',
+        render: (r) => (
+          <>
+            {r.needs_onboarding ? (
+              <Btn variant="dark" onClick={() => openScript(r)}>
+                <Copy className="h-3.5 w-3.5" /> {r.enrolled_at ? 'Re-run setup' : 'Setup script'}
+              </Btn>
+            ) : (
+              <>
+                <Btn variant="outline" onClick={() => test(r)} disabled={testing === r.id}>
+                  <Plug className="h-3.5 w-3.5" />
+                  {testing === r.id ? 'Testing…' : 'Test'}
+                </Btn>
+                <Btn variant="outline" onClick={() => resync(r)} title="Push any missing active sessions back onto the router">
+                  <RefreshCw className="h-3.5 w-3.5" /> Re-sync
+                </Btn>
+                <Btn variant="outline" onClick={() => openInfo(r)} title="Live device details">
+                  <Cpu className="h-3.5 w-3.5" /> Details
+                </Btn>
+                <button
+                  onClick={() => openScript(r)}
+                  className="text-[11px] font-mono underline text-[#141414]/50 hover:text-[#141414]"
+                  title="Show the setup script again"
+                >
+                  script
+                </button>
+              </>
+            )}
+            <Btn variant="outline" onClick={() => setEditRouter(r)} title="Edit router"><Pencil className="h-3.5 w-3.5" /></Btn>
+            <Btn variant="danger" onClick={() => deleteRouter(r)} title="Delete router"><Trash2 className="h-3.5 w-3.5" /></Btn>
+          </>
+        ),
+      },
+    ];
+  }
+
   return (
     <div className="space-y-5 text-[#141414]">
       <ViewHeader
@@ -117,7 +183,6 @@ export default function RoutersView() {
         <Btn onClick={() => setShowAdd(!showAdd)}>
           <Plus className="h-3.5 w-3.5" /> Add Router
         </Btn>
-        <RefreshBtn onClick={reload} spinning={refreshing} />
       </ViewHeader>
 
       {showAdd && (
@@ -134,73 +199,15 @@ export default function RoutersView() {
         </Panel>
       )}
 
-      <TableShell
-        headers={['Site', 'Model', 'Status', 'RouterOS', 'Last seen', 'Last sync', '']}
-        loading={rows === null}
-        error={error}
-        empty="No routers yet — add your first site to generate its setup script."
-      >
-        {(rows ?? []).map((r) => (
-          <tr key={r.id} className="hover:bg-[#f0efec]/40 transition">
-            <td className={`${tdCls} font-bold`}>
-              {r.name}
-              {r.management_host && <span className="block text-[11px] font-mono text-[#141414]/50">{r.management_host}</span>}
-            </td>
-            <td className={tdCls}>
-              {r.board_name ? (
-                <>
-                  <span className="font-mono">{r.board_name}</span>
-                  {r.serial_number && <span className="block text-[11px] font-mono text-[#141414]/50">SN {r.serial_number}</span>}
-                </>
-              ) : (
-                <span className="text-[#141414]/40">—</span>
-              )}
-            </td>
-            <td className={tdCls}>
-              {r.needs_onboarding ? (
-                <Badge color="amber">needs setup</Badge>
-              ) : (
-                <Badge color={r.status === 'online' ? 'green' : r.status === 'offline' ? 'red' : 'gray'}>
-                  {r.status}
-                </Badge>
-              )}
-            </td>
-            <td className={`${tdCls} font-mono`}>{r.routeros_version || '—'}</td>
-            <td className={`${tdCls} font-mono whitespace-nowrap`}>{fmtDateTime(r.last_seen_at)}</td>
-            <td className={`${tdCls} font-mono whitespace-nowrap`}>{fmtDateTime(r.last_sync_at)}</td>
-            <td className={`${tdCls} whitespace-nowrap space-x-1.5`}>
-              {r.needs_onboarding ? (
-                // Never set up, OR factory-reset (API user wiped) — same remedy.
-                <Btn variant="dark" onClick={() => openScript(r)}>
-                  <Copy className="h-3.5 w-3.5" /> {r.enrolled_at ? 'Re-run setup' : 'Setup script'}
-                </Btn>
-              ) : (
-                <>
-                  <Btn variant="outline" onClick={() => test(r)} disabled={testing === r.id}>
-                    <Plug className="h-3.5 w-3.5" />
-                    {testing === r.id ? 'Testing…' : 'Test'}
-                  </Btn>
-                  <Btn variant="outline" onClick={() => resync(r)} title="Push any missing active sessions back onto the router">
-                    <RefreshCw className="h-3.5 w-3.5" /> Re-sync
-                  </Btn>
-                  <Btn variant="outline" onClick={() => openInfo(r)} title="Live device details">
-                    <Cpu className="h-3.5 w-3.5" /> Details
-                  </Btn>
-                  <button
-                    onClick={() => openScript(r)}
-                    className="text-[11px] font-mono underline text-[#141414]/50 hover:text-[#141414]"
-                    title="Show the setup script again"
-                  >
-                    script
-                  </button>
-                </>
-              )}
-              <Btn variant="outline" onClick={() => setEditRouter(r)} title="Edit router"><Pencil className="h-3.5 w-3.5" /></Btn>
-              <Btn variant="danger" onClick={() => deleteRouter(r)} title="Delete router"><Trash2 className="h-3.5 w-3.5" /></Btn>
-            </td>
-          </tr>
-        ))}
-      </TableShell>
+      <DataTable<ApiRouter>
+        fetcher={(q) => api.routers.list(q)}
+        columns={routerColumns()}
+        rowKey={(r) => r.id}
+        searchPlaceholder="Search site / host / serial…"
+        emptyMessage="No routers yet — add your first site to generate its setup script."
+        initialOrdering="name"
+        refreshSignal={refresh}
+      />
 
       {/* Script modal */}
       {scriptFor && (

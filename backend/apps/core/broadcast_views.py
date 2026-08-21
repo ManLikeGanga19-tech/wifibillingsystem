@@ -41,6 +41,9 @@ class PlatformBroadcastViewSet(viewsets.ModelViewSet):
 
     serializer_class = PlatformBroadcastSerializer
     queryset = PlatformBroadcast.objects.all()
+    search_fields = ["title", "body"]
+    ordering_fields = ["created_at"]
+    filterset_fields = ["is_active", "level"]
 
     def get_permissions(self):
         if self.request.method in ("GET", "HEAD", "OPTIONS"):

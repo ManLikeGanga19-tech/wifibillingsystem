@@ -239,7 +239,11 @@ class Client(OperatorOwnedModel):
 
     class Meta:
         ordering = ["-created_at"]
-        indexes = [models.Index(fields=["operator", "status"])]
+        indexes = [
+            models.Index(fields=["operator", "status"]),
+            # The default tenant-scoped, newest-first list — an index-covered pagination scan.
+            models.Index(fields=["operator", "-created_at"]),
+        ]
 
     def __str__(self):
         return f"{self.account_number} — {self.full_name}"

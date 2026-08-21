@@ -164,6 +164,9 @@ class PlatformTenantViewSet(viewsets.ModelViewSet):
 
     serializer_class = PlatformTenantSerializer
     http_method_names = ["get", "patch", "post", "head", "options"]
+    search_fields = ["name", "slug"]
+    ordering_fields = ["created_at", "name", "status"]
+    filterset_fields = ["status"]
 
     #: GET actions that are owner-only despite being reads — they expose money or PII. A
     #: plain method check would wave these through to read-only support staff.

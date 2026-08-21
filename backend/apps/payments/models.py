@@ -73,7 +73,11 @@ class Transaction(OperatorOwnedModel):
 
     class Meta:
         ordering = ["-created_at"]
-        indexes = [models.Index(fields=["status", "created_at"])]
+        indexes = [
+            models.Index(fields=["status", "created_at"]),
+            # The default tenant-scoped, newest-first list — an index-covered pagination scan.
+            models.Index(fields=["operator", "-created_at"]),
+        ]
 
     def __str__(self):
         return f"{self.phone} KSh {self.amount} [{self.status}]"
