@@ -196,6 +196,82 @@ class TestPlatformFee:
         assert charge_pppoe_user_fees() == 0
 
 
+class TestOffSystemPayment:
+    """Payments the ISP collected OUTSIDE the paybill (cash, M-Pesa to their own number, bank).
+    They settle the client exactly like a paybill payment — but the platform never held the
+    money, so the withdrawable wallet must NOT move."""
+
+    def test_settles_and_restores_without_crediting_wallet(self):
+        from apps.pppoe.services import record_offsystem_payment
+
+        client = PppoeClientFactory(
+            plan__price=Decimal("2000.00"), status=Client.Status.SUSPENDED
+        )
+        issue_invoice(client, timezone.localdate())  # balance -2000
+        DummyAdapter.calls = []
+        payment = record_offsystem_payment(
+            client, Decimal("2000.00"), method="cash", note="receipt 12"
+        )
+        client.refresh_from_db()
+        # Client side — identical to a paybill payment.
+        assert client.balance == Decimal("0.00")
+        assert client.status == Client.Status.ACTIVE
+        assert client.invoices.first().status == Invoice.Status.PAID
+        assert ("pppoe_enable", client.pppoe_username) in DummyAdapter.calls
+        # Platform side — the ISP already holds this cash, so the wallet does NOT move.
+        assert wallet_balance(client.operator) == Decimal("0.00")
+        # Recorded as a matched, off-system payment with no platform collection cost, so it
+        # still shows in the ISP's revenue report.
+        assert payment.status == C2BPayment.Status.MATCHED
+        assert payment.method == "cash"
+        assert payment.platform_cost == Decimal("0.00")
+
+    def test_works_even_when_operator_cannot_transact(self):
+        """The whole point: an ISP not yet cleared to collect through us can still reconcile a
+        customer who paid THEM directly. This is the money the paybill gate would otherwise HOLD."""
+        from apps.core.models import Operator
+        from apps.pppoe.services import record_offsystem_payment
+
+        # PENDING (exploring, money later) — allowed in the console, but no money moves for them.
+        op = OperatorFactory(slug="unverified-isp", status=Operator.Status.PENDING)
+        assert not op.can_transact
+        client = PppoeClientFactory(
+            operator=op, plan__price=Decimal("1500.00"), status=Client.Status.SUSPENDED
+        )
+        issue_invoice(client, timezone.localdate())
+        record_offsystem_payment(client, Decimal("1500.00"), method="mpesa_direct")
+        client.refresh_from_db()
+        assert client.status == Client.Status.ACTIVE
+        assert client.balance == Decimal("0.00")
+        assert wallet_balance(op) == Decimal("0.00")  # never credited — we never held it
+
+    def test_api_records_payment(self):
+        op = OperatorFactory()
+        client = PppoeClientFactory(operator=op, plan__price=Decimal("2000.00"))
+        issue_invoice(client, timezone.localdate())
+        resp = staff(op).post(
+            f"/api/v1/pppoe/clients/{client.id}/record-payment/",
+            {"amount": "2000", "method": "cash", "note": "cash at the shop"},
+            format="json",
+        )
+        assert resp.status_code == 200
+        client.refresh_from_db()
+        assert client.balance == Decimal("0.00")
+        assert wallet_balance(op) == Decimal("0.00")
+
+    def test_api_rejects_the_paybill_method(self):
+        """This endpoint is for OFF-system money only — a real paybill payment must arrive
+        through Safaricom's C2B callback, never be keyed by hand."""
+        op = OperatorFactory()
+        client = PppoeClientFactory(operator=op, plan__price=Decimal("2000.00"))
+        resp = staff(op).post(
+            f"/api/v1/pppoe/clients/{client.id}/record-payment/",
+            {"amount": "500", "method": "paybill"},
+            format="json",
+        )
+        assert resp.status_code == 400
+
+
 class TestApiAndIsolation:
     def test_client_create_via_api_generates_account(self):
         op = OperatorFactory()

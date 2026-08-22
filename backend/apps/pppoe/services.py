@@ -474,3 +474,51 @@ def record_client_payment(client: Client, amount: Decimal, *, source: str, memo:
           amount=str(amount), source=source)
     _emit(client.operator, "payment.received",
           {**_client_payload(client), "amount": str(amount), "source": source})
+
+
+def record_offsystem_payment(
+    client: Client, amount: Decimal, *, method: str, note: str = "", actor=None
+):
+    """Record a payment the ISP collected OUTSIDE the platform — cash, M-Pesa to their own
+    number, a bank transfer.
+
+    It settles the client's bill and restores their service exactly like a paybill payment,
+    and it counts as the ISP's revenue (a MATCHED C2BPayment, which the revenue report reads).
+    But the platform never held this money, so — unlike a paybill payment — it is NOT credited
+    to the ISP's withdrawable wallet and bears NO platform collection cost. The ISP already has
+    the cash in hand; crediting the wallet would make the platform owe money it never received.
+
+    Deliberately exempt from the can-transact gate: this is the ISP's own money, not ours, so a
+    not-yet-cleared operator can still reconcile a customer who paid them directly. Everything —
+    the payment record, the balance, the invoice settlement, the restore — commits atomically,
+    so a router that can't be reached rolls the whole thing back rather than banking a half-
+    applied payment."""
+    import uuid
+
+    from apps.payments.models import C2BPayment
+
+    with db_transaction.atomic():
+        client = Client.objects.select_for_update().get(pk=client.pk)
+        payment = C2BPayment.objects.create(
+            trans_id=f"OFF-{uuid.uuid4().hex[:20]}",
+            bill_ref=client.account_number,
+            amount=amount,
+            first_name=(client.full_name or "")[:60],
+            operator=client.operator,
+            client=client,
+            status=C2BPayment.Status.MATCHED,
+            method=method,
+            note=note[:200],
+            recorded_by=actor,
+            platform_cost=Decimal("0"),
+        )
+        client.balance = client.balance + amount
+        client.save(update_fields=["balance", "updated_at"])
+        # Settles open invoices oldest-first and restores service if the debt is cleared.
+        # NOTE: no credit_pppoe_payment — the wallet must not move for money we never held.
+        apply_payment_to_invoices(client)
+    audit("pppoe_offsystem_payment", operator=client.operator, actor=actor, target=client,
+          amount=str(amount), method=method)
+    _emit(client.operator, "payment.received",
+          {**_client_payload(client), "amount": str(amount), "source": f"offsystem:{method}"})
+    return payment

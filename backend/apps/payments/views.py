@@ -372,7 +372,7 @@ class PaymentSearchView(APIView):
             {
                 "kind": "pppoe", "phone": p.msisdn, "code": p.trans_id or "",
                 "reference": p.bill_ref or "", "amount": str(p.amount), "status": p.status,
-                "date": p.received_at.isoformat(),
+                "date": p.received_at.isoformat(), "method": p.method,
             }
             for p in (
                 C2BPayment.objects.filter(operator=operator)

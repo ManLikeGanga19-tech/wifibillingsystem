@@ -25,6 +25,7 @@ from apps.accounts.rbac import (
     FINANCE_VIEW,
     HOTSPOT_PLANS,
     NETWORK_WRITE,
+    PAYMENTS_STATUS,
 )
 from apps.core.permissions import RequireTenant, TenantCanTransact, TenantIsOperational
 from apps.core.public import PublicAPIView
@@ -47,6 +48,7 @@ from .services import (
     create_client,
     delete_client,
     provision_client,
+    record_offsystem_payment,
     reset_pppoe_password,
     restore_client,
     suspend_client,
@@ -135,6 +137,10 @@ class ClientViewSet(TenantModelViewSet):
 
     @property
     def write_capability(self):
+        # Recording a payment writes to the books — the delegable "mark paid/unpaid" money
+        # capability, not the client-admin one.
+        if self.action == "record_payment":
+            return PAYMENTS_STATUS
         return (CLIENTS_WRITE, CLIENTS_FIELD) if self.action in self.TECH_ACTIONS else CLIENTS_WRITE
 
     def get_permissions(self):
@@ -321,6 +327,52 @@ class ClientViewSet(TenantModelViewSet):
         except ProvisioningError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
         return Response({"detail": "Restored", "status": client.status})
+
+    @extend_schema(request=OBJECT_REQUEST, responses=OBJECT_RESPONSE)
+    @action(detail=True, methods=["post"], url_path="record-payment")
+    def record_payment(self, request, pk=None):
+        """Record a payment the customer made OUTSIDE the platform (cash, M-Pesa to the ISP's
+        own number, bank). Settles their bill and reconnects them exactly like a paybill
+        payment, and counts as the ISP's revenue — but the platform never held this money, so
+        it is not added to the withdrawable wallet. Deliberately NOT gated on can-transact: it
+        is the ISP's own money, so even a not-yet-cleared operator can reconcile it."""
+        from decimal import Decimal, InvalidOperation
+
+        from apps.payments.models import C2BPayment
+
+        client = self.get_object()
+        try:
+            amount = Decimal(str(request.data.get("amount", "")).strip())
+        except (InvalidOperation, ValueError):
+            amount = Decimal("0")
+        if amount <= 0:
+            return Response(
+                {"detail": "Enter a payment amount greater than zero."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        method = (request.data.get("method") or "").strip()
+        allowed = set(C2BPayment.OFF_SYSTEM_METHODS)
+        if method not in allowed:
+            return Response(
+                {"detail": f"Choose a payment method: {', '.join(sorted(allowed))}."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        note = (request.data.get("note") or "").strip()
+        try:
+            record_offsystem_payment(client, amount, method=method, note=note, actor=request.user)
+        except ProvisioningError as exc:
+            # The books would have rolled back with the failed reconnect — nothing was applied.
+            return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+        client.refresh_from_db()
+        return Response(
+            {
+                "detail": "Payment recorded.",
+                "status": client.status,
+                "balance": str(client.balance),
+            }
+        )
 
     @action(detail=True, methods=["get"])
     def live_status(self, request, pk=None):

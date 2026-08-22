@@ -101,11 +101,36 @@ class C2BPayment(models.Model):
         # restoring service. Released automatically the moment the ISP goes live.
         HELD = "held", "Held — ISP not yet cleared to transact"
 
+    class Method(models.TextChoices):
+        """How the money actually reached the ISP. PAYBILL is the platform rail — money the
+        platform collected and holds, credited to the ISP's withdrawable wallet. Every other
+        method is OFF-SYSTEM: the ISP collected it directly (cash, M-Pesa to their own number,
+        bank), so it settles the client and counts as the ISP's revenue, but the platform never
+        held it — no wallet credit, no collection cost."""
+
+        PAYBILL = "paybill", "Paybill (M-Pesa C2B)"
+        CASH = "cash", "Cash"
+        MPESA_DIRECT = "mpesa_direct", "M-Pesa (direct to ISP)"
+        BANK = "bank", "Bank transfer"
+        OTHER = "other", "Other"
+
+    OFF_SYSTEM_METHODS = (Method.CASH, Method.MPESA_DIRECT, Method.BANK, Method.OTHER)
+
     trans_id = models.CharField(max_length=30, unique=True, db_index=True)
     bill_ref = models.CharField(max_length=30, db_index=True, help_text="Account number typed")
     msisdn = models.CharField(max_length=15, blank=True)
     amount = models.DecimalField(max_digits=12, decimal_places=2)
     first_name = models.CharField(max_length=60, blank=True)
+    # PAYBILL (the platform rail) unless an ISP recorded a payment they collected off-platform.
+    method = models.CharField(
+        max_length=14, choices=Method.choices, default=Method.PAYBILL, db_index=True
+    )
+    # Free-text reference for an off-system payment (an M-Pesa code they read out, a receipt no.).
+    note = models.CharField(max_length=200, blank=True, default="")
+    # Who keyed an off-system payment (null for real paybill traffic, which nobody keys).
+    recorded_by = models.ForeignKey(
+        "accounts.User", null=True, blank=True, on_delete=models.SET_NULL
+    )
     # Set when matched; operator derived from the client
     operator = models.ForeignKey(
         "core.Operator", null=True, blank=True, on_delete=models.SET_NULL

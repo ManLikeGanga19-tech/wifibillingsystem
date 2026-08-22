@@ -1339,6 +1339,16 @@ export interface PppoePlan {
   sort_order: number;
 }
 
+/** Off-system payment methods — money the ISP collected directly, not through the paybill. */
+export type OffSystemMethod = 'cash' | 'mpesa_direct' | 'bank' | 'other';
+
+export const OFF_SYSTEM_METHODS: { value: OffSystemMethod; label: string }[] = [
+  { value: 'cash', label: 'Cash' },
+  { value: 'mpesa_direct', label: 'M-Pesa (to your number)' },
+  { value: 'bank', label: 'Bank transfer' },
+  { value: 'other', label: 'Other' },
+];
+
 export interface PppoeClient {
   id: number;
   account_number: string;
@@ -2228,6 +2238,14 @@ export const api = {
         request<{ detail: string }>(`/pppoe/clients/${id}/suspend/`, { method: 'POST' }),
       restore: (id: number) =>
         request<{ detail: string }>(`/pppoe/clients/${id}/restore/`, { method: 'POST' }),
+      // Record a payment the customer made OUTSIDE the platform (cash, M-Pesa to the ISP's own
+      // number, bank). Settles their bill and reconnects them like a paybill payment, but the
+      // platform never held this money so it is not credited to the withdrawable wallet.
+      recordPayment: (id: number, data: { amount: string; method: OffSystemMethod; note?: string }) =>
+        request<{ detail: string; status: string; balance: string }>(
+          `/pppoe/clients/${id}/record-payment/`,
+          { method: 'POST', body: JSON.stringify(data) },
+        ),
       liveStatus: (id: number) =>
         request<{ online: boolean }>(`/pppoe/clients/${id}/live_status/`),
       // Hybrid reset: pass a password to set it, or omit to have the server generate one.

@@ -1,6 +1,6 @@
 import React, { useEffect, useState, type FormEvent } from 'react';
-import { Users, Plus, Ban, RotateCcw, Zap, Printer, X, Loader2, Wifi, WifiOff, AlertTriangle, Key, Copy, Eye, EyeOff, Trash2, RefreshCw, Upload, Download, Pencil, Save, Search, MoreHorizontal, ArrowRight } from 'lucide-react';
-import { api, ApiError, PppoeClient, PppoePlan, ApiRouter, AccessPoint, FibrePoint, PppoeUsageSummary, PppoeChurnSummary, CapacityWarning, PppoeImportRow, PppoeImportItem, PppoeCsvPreview, PppoeImportResult } from '../api/client';
+import { Users, Plus, Ban, RotateCcw, Zap, Printer, X, Loader2, Wifi, WifiOff, AlertTriangle, Key, Copy, Eye, EyeOff, Trash2, RefreshCw, Upload, Download, Pencil, Save, Search, MoreHorizontal, ArrowRight, Banknote } from 'lucide-react';
+import { api, ApiError, PppoeClient, PppoePlan, ApiRouter, AccessPoint, FibrePoint, PppoeUsageSummary, PppoeChurnSummary, CapacityWarning, PppoeImportRow, PppoeImportItem, PppoeCsvPreview, PppoeImportResult, OFF_SYSTEM_METHODS, type OffSystemMethod } from '../api/client';
 import MapPicker from './MapPicker';
 import DataTable, { type Column } from './DataTable';
 import {
@@ -134,11 +134,12 @@ function NextDueCell({ client }: { client: PppoeClient }) {
 /** The per-row tools, behind a menu. Keeping only the status action inline stops the row
  *  turning into a wall of buttons once an ISP has a few hundred clients. */
 function RowMenu({
-  onEdit, onCredentials, onSheet,
+  onEdit, onCredentials, onSheet, onRecordPayment,
 }: {
   onEdit: () => void;
   onCredentials: () => void;
   onSheet: () => void;
+  onRecordPayment: () => void;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -176,6 +177,7 @@ function RowMenu({
           onClick={(e) => e.stopPropagation()}
         >
           <MenuItem icon={<Pencil className="h-3.5 w-3.5" />} label="Edit details" onClick={pick(onEdit)} />
+          <MenuItem icon={<Banknote className="h-3.5 w-3.5" />} label="Record payment" onClick={pick(onRecordPayment)} />
           <MenuItem icon={<Key className="h-3.5 w-3.5" />} label="Credentials" onClick={pick(onCredentials)} />
           <MenuItem icon={<Printer className="h-3.5 w-3.5" />} label="Account sheet" onClick={pick(onSheet)} />
         </div>
@@ -235,6 +237,7 @@ export default function PppoeClientsView() {
   const [sheetFor, setSheetFor] = useState<PppoeClient | null>(null);
   const [credsFor, setCredsFor] = useState<PppoeClient | null>(null);
   const [editFor, setEditFor] = useState<PppoeClient | null>(null);
+  const [payFor, setPayFor] = useState<PppoeClient | null>(null);
   const [showImport, setShowImport] = useState(false);
   const [showExport, setShowExport] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -389,7 +392,7 @@ export default function PppoeClientsView() {
               <RotateCcw className="h-3.5 w-3.5" /> Restore
             </Btn>
           )}
-          <RowMenu onEdit={() => setEditFor(c)} onCredentials={() => setCredsFor(c)} onSheet={() => setSheetFor(c)} />
+          <RowMenu onEdit={() => setEditFor(c)} onCredentials={() => setCredsFor(c)} onSheet={() => setSheetFor(c)} onRecordPayment={() => setPayFor(c)} />
         </div>
       ),
     },
@@ -515,6 +518,13 @@ export default function PppoeClientsView() {
       />
 
       {sheetFor && <AccountSheet client={sheetFor} onClose={() => setSheetFor(null)} />}
+      {payFor && (
+        <PaymentDialog
+          client={payFor}
+          onClose={() => setPayFor(null)}
+          onRecorded={() => { setPayFor(null); reload(); }}
+        />
+      )}
       {credsFor && (
         <CredentialsDialog
           client={credsFor}
@@ -1297,6 +1307,113 @@ function Row({ label, value }: { label: string; value: string }) {
     <div className="flex justify-between">
       <span className="opacity-50">{label}</span>
       <b>{value}</b>
+    </div>
+  );
+}
+
+/**
+ * Record a payment the customer made OUTSIDE the platform (cash, M-Pesa to the ISP's own
+ * number, a bank transfer). It settles their bill and reconnects them exactly like a paybill
+ * payment — but the platform never held this money, so it is NOT added to the withdrawable
+ * wallet. That is deliberate: the ISP already has the cash in hand.
+ */
+function PaymentDialog({
+  client, onClose, onRecorded,
+}: {
+  client: PppoeClient;
+  onClose: () => void;
+  onRecorded: () => void;
+}) {
+  const [amount, setAmount] = useState('');
+  const [method, setMethod] = useState<OffSystemMethod>('cash');
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const owed = Number(client.balance) < 0 ? Math.abs(Number(client.balance)) : 0;
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    const n = Number(amount);
+    if (!Number.isFinite(n) || n <= 0) {
+      toast('error', 'Enter a payment amount greater than zero.');
+      return;
+    }
+    setBusy(true);
+    try {
+      const r = await api.pppoe.clients.recordPayment(client.id, { amount, method, note: note.trim() });
+      toast('success', `Payment recorded — ${client.full_name} is now ${r.status}.`);
+      onRecorded();
+    } catch (err) {
+      toast('error', err instanceof ApiError ? err.message : 'Could not record the payment.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-[#141414]/50 flex items-center justify-center p-4" onClick={onClose}>
+      <form
+        className="bg-white border border-[#141414] w-full max-w-md"
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={submit}
+      >
+        <div className="flex items-center justify-between p-4 border-b border-[#141414]">
+          <h3 className="font-bold font-mono uppercase text-sm flex items-center gap-2">
+            <Banknote className="h-4 w-4" /> Record payment
+          </h3>
+          <button type="button" onClick={onClose} className="cursor-pointer"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="p-5 space-y-4">
+          <div className="bg-[#f0efec] border border-[#141414]/20 p-3 text-xs font-mono">
+            <div className="flex justify-between"><span className="opacity-60">Client</span><b>{client.full_name}</b></div>
+            <div className="flex justify-between"><span className="opacity-60">Account</span><b>{client.account_number}</b></div>
+            <div className="flex justify-between">
+              <span className="opacity-60">Balance</span>
+              <b className={Number(client.balance) < 0 ? 'text-[#B22222]' : ''}>{fmtKsh(client.balance)}</b>
+            </div>
+          </div>
+
+          <Field label="Amount received (KSh)">
+            <input
+              type="number" min="1" step="0.01" required autoFocus value={amount}
+              onChange={(e) => setAmount(e.target.value)} className={inputCls}
+              placeholder={owed ? String(owed) : '0'}
+            />
+          </Field>
+          {owed > 0 && (
+            <button
+              type="button"
+              onClick={() => setAmount(String(owed))}
+              className="-mt-2 text-[11px] font-mono text-[#141414]/60 underline hover:text-[#141414] cursor-pointer"
+            >
+              Pay the full {fmtKsh(String(owed))} owed
+            </button>
+          )}
+
+          <Field label="How they paid">
+            <select value={method} onChange={(e) => setMethod(e.target.value as OffSystemMethod)} className={inputCls}>
+              {OFF_SYSTEM_METHODS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+            </select>
+          </Field>
+
+          <Field label="Reference / note (optional)">
+            <input value={note} onChange={(e) => setNote(e.target.value)} className={inputCls} placeholder="M-Pesa code, receipt no., who took it…" />
+          </Field>
+
+          <p className="text-[11px] leading-relaxed text-[#141414]/55 font-sans border-t border-[#141414]/10 pt-3">
+            This settles their bill and reconnects them, just like a paybill payment — and it shows in
+            your revenue. It is <b>not</b> added to your withdrawable WIFI.OS wallet, because this money
+            went straight to you, not through the platform.
+          </p>
+        </div>
+        <div className="p-4 border-t border-[#141414] flex justify-end gap-2">
+          <Btn type="button" variant="outline" onClick={onClose}>Cancel</Btn>
+          <Btn type="submit" variant="green" disabled={busy}>
+            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+            Record payment
+          </Btn>
+        </div>
+      </form>
     </div>
   );
 }
