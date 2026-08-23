@@ -106,6 +106,13 @@ class TestMssClampHeal:
         DummyAdapter.calls = []
         assert heal_pppoe_mss_clamps() == 0
 
+    def test_heal_action_restores_clamp_now(self):
+        router = RouterFactory()
+        DummyAdapter.calls = []
+        resp = staff(router.operator).post(f"/api/v1/routers/{router.id}/heal-mss-clamp/")
+        assert resp.status_code == 200
+        assert ("mss_clamp", router.pk) in DummyAdapter.calls
+
 
 class TestSamplePruning:
     def test_prunes_old_samples_only(self):

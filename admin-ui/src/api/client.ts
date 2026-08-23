@@ -2239,6 +2239,9 @@ export const api = {
     diagnose: (id: number) => request<RouterDiagnostics>(`/routers/${id}/diagnose/`),
     /** Recent CPU/mem/active-user samples + 24h peaks, for the load trend. */
     healthTrend: (id: number) => request<RouterHealthTrend>(`/routers/${id}/health-trend/`),
+    /** Re-assert the PPPoE TCP-MSS clamp now (idempotent), instead of waiting for the nightly heal. */
+    healMssClamp: (id: number) =>
+      request<{ detail: string }>(`/routers/${id}/heal-mss-clamp/`, { method: 'POST' }),
   },
 
   tickets: {

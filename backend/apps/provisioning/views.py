@@ -184,6 +184,26 @@ class RouterViewSet(TenantModelViewSet):
             }
         )
 
+    @extend_schema(request=OBJECT_REQUEST, responses=OBJECT_RESPONSE,
+                   summary="Re-assert the PPPoE TCP-MSS clamp on this router now")
+    @action(detail=True, methods=["post"], url_path="heal-mss-clamp")
+    def heal_mss_clamp(self, request, pk=None):
+        """Restore the router-wide TCP-MSS clamp immediately, instead of waiting for the nightly
+        self-heal. Idempotent (no-op if already present), so it is safe to click any time — it
+        fixes the classic PPPoE 'pages half-load / HTTPS crawls' fault the moment it is found."""
+        router = self.get_object()
+        try:
+            get_adapter(router).ensure_pppoe_mss_clamp()
+        except ProvisioningError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+        audit(
+            "router_mss_clamp_healed",
+            operator=router.operator, actor=request.user, target=router,
+        )
+        return Response(
+            {"detail": "TCP-MSS clamp restored. Clients recover on their next connection."}
+        )
+
     @extend_schema(responses=OBJECT_RESPONSE, summary="Recent load trend for a router")
     @action(detail=True, methods=["get"], url_path="health-trend")
     def health_trend(self, request, pk=None):

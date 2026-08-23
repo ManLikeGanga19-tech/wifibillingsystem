@@ -297,15 +297,31 @@ function DiagnoseModal({ router, onClose }: { router: ApiRouter; onClose: () => 
   const [diag, setDiag] = useState<RouterDiagnostics | null>(null);
   const [trend, setTrend] = useState<RouterHealthTrend | null>(null);
   const [error, setError] = useState('');
+  const [healing, setHealing] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let live = true;
+    setDiag(null);
     api.routers.diagnose(router.id)
       .then((d) => { if (live) setDiag(d); })
       .catch((e) => { if (live) setError(e instanceof Error ? e.message : 'Could not reach the router.'); });
     api.routers.healthTrend(router.id).then((t) => { if (live) setTrend(t); }).catch(() => {});
     return () => { live = false; };
-  }, [router.id]);
+  }, [router.id, reloadKey]);
+
+  const healClamp = async () => {
+    setHealing(true);
+    try {
+      const r = await api.routers.healMssClamp(router.id);
+      toast('success', r.detail);
+      setReloadKey((k) => k + 1);  // re-diagnose so the panel shows it present now
+    } catch (e) {
+      toast('error', e instanceof ApiError ? e.message : 'Could not restore the clamp.');
+    } finally {
+      setHealing(false);
+    }
+  };
 
   const hits: string[] = [];
   if (diag) {
@@ -356,10 +372,16 @@ function DiagnoseModal({ router, onClose }: { router: ApiRouter; onClose: () => 
             <div className={`flex items-center gap-2 border px-3 py-2 ${clamp === false ? 'border-[#B22222] bg-[#B22222]/5 text-[#B22222]' : 'border-[#141414]/15'}`}>
               {clamp === true && <Check className="h-3.5 w-3.5 text-[#228B22]" />}
               {clamp === false && <AlertTriangle className="h-3.5 w-3.5" />}
-              <span>
+              <span className="flex-1">
                 TCP-MSS clamp:{' '}
                 <b>{clamp === true ? 'present' : clamp === false ? 'MISSING' : 'unknown'}</b>
               </span>
+              {clamp === false && (
+                <Btn variant="green" onClick={healClamp} disabled={healing}>
+                  {healing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                  Restore now
+                </Btn>
+              )}
             </div>
 
             {/* Oversubscription */}
