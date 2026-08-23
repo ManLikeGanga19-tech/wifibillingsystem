@@ -10,7 +10,8 @@ from rest_framework.test import APIClient
 from apps.accounts.models import Role
 from apps.provisioning.adapters.base import DeviceInfo
 from apps.provisioning.adapters.dummy import DummyAdapter
-from apps.provisioning.models import RouterHealthSample
+from apps.provisioning.adapters.mikrotik import MSS_CLAMP_COMMENT, MikroTikRestAdapter
+from apps.provisioning.models import Router, RouterHealthSample
 from apps.provisioning.tasks import (
     _record_health_sample,
     heal_pppoe_mss_clamps,
@@ -112,6 +113,61 @@ class TestMssClampHeal:
         resp = staff(router.operator).post(f"/api/v1/routers/{router.id}/heal-mss-clamp/")
         assert resp.status_code == 200
         assert ("mss_clamp", router.pk) in DummyAdapter.calls
+
+
+class TestMssClampClientSideMatch:
+    """RouterOS REST does NOT match `?comment=` on a spaced/colon'd comment — it returns
+    nothing. The old code trusted that filter, so it never saw the clamp and re-added a
+    duplicate on every heal. These pin the client-side match + de-dup."""
+
+    def _adapter(self):
+        r = RouterFactory(
+            provisioning_backend=Router.Backend.MIKROTIK_REST,
+            management_host="10.0.0.9", password="x",
+        )
+        return MikroTikRestAdapter(r)
+
+    def _mock_client(self, mocker, adapter, mangle_rows):
+        mc = mocker.MagicMock()
+
+        def _get(path, params=None):
+            resp = mocker.MagicMock(status_code=200)
+            # RouterOS ignores the ?comment filter — return the full table regardless.
+            resp.json.return_value = mangle_rows if path == "/ip/firewall/mangle" else []
+            return resp
+
+        mc.get.side_effect = _get
+        mc.__enter__ = mocker.MagicMock(return_value=mc)
+        mc.__exit__ = mocker.MagicMock(return_value=False)
+        mocker.patch.object(adapter, "_client", return_value=mc)
+        return mc
+
+    def test_finds_clamp_despite_broken_query_filter(self, mocker):
+        adapter = self._adapter()
+        self._mock_client(mocker, adapter, [{".id": "*1", "comment": MSS_CLAMP_COMMENT}])
+        assert adapter._clamp_rule_ids(adapter._client()) == ["*1"]
+
+    def test_does_not_add_a_duplicate_when_present(self, mocker):
+        adapter = self._adapter()
+        mc = self._mock_client(mocker, adapter, [{".id": "*1", "comment": MSS_CLAMP_COMMENT}])
+        adapter.ensure_pppoe_mss_clamp()
+        mc.put.assert_not_called()
+
+    def test_adds_when_absent(self, mocker):
+        adapter = self._adapter()
+        mc = self._mock_client(mocker, adapter, [{".id": "*7", "comment": "something else"}])
+        adapter.ensure_pppoe_mss_clamp()
+        mc.put.assert_called_once()
+
+    def test_cleans_up_duplicates(self, mocker):
+        adapter = self._adapter()
+        mc = self._mock_client(mocker, adapter, [
+            {".id": "*1", "comment": MSS_CLAMP_COMMENT},
+            {".id": "*2", "comment": MSS_CLAMP_COMMENT},
+        ])
+        adapter.ensure_pppoe_mss_clamp()
+        mc.put.assert_not_called()
+        mc.delete.assert_called_once_with("/ip/firewall/mangle/*2")
 
 
 class TestSamplePruning:

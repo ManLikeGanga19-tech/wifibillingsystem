@@ -529,6 +529,17 @@ class MikroTikRestAdapter(ProvisioningAdapter):
                 f"kick_pppoe_session failed on {self.router}: {exc}"
             ) from exc
 
+    def _clamp_rule_ids(self, c) -> list[str]:
+        """IDs of our MSS-clamp mangle rules, matched CLIENT-SIDE.
+
+        RouterOS REST query-param filtering (`?comment=...`) does NOT match a comment that
+        contains spaces and a colon — it silently returns nothing. Relying on it made the
+        adapter both fail to SEE the clamp and, thinking it absent, ADD a fresh duplicate on
+        every heal. So we read the rules and compare the comment here instead."""
+        resp = c.get("/ip/firewall/mangle", params={".proplist": ".id,comment"})
+        resp.raise_for_status()
+        return [row[".id"] for row in resp.json() if row.get("comment") == MSS_CLAMP_COMMENT]
+
     def ensure_pppoe_mss_clamp(self) -> ProvisionResult:
         """Add the forward-chain TCP-MSS clamp (clamp-to-pmtu) if it isn't already there.
         Idempotent via a WIFI.OS comment, so it's safe to call on every provision. One rule
@@ -544,12 +555,14 @@ class MikroTikRestAdapter(ProvisioningAdapter):
         }
         try:
             with self._client() as c:
-                existing = c.get(
-                    "/ip/firewall/mangle", params={"comment": MSS_CLAMP_COMMENT}
-                )
-                existing.raise_for_status()
-                if not existing.json():
+                ids = self._clamp_rule_ids(c)
+                if not ids:
                     c.put("/ip/firewall/mangle", json=rule).raise_for_status()
+                elif len(ids) > 1:
+                    # Clean up duplicates the old query-filter bug may have piled up: one
+                    # clamp is enough, keep the first and drop the rest.
+                    for extra in ids[1:]:
+                        c.delete(f"/ip/firewall/mangle/{extra}").raise_for_status()
             return ProvisionResult(ok=True, message="mss clamp ensured")
         except httpx.HTTPError as exc:
             raise ProvisioningError(
@@ -581,11 +594,10 @@ class MikroTikRestAdapter(ProvisioningAdapter):
                 if fm is not None and tm:
                     diag.mem_used_pct = 100 - round(100 * fm / tm)
 
-                # The MSS clamp — a missing one is the classic PPPoE slowness.
+                # The MSS clamp — a missing one is the classic PPPoE slowness. Matched
+                # client-side: the `?comment=` filter does not match a spaced comment.
                 try:
-                    mangle = c.get("/ip/firewall/mangle", params={"comment": MSS_CLAMP_COMMENT})
-                    mangle.raise_for_status()
-                    diag.mss_clamp_present = bool(mangle.json())
+                    diag.mss_clamp_present = bool(self._clamp_rule_ids(c))
                 except httpx.HTTPError:
                     diag.notes.append("could not read the firewall mangle rules")
 
