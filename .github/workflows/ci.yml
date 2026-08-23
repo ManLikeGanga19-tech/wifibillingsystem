@@ -210,29 +210,56 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Secrets go through env, not inline ${{ }} in the shell body: it keeps a value with a
+      # stray newline/space or shell metacharacter from mangling the command (or worse).
       - name: Load the deploy key
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_SSH_PORT: ${{ secrets.VPS_SSH_PORT }}
         run: |
+          set -euo pipefail
+          if [ -z "${VPS_HOST:-}" ] || [ -z "${VPS_SSH_KEY:-}" ]; then
+            echo "::error::VPS_HOST and VPS_SSH_KEY must be set as repository secrets." >&2
+            exit 1
+          fi
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
-          printf '%s\n' "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+          echo "${VPS_SSH_PORT:-22}" > ~/.ssh/wifios_port  # passed to the later steps
+          # Pin the host key when we can reach it — but DON'T hard-fail on a transient
+          # keyscan error (and surface WHY, instead of the old 2>/dev/null that hid it). The
+          # sync/build steps use StrictHostKeyChecking=accept-new, so a first/blip connect
+          # still succeeds and pins the key then.
+          if ! ssh-keyscan -p "${VPS_SSH_PORT:-22}" -H "$VPS_HOST" >> ~/.ssh/known_hosts 2>/tmp/keyscan.err; then
+            echo "::warning::ssh-keyscan could not reach $VPS_HOST:${VPS_SSH_PORT:-22} — $(head -1 /tmp/keyscan.err). If the deploy also fails to connect below, the box is unreachable from the runner (down, wrong SSH port, or a firewall blocking GitHub's IPs)."
+          fi
 
       # Push the source the runner already checked out. We do NOT --delete (the VPS holds
       # the .env and Caddy's cert volume, which are not in the repo).
       - name: Sync source to the VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
         run: |
-          rsync -az -e "ssh -i ~/.ssh/deploy_key" \
+          set -euo pipefail
+          port="$(cat ~/.ssh/wifios_port)"
+          rsync -az -e "ssh -i ~/.ssh/deploy_key -p $port -o StrictHostKeyChecking=accept-new" \
             --exclude node_modules --exclude .git --exclude dist \
             --exclude __pycache__ --exclude '*.pyc' --exclude .pytest_cache \
             backend admin-ui super-admin portal marketing docs-site deploy \
-            "deploy@${{ secrets.VPS_HOST }}:~/wifios/"
+            "deploy@${VPS_HOST}:~/wifios/"
 
       # Rebuild, run migrations (the api container migrates on boot), and roll. Caddy is
       # restarted (not reloaded) so Caddyfile changes always take — a graceful reload has
       # been observed to keep a stale header policy.
       - name: Build, migrate, and bring up
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
         run: |
-          ssh -i ~/.ssh/deploy_key "deploy@${{ secrets.VPS_HOST }}" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          port="$(cat ~/.ssh/wifios_port)"
+          ssh -i ~/.ssh/deploy_key -p "$port" -o StrictHostKeyChecking=accept-new \
+            "deploy@${VPS_HOST}" 'bash -s' <<'REMOTE'
           set -e
           cd ~/wifios/deploy
           C="docker compose -f docker-compose.prod.yml --env-file .env --profile staging"
