@@ -13,11 +13,13 @@ from .base import (
     ActiveSession,
     DeviceInfo,
     HostEntry,
+    InterfaceRate,
     PppoeSecret,
     ProvisioningAdapter,
     ProvisioningAuthError,
     ProvisioningError,
     ProvisionResult,
+    SpeedDiagnostics,
 )
 
 
@@ -553,6 +555,86 @@ class MikroTikRestAdapter(ProvisioningAdapter):
             raise ProvisioningError(
                 f"ensure_pppoe_mss_clamp failed on {self.router}: {exc}"
             ) from exc
+
+    def get_speed_diagnostics(self) -> SpeedDiagnostics:
+        """Read-only snapshot for the 'clients are slow' investigation. Each sub-read is
+        isolated so a router that answers most calls but not one still returns what it can.
+        Interface throughput is two counter reads ~1s apart — plain GETs, no streaming."""
+        import time
+
+        diag = SpeedDiagnostics()
+        iface_props = {".proplist": "name,rx-byte,tx-byte,running"}
+        try:
+            with self._client() as c:
+                res = c.get("/system/resource")
+                if res.status_code in (401, 403):
+                    raise ProvisioningAuthError(
+                        f"{self.router} rejected our API credentials (status {res.status_code})"
+                    )
+                res.raise_for_status()
+                r = res.json()
+                diag.reachable = True
+                diag.board_name = r.get("board-name", "")
+                diag.uptime = r.get("uptime", "")
+                diag.cpu_load = _to_int(r.get("cpu-load"))
+                fm, tm = _to_int(r.get("free-memory")), _to_int(r.get("total-memory"))
+                if fm is not None and tm:
+                    diag.mem_used_pct = 100 - round(100 * fm / tm)
+
+                # The MSS clamp — a missing one is the classic PPPoE slowness.
+                try:
+                    mangle = c.get("/ip/firewall/mangle", params={"comment": MSS_CLAMP_COMMENT})
+                    mangle.raise_for_status()
+                    diag.mss_clamp_present = bool(mangle.json())
+                except httpx.HTTPError:
+                    diag.notes.append("could not read the firewall mangle rules")
+
+                # Simple-queue count — a double-limit (profile + leftover queue) shows here.
+                try:
+                    q = c.get("/queue/simple", params={".proplist": ".id"})
+                    q.raise_for_status()
+                    diag.simple_queue_count = len(q.json())
+                except httpx.HTTPError:
+                    diag.notes.append("could not read simple queues")
+
+                try:
+                    a = c.get("/ppp/active", params={".proplist": ".id"})
+                    a.raise_for_status()
+                    diag.pppoe_active_count = len(a.json())
+                except httpx.HTTPError:
+                    diag.notes.append("could not read PPPoE active sessions")
+
+                # Live throughput: delta of the byte counters over ~1s → Mbps per interface.
+                try:
+                    r1 = c.get("/interface", params=iface_props).json()
+                    time.sleep(1)
+                    r2 = c.get("/interface", params=iface_props).json()
+                    first = {r.get("name"): r for r in r1}
+                    second = {r.get("name"): r for r in r2}
+                    rates: list[InterfaceRate] = []
+                    for name, s in second.items():
+                        f = first.get(name)
+                        # A dynamic per-client PPPoE interface is not the uplink; skip them.
+                        if not f or name.startswith("<pppoe-") or s.get("running") != "true":
+                            continue
+                        rx0, rx1 = _to_int(f.get("rx-byte")), _to_int(s.get("rx-byte"))
+                        tx0, tx1 = _to_int(f.get("tx-byte")), _to_int(s.get("tx-byte"))
+                        if None in (rx0, rx1, tx0, tx1):
+                            continue
+                        rates.append(InterfaceRate(
+                            name=name,
+                            rx_mbps=round(max(0, rx1 - rx0) * 8 / 1_000_000, 2),
+                            tx_mbps=round(max(0, tx1 - tx0) * 8 / 1_000_000, 2),
+                        ))
+                    rates.sort(key=lambda x: x.rx_mbps + x.tx_mbps, reverse=True)
+                    diag.top_interfaces = rates[:5]
+                except httpx.HTTPError:
+                    diag.notes.append("could not read interface throughput")
+        except ProvisioningAuthError:
+            raise
+        except httpx.HTTPError as exc:
+            raise ProvisioningError(f"speed diagnostics failed on {self.router}: {exc}") from exc
+        return diag
 
     def get_device_info(self) -> DeviceInfo:
         """Query the router's identity + live health. Stable fields are persisted

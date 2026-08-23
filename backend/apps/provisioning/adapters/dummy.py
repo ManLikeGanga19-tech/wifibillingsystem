@@ -4,9 +4,11 @@ from .base import (
     ActiveSession,
     DeviceInfo,
     HostEntry,
+    InterfaceRate,
     PppoeSecret,
     ProvisioningAdapter,
     ProvisionResult,
+    SpeedDiagnostics,
 )
 
 
@@ -100,6 +102,19 @@ class DummyAdapter(ProvisioningAdapter):
     def ensure_pppoe_mss_clamp(self) -> ProvisionResult:
         DummyAdapter.calls.append(("mss_clamp", self.router.pk))
         return ProvisionResult(ok=True, message="mss clamp ensured")
+
+    def get_speed_diagnostics(self) -> SpeedDiagnostics:
+        return SpeedDiagnostics(
+            reachable=True,
+            board_name="DummyBoard",
+            uptime="0s",
+            cpu_load=0,
+            mem_used_pct=0,
+            mss_clamp_present=True,
+            simple_queue_count=0,
+            pppoe_active_count=len(DummyAdapter.pppoe_active),
+            top_interfaces=[InterfaceRate(name="ether1", rx_mbps=0.0, tx_mbps=0.0)],
+        )
 
     # -- Static IP (records calls for test assertions) --------------------
     def ensure_static_queue(self, client) -> ProvisionResult:

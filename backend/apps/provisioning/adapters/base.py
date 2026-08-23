@@ -76,6 +76,38 @@ class DeviceInfo:
     active_users: int | None = None
 
 
+@dataclass
+class InterfaceRate:
+    """A live throughput snapshot for one interface (Mbps in each direction), used to
+    see whether the WAN uplink is pinned at its ceiling."""
+
+    name: str
+    rx_mbps: float = 0.0
+    tx_mbps: float = 0.0
+
+
+@dataclass
+class SpeedDiagnostics:
+    """Read-only signals for the 'my clients are slow' investigation. Everything here is
+    observed, never changed, so it is safe to run against production hardware."""
+
+    reachable: bool = False
+    board_name: str = ""
+    uptime: str = ""
+    cpu_load: int | None = None
+    mem_used_pct: int | None = None
+    # Is the router-wide TCP-MSS clamp present? A missing clamp is the classic PPPoE
+    # 'pages half-load / HTTPS crawls' fault. None = could not read it.
+    mss_clamp_present: bool | None = None
+    # How many /queue/simple exist — a sanity check for double-limiting (a client capped by
+    # BOTH a PPPoE profile and a leftover simple queue). None = could not read it.
+    simple_queue_count: int | None = None
+    pppoe_active_count: int | None = None
+    # Busiest interfaces right now — the WAN uplink shows here when it is saturated.
+    top_interfaces: list["InterfaceRate"] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+
+
 class ProvisioningAdapter(ABC):
     def __init__(self, router):
         self.router = router
@@ -162,6 +194,12 @@ class ProvisioningAdapter(ABC):
         ~1480, below Ethernet's 1500) don't get slow or hung connections to the many sites
         that break Path-MTU Discovery. Router-wide and idempotent; default no-op."""
         return ProvisionResult(ok=True, message="noop")
+
+    # -- Diagnostics (read-only) -------------------------------------------
+    def get_speed_diagnostics(self) -> "SpeedDiagnostics":
+        """Observe the signals behind a 'clients are slow' report — CPU, memory, the MSS
+        clamp, queue count, live throughput. Read-only; default reports nothing."""
+        return SpeedDiagnostics(reachable=True, notes=["adapter has no diagnostics"])
 
     # -- Static IP (broadband, no login) -----------------------------------
     # A static client's CPE is configured with a fixed IP; WIFI.OS only enforces the plan.

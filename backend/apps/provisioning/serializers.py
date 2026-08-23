@@ -20,6 +20,7 @@ class RouterSerializer(serializers.ModelSerializer):
             "use_tls",
             "verify_tls",
             "provisioning_backend",
+            "uplink_mbps",
             "status",
             "last_seen_at",
             "last_sync_at",

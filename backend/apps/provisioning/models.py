@@ -55,6 +55,14 @@ class Router(OperatorOwnedModel):
     last_seen_at = models.DateTimeField(null=True, blank=True)
     is_active = models.BooleanField(default=True)
 
+    # The site's WAN uplink in Mbps. Optional — set it and the console can show the
+    # oversubscription ratio (sold Mbps vs uplink), the bandwidth analogue of the
+    # sector-capacity warning, so an ISP can see when a site is sold past its pipe.
+    uplink_mbps = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text="WAN uplink capacity in Mbps (for the oversubscription check)",
+    )
+
     # Which captive-portal address this router is actually sending customers to, and when
     # we last confirmed it. After a subdomain change these say, per router, whether the
     # new address really landed — an offline router keeps redirecting to the old one, and
@@ -172,6 +180,29 @@ class RouterHealthCheck(models.Model):
 
     def __str__(self):
         return f"{self.router.name} {'up' if self.online else 'down'} @ {self.checked_at}"
+
+
+class RouterHealthSample(models.Model):
+    """A point-in-time load reading, captured on the health-check cadence whenever a router is
+    reachable. Trends the very signal the on-demand `router_diagnose` reads live — so a nightly
+    CPU spike becomes visible ('pegged 100% at 20:00') instead of only showing if you happen to
+    look at peak. Cheap and append-only; pruned to a rolling window."""
+
+    operator = models.ForeignKey(
+        "core.Operator", on_delete=models.CASCADE, related_name="router_health_samples"
+    )
+    router = models.ForeignKey(Router, on_delete=models.CASCADE, related_name="health_samples")
+    cpu_load = models.PositiveSmallIntegerField(null=True, blank=True)
+    mem_used_pct = models.PositiveSmallIntegerField(null=True, blank=True)
+    active_users = models.PositiveIntegerField(null=True, blank=True)
+    sampled_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["-sampled_at"]
+        indexes = [models.Index(fields=["router", "-sampled_at"])]
+
+    def __str__(self):
+        return f"{self.router.name} cpu={self.cpu_load}% @ {self.sampled_at}"
 
 
 class RouterOutage(models.Model):

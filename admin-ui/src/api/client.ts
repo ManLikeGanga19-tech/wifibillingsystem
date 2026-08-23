@@ -407,6 +407,37 @@ export interface ApiRouter {
   is_reachable: boolean;
   needs_onboarding: boolean;
   is_active: boolean;
+  /** WAN uplink capacity in Mbps — powers the oversubscription check. */
+  uplink_mbps: number | null;
+}
+
+export interface RouterInterfaceRate {
+  name: string;
+  rx_mbps: number;
+  tx_mbps: number;
+}
+
+export interface RouterDiagnostics {
+  reachable: boolean;
+  cpu_load: number | null;
+  mem_used_pct: number | null;
+  uptime: string;
+  mss_clamp_present: boolean | null;
+  simple_queue_count: number | null;
+  pppoe_active_count: number | null;
+  top_interfaces: RouterInterfaceRate[];
+  notes: string[];
+  active_clients: number;
+  sold_download_mbps: number;
+  uplink_mbps: number | null;
+  oversubscription_ratio: number | null;
+}
+
+export interface RouterHealthTrend {
+  samples: { at: string; cpu_load: number | null; mem_used_pct: number | null; active_users: number | null }[];
+  peak_cpu_24h: number | null;
+  peak_mem_24h: number | null;
+  peak_users_24h: number | null;
 }
 
 export interface DeviceInfo {
@@ -2204,6 +2235,10 @@ export const api = {
     resync: (id: number) =>
       request<{ detail: string }>(`/routers/${id}/resync/`, { method: 'POST' }),
     deviceInfo: (id: number) => request<DeviceInfo>(`/routers/${id}/device_info/`),
+    /** Read-only slow-speed diagnostics: CPU, MSS clamp, queues, throughput, oversubscription. */
+    diagnose: (id: number) => request<RouterDiagnostics>(`/routers/${id}/diagnose/`),
+    /** Recent CPU/mem/active-user samples + 24h peaks, for the load trend. */
+    healthTrend: (id: number) => request<RouterHealthTrend>(`/routers/${id}/health-trend/`),
   },
 
   tickets: {

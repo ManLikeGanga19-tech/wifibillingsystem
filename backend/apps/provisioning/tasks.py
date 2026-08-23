@@ -262,6 +262,11 @@ def expire_sessions():
     return expired
 
 
+#: How often to bank a load sample, even though the health check itself runs every 60s. A
+#: 5-minute cadence is enough to see peak-hour saturation without flooding the table.
+HEALTH_SAMPLE_INTERVAL_SECONDS = 300
+
+
 @shared_task
 def check_router_health():
     from .adapters import ProvisioningAuthError, get_adapter
@@ -284,7 +289,8 @@ def check_router_health():
         if ok:
             from .services import refresh_device_identity
 
-            refresh_device_identity(router)  # keep version/model/serial current
+            info = refresh_device_identity(router)  # keep version/model/serial current
+            _record_health_sample(router, info)  # trend CPU/mem for the slow-speed view
         # Offline -> online transition with valid creds: re-sync its sessions.
         if ok and not was_online:
             sync_router.delay(router.id)
@@ -296,6 +302,32 @@ def check_router_health():
             on_router_offline(router)
         elif was_offline and ok:
             on_router_online(router)
+
+
+def _record_health_sample(router, info) -> None:
+    """Bank a CPU/mem/active-users reading for trending, throttled to one every
+    HEALTH_SAMPLE_INTERVAL_SECONDS so the 60s health cadence doesn't flood the table.
+    Best-effort: a missing device_info (an older adapter, a momentary read fail) is skipped,
+    never fatal to the health check."""
+    from datetime import timedelta
+
+    from .models import RouterHealthSample
+
+    if info is None or getattr(info, "cpu_load", None) is None:
+        return
+    cutoff = timezone.now() - timedelta(seconds=HEALTH_SAMPLE_INTERVAL_SECONDS)
+    if RouterHealthSample.objects.filter(router=router, sampled_at__gte=cutoff).exists():
+        return
+    mem_used = None
+    if info.free_memory is not None and info.total_memory:
+        mem_used = 100 - round(100 * info.free_memory / info.total_memory)
+    RouterHealthSample.objects.create(
+        operator=router.operator,
+        router=router,
+        cpu_load=info.cpu_load,
+        mem_used_pct=mem_used,
+        active_users=info.active_users,
+    )
 
 
 def _apply_reachability(router, ok: bool, auth_failed: bool):
@@ -338,6 +370,54 @@ def sync_all_routers():
     for router in Router.objects.filter(is_active=True, status=Router.Status.ONLINE):
         if router.is_reachable:
             sync_router.delay(router.id)
+
+
+@shared_task
+def heal_pppoe_mss_clamps():
+    """Daily: re-assert the TCP-MSS clamp on every reachable router that carries PPPoE
+    clients.
+
+    The clamp is added best-effort at provision time, but a factory reset or a hand-edit can
+    wipe it — and a missing clamp is the classic 'some sites are slow / pages half-load' fault
+    for PPPoE customers, silent until someone complains. ensure_pppoe_mss_clamp is idempotent
+    (keyed on our comment), so this is a no-op on a healthy router and a self-heal on a wiped
+    one. Best-effort per router: one unreachable box never stops the rest."""
+    from apps.pppoe.models import Client
+
+    from .adapters import get_adapter
+    from .models import Router
+
+    router_ids = (
+        Client.objects.filter(status__in=Client.ACTIVE_STATUSES)
+        .exclude(connection_type=Client.Connection.STATIC)  # static lines don't ride PPPoE
+        .values_list("router_id", flat=True)
+        .distinct()
+    )
+    healed = 0
+    for router in Router.objects.filter(id__in=list(router_ids), is_active=True):
+        if not router.is_reachable:
+            continue
+        try:
+            get_adapter(router).ensure_pppoe_mss_clamp()
+            healed += 1
+        except Exception:
+            logger.warning("mss clamp heal: %s unreachable", router.name)
+    return healed
+
+
+@shared_task
+def prune_router_health_samples():
+    """Daily: drop router load samples older than the retention window, so the trend table
+    stays a rolling recent view rather than an ever-growing archive."""
+    from datetime import timedelta
+
+    from .models import RouterHealthSample
+
+    cutoff = timezone.now() - timedelta(days=14)
+    deleted, _ = RouterHealthSample.objects.filter(sampled_at__lt=cutoff).delete()
+    if deleted:
+        logger.info("Pruned %d router health samples", deleted)
+    return deleted
 
 
 @shared_task

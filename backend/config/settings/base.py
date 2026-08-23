@@ -389,6 +389,18 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.provisioning.tasks.sync_all_routers",
         "schedule": crontab(minute=0, hour=3),
     },
+    # Self-heal the PPPoE TCP-MSS clamp on every router with broadband clients — idempotent,
+    # so it's a no-op on a healthy router and restores a wiped clamp (the classic 'sites are
+    # slow / pages half-load' fault) without anyone noticing it went missing.
+    "heal-pppoe-mss-clamps": {
+        "task": "apps.provisioning.tasks.heal_pppoe_mss_clamps",
+        "schedule": crontab(minute=40, hour=3),
+    },
+    # Keep the router load-trend table a rolling window, not an archive.
+    "prune-router-health-samples": {
+        "task": "apps.provisioning.tasks.prune_router_health_samples",
+        "schedule": crontab(minute=25, hour=3),
+    },
     # Daily sales digest to opted-in ISPs (Settings > Operator alerts). Morning, after the
     # prior day has fully closed, so the figure is final.
     "send-sales-digests": {
